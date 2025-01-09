@@ -6,6 +6,9 @@ import re
 # Regex to capture groups, mag, timepoints
 # Format:
 #   significance_analysis_per_mag-groups=...,mag=...,timepoints=...
+# significance_analysis_per_mag-groups=fat_control,mag=SLG1009_DASTool_bins_111,timepoints=end_post-61553487.out
+# significance_analysis_per_mag-groups=fat_control,mag=SLG1122_DASTool_bins_78,timepoints=end_post-61553782.out
+# significance_analysis_per_mag-groups=fat_control,mag=SLG992_DASTool_bins_103,timepoints=end_post-61552666.out
 PATTERN = re.compile(
     r"^significance_analysis_per_mag-groups=([^,]+),mag=([^,]+),timepoints=(.+)$"
 )
