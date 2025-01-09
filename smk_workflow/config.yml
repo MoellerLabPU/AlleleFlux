@@ -16,10 +16,11 @@ fasta: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"
 prodigal: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"
 metadata_file: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
 gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
-# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/profiles_paired5/mag_list
+# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/check_blacklist/mag_list
+blacklist_file: "/workdir1/sidd/for_sam/new_instrain/check_blacklist/blacklist.tsv"
 
 # Outputs
-root_out: "/workdir1/sidd/for_sam/new_instrain/profiles_paired5"
+root_out: "/workdir1/sidd/for_sam/new_instrain/check_blacklist"
 
 # Parameters
 timepoints_combinations:

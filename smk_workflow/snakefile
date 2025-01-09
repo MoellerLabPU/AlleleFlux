@@ -196,10 +196,12 @@ checkpoint find_mags:
         os.path.join(OUTDIR, "found_mags.tsv"),
     params:
         mag_ids_file=config.get("mag_ids_file", None),  # Optional input
+        blacklist_file=config.get("blacklist_file", None),  # Optional input
     resources:
         time=config["time"]["general"],
     run:
         # Discover all sample files
+        # mag_files now holds lists of matched wildcards: mag_files.timepoints, mag_files.groups, mag_files.mag
         mag_files = glob_wildcards(
             os.path.join(
                 OUTDIR,
@@ -207,12 +209,23 @@ checkpoint find_mags:
                 "inputMetadata_{timepoints}-{groups}",
                 "{mag}_samples.tsv",
             )
-        )  # mag_files now holds lists of matched wildcards: mag_files.timepoints, mag_files.groups, mag_files.mag
-
+        ) 
+        if params.blacklist_file:
+            with open(params.blacklist_file) as f:
+                next(f)  # Skip the header
+                blacklist = set(
+                    (mg, gp, tp) for mg, gp, tp in (line.strip().split("\t") for line in f)
+                )
+            print(f"Blacklist: {blacklist}")
+        else:
+            blacklist = set()
 
         # Organize the found MAGs by combination of timepoints and groups
         combos = defaultdict(list)
-        for tp, gr, mg in zip(mag_files.timepoints, mag_files.groups, mag_files.mag):
+        for tp, gp, mg in zip(mag_files.timepoints, mag_files.groups, mag_files.mag):
+            if (mg, gp, tp) in blacklist:  # Check if the combination is in the blacklist
+                print(f"Skipping MAG: {mg}, Group: {gp}, Timepoints: {tp} (blacklisted)")
+                continue
             # If mag_ids_file is provided, filter by the IDs in the file
             if params.mag_ids_file:
                 with open(params.mag_ids_file) as f:
@@ -222,12 +235,13 @@ checkpoint find_mags:
                 if mg not in valid_mag_ids:
                     print(f"Skipping {mg}")
                     continue
-            combos[(tp, gr)].append(mg)
+            combos[(tp, gp)].append(mg)
+        print(combos)
 
             # Write the filtered or unfiltered MAGs to a file
         with open(output[0], "w") as f:
-            for (tp, gr), mg_list in combos.items():
-                f.write(f"{tp}\t{gr}\t{','.join(mg_list)}\n")
+            for (tp, gp), mg_list in combos.items():
+                f.write(f"{tp}\t{gp}\t{','.join(mg_list)}\n")
 
 
 #####################################

@@ -44,7 +44,7 @@ def calculate_score(df, test_columns_dict, group_by_column, p_value_threshold=0.
         if subdf[test_cols].isnull().values.any():
             raise ValueError("NaNs found in p-value column.")
 
-        # NAs will be included. Eg. if a position has no no gene it will still be included
+        # The `dropna=False` ensures that groups with NaN values are included as a separate group
         grouped = subdf.groupby(group_by_column, dropna=False)
 
         # Total sites = number of present sites per group
