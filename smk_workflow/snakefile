@@ -478,22 +478,22 @@ rule taxa_scores:
 
 rule gene_scores:
     input:
-        # pvalue_table=os.path.join(
-        #     OUTDIR,
-        #     "significanceAnalysis",
-        #     "significanceAnalysis_{timepoints}-{groups}",
-        #     "{mag}_{test_type}.tsv.gz",
-        # ),
-        pvalue_table=lambda wildcards: [
-            os.path.join(
-                OUTDIR,
-                "significanceAnalysis",
-                f"significanceAnalysis_{wildcards.timepoints}-{wildcards.groups}",
-                f"{mag}_{wildcards.test_type}.tsv.gz",
-            )
-            for tp, gp, mag in discovered_mags()
-            if tp == wildcards.timepoints and gp == wildcards.groups
-        ],
+        pvalue_table=os.path.join(
+            OUTDIR,
+            "significanceAnalysis",
+            "significanceAnalysis_{timepoints}-{groups}",
+            "{mag}_{test_type}.tsv.gz",
+        ),
+        # pvalue_table=lambda wildcards: [
+        #     os.path.join(
+        #         OUTDIR,
+        #         "significanceAnalysis",
+        #         f"significanceAnalysis_{wildcards.timepoints}-{wildcards.groups}",
+        #         f"{mag}_{wildcards.test_type}.tsv.gz",
+        #     )
+        #     for tp, gp, mag in discovered_mags()
+        #     if tp == wildcards.timepoints and gp == wildcards.groups
+        # ],
     output:
         combined=os.path.join(
             OUTDIR,
@@ -549,42 +549,42 @@ rule gene_scores:
 
 rule analyze_outliers:
     input:
-        # mag_file=os.path.join(
-        #     OUTDIR,
-        #     "scores",
-        #     "intermediate",
-        #     "MAG_scores_{timepoints}-{groups}",
-        #     "{mag}_score_{test_type}.tsv",
-        # ),
-        # gene_file=os.path.join(
-        #     OUTDIR,
-        #     "scores",
-        #     "processed",
-        #     "gene_scores_{timepoints}-{groups}",
-        #     "{mag}-{test_type}_gene_scores_individual.tsv",
-        # ),
-        mag_file=lambda wildcards: [
-            os.path.join(
-                OUTDIR,
-                "scores",
-                "intermediate",
-                f"MAG_scores_{wildcards.timepoints}-{wildcards.groups}",
-                f"{mag}_score_{wildcards.test_type}.tsv",
-            )
-            for tp, gp, mag in discovered_mags()
-            if tp == wildcards.timepoints and gp == wildcards.groups
-        ],
-        gene_file=lambda wildcards: [
-            os.path.join(
-                OUTDIR,
-                "scores",
-                "processed",
-                f"gene_scores_{wildcards.timepoints}-{wildcards.groups}",
-                f"{mag}-{wildcards.test_type}_gene_scores_individual.tsv",
-            )
-            for tp, gp, mag in discovered_mags()
-            if tp == wildcards.timepoints and gp == wildcards.groups
-        ],
+        mag_file=os.path.join(
+            OUTDIR,
+            "scores",
+            "intermediate",
+            "MAG_scores_{timepoints}-{groups}",
+            "{mag}_score_{test_type}.tsv",
+        ),
+        gene_file=os.path.join(
+            OUTDIR,
+            "scores",
+            "processed",
+            "gene_scores_{timepoints}-{groups}",
+            "{mag}-{test_type}_gene_scores_individual.tsv",
+        ),
+        # mag_file=lambda wildcards: [
+        #     os.path.join(
+        #         OUTDIR,
+        #         "scores",
+        #         "intermediate",
+        #         f"MAG_scores_{wildcards.timepoints}-{wildcards.groups}",
+        #         f"{mag}_score_{wildcards.test_type}.tsv",
+        #     )
+        #     for tp, gp, mag in discovered_mags()
+        #     if tp == wildcards.timepoints and gp == wildcards.groups
+        # ],
+        # gene_file=lambda wildcards: [
+        #     os.path.join(
+        #         OUTDIR,
+        #         "scores",
+        #         "processed",
+        #         f"gene_scores_{wildcards.timepoints}-{wildcards.groups}",
+        #         f"{mag}-{wildcards.test_type}_gene_scores_individual.tsv",
+        #     )
+        #     for tp, gp, mag in discovered_mags()
+        #     if tp == wildcards.timepoints and gp == wildcards.groups
+        # ],
     output:
         out_fPath=os.path.join(
             OUTDIR,
