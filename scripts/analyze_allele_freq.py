@@ -988,7 +988,7 @@ def main():
     del data_list
     gc.collect()
 
-    # save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
+    save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
 
     allele_changes = calculate_allele_frequency_changes(
         data_dict, args.output_dir, mag_id
