@@ -93,6 +93,12 @@ def main():
     logging.info("Reading p-value table.")
     df = pd.read_csv(args.pValue_table, sep="\t")
 
+    if df.empty:
+        raise ValueError("Input p-value table is empty.")
+
+    if df["gene_id"].isna().all():
+        raise ValueError("No gene IDs are present in the input table.")
+
     logging.info("Calculating significant scores...")
 
     group_scores_combined, group_scores_individual, group_scores_overlapping = (

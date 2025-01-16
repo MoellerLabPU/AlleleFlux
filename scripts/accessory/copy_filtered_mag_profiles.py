@@ -8,9 +8,9 @@ import sys
 import pandas as pd
 
 
-def read_and_filter_metadata(metadata_file, delimiter):
+def read_and_filter_metadata(metadata_file):
 
-    metadata = pd.read_csv(metadata_file, delimiter=delimiter)
+    metadata = pd.read_csv(metadata_file, sep="\t")
 
     required_columns = {"sample", "time", "group"}
     if not required_columns.issubset(metadata.columns):
@@ -34,50 +34,6 @@ def read_and_filter_metadata(metadata_file, delimiter):
     # Extract sample IDs
     sample_ids = filtered["sample"].unique()
     return sample_ids
-
-
-# def copy_mag_profiles_structured(rootDir, sample_ids, mag_id, destination):
-
-#     # Ensure the destination root directory exists
-#     os.makedirs(destination, exist_ok=True)
-
-#     files_copied = 0
-#     files_not_found = 0
-#     for sample_id in sample_ids:
-#         sorted_dir = f"{sample_id}.sorted"
-#         sorted_dir_path = os.path.join(rootDir, sorted_dir)
-
-#         if not os.path.isdir(sorted_dir_path):
-#             print(
-#                 f"Warning: Directory '{sorted_dir_path}' does not exist. Skipping sample '{sample_id}'.",
-#                 file=sys.stderr,
-#             )
-#             files_not_found += 1
-#             continue
-
-#         # Construct the expected file name
-#         file_name = f"{sorted_dir}_{mag_id}_profiled.tsv.gz"
-#         file_path = os.path.join(sorted_dir_path, file_name)
-
-#         if os.path.isfile(file_path):
-#             # Create corresponding directory in destination
-#             dest_sorted_dir = os.path.join(destination, sorted_dir)
-#             os.makedirs(dest_sorted_dir, exist_ok=True)
-
-#             shutil.copy2(file_path, dest_sorted_dir)
-#             print(f"Copied: {file_path} -> {dest_sorted_dir}")
-#             files_copied += 1
-#         else:
-#             print(
-#                 f"Warning: File '{file_name}' not found in '{sorted_dir_path}'.",
-#                 file=sys.stderr,
-#             )
-#             files_not_found += 1
-
-#     print("\nCopying Summary:")
-#     print(f"Total samples processed: {len(sample_ids)}")
-#     print(f"Files successfully copied: {files_copied}")
-#     print(f"Files not found or failed to copy: {files_not_found}")
 
 
 def copy_mag_profiles_structured(rootDir, sample_ids, mag_ids, destination):
@@ -171,15 +127,9 @@ def main():
         required=True,
         help="MAG ID to filter files.",
     )
-    parser.add_argument(
-        "--metadata_delimiter",
-        type=str,
-        default="\t",
-        help="Delimiter used in the metadata file (default: tab).",
-    )
     args = parser.parse_args()
 
-    sample_ids = read_and_filter_metadata(args.metadata_file, args.metadata_delimiter)
+    sample_ids = read_and_filter_metadata(args.metadata_file)
     print(f"Filtered {len(sample_ids)} samples based on metadata criteria.\n")
 
     copy_mag_profiles_structured(

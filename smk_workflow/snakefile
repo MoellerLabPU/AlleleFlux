@@ -248,7 +248,7 @@ checkpoint find_mags:
 # Step 3: Process MAGs
 #####################################
 
-
+# TODO: Add the --disable_zero_diff_filtering option
 rule significance_analysis_per_mag:
     input:
         mag_metadata_file=os.path.join(

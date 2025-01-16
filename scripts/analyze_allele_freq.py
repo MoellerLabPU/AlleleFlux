@@ -321,10 +321,10 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     ]
 
     if not common_subjectIDs:
-        logging.warning(
+        logging.error(
             f"No common subjectIDs found between the {timepoint_1} and {timepoint_2}."
         )
-        return
+        sys.exit(42)
 
     for subjectID in common_subjectIDs:
         # Get DataFrames for each timepoint
@@ -373,13 +373,13 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
         results.append(merged_df[columns_to_keep])
 
     if not results:
-        logging.warning("No allele frequency changes calculated.")
-        return
+        logging.error("No allele frequency changes calculated.")
+        sys.exit(42)
 
     allele_changes = pd.concat(results, ignore_index=True)
 
     logging.info(
-        f"saving allele frequency changes saved to {output_dir}/{mag_id}_allele_frequency_changes.tsv"
+        f"Allele frequency changes saved to {output_dir}/{mag_id}_allele_frequency_changes.tsv.gz"
     )
     # Save the allele frequency changes
     allele_changes.to_csv(
@@ -390,6 +390,67 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     )
 
     return allele_changes
+
+
+def filter_zero_diff_positions(allele_changes, output_dir, mag_id):
+    """
+    Filters out positions where the sum of the difference values across all samples for all nucleotides is zero.
+
+    Args:
+        allele_changes (pd.DataFrame): DataFrame containing allele frequency changes with columns for contig, position,
+                                       and nucleotide frequency differences (e.g., 'A_diff', 'T_diff', 'G_diff', 'C_diff').
+
+    Returns:
+        pd.DataFrame: A filtered DataFrame with positions where the sum of the difference values across all samples
+                      for all nucleotides is zero removed.
+    """
+    logging.info(
+        f"Identifying positions where sum of the difference values across all samples for all nucleotides is zero, called zero-diff positions"
+    )
+
+    diff_cols = [f"{nuc}_diff" for nuc in NUCLEOTIDES]
+
+    # Group by (contig, position) and sum the _diff columns for each group.
+    # This gives us, for each (contig, position), the total difference across all samples.
+    grouped_sums = allele_changes.groupby(["contig", "position"], dropna=False)[
+        diff_cols
+    ].sum()
+
+    # Find positions where ALL of the diff-sums are zero.
+    is_all_zero = (
+        (grouped_sums["A_frequency_diff"] == 0)
+        & (grouped_sums["T_frequency_diff"] == 0)
+        & (grouped_sums["G_frequency_diff"] == 0)
+        & (grouped_sums["C_frequency_diff"] == 0)
+    )
+    # multi-index of (contig, gene_id, position)
+    zero_positions = is_all_zero[is_all_zero].index
+
+    logging.info(f"Found {len(zero_positions):,} zero-diff positions.")
+
+    # Filter those positions OUT of allele_changes
+    logging.info(f"Filtering zero-diff positions")
+    ac_indexed = allele_changes.set_index(["contig", "position"], drop=False)
+    keep_mask_ac = ~ac_indexed.index.isin(zero_positions)
+    filtered_allele_changes = ac_indexed[keep_mask_ac].copy()
+    filtered_allele_changes.reset_index(drop=True, inplace=True)
+
+    logging.info(f"Filtering done. Returning filtered DataFrame.")
+
+    logging.info(
+        f"Saving allele frequency changes with no zero diff position to {output_dir}/{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
+    )
+    # Save the allele frequency changes
+    filtered_allele_changes.to_csv(
+        os.path.join(
+            output_dir, f"{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
+        ),
+        sep="\t",
+        index=False,
+        compression="gzip",
+    )
+
+    return filtered_allele_changes
 
 
 def get_mean_change(allele_changes, mag_id, output_dir):
@@ -457,14 +518,16 @@ def perform_tests(mean_changes_df, mag_id, output_dir, cpus, min_sample_num=4):
         logging.error(
             f"Expected exactly 2 groups for paired tests, but found {len(groups)} groups: {groups}. Exiting...."
         )
-        sys.exit(1)
+        raise ValueError(
+            f"Expected exactly 2 groups for paired tests, but found {len(groups)} groups: {groups}. Exiting...."
+        )
 
     group_1, group_2 = groups
 
     # Check that pairing key exists
     if "replicate" not in mean_changes_df.columns:
         logging.error("Column 'replicate' not found in the data.")
-        return
+        raise ValueError("Column 'replicate' not found in the data.")
 
     # Group the data
     logging.info("Grouping data by contig, gene_id and position")
@@ -853,6 +916,13 @@ def main():
     )
 
     parser.add_argument(
+        "--disable_zero_diff_filtering",
+        help="Do not remove positions where change in allele frequency for each nucleotide's for in samples sums to zero across. Default is to do the filtering.",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--cpus",
         help=f"Number of processors to use.",
         default=cpu_count(),
@@ -873,7 +943,7 @@ def main():
         help="Path to output directory",
         type=str,
         required=True,
-        metavar="filepath",
+        metavar="Directory path",
     )
 
     args = parser.parse_args()
@@ -907,13 +977,10 @@ def main():
     data_list = [df for df in data_list if df is not None]
 
     if not data_list:
-        logging.info(f"No samples for MAG {mag_id} passed the breadth threshold.")
-        # os.makedirs(args.output_dir, exist_ok=True)
-        # nuc_fPath = os.path.join(
-        #     args.output_dir, f"{mag_id}_nucleotide_frequencies.tsv"
-        # )
-        # Path(nuc_fPath).touch()
-        return  # Exit the program
+        logging.error(
+            f"No samples for MAG {mag_id} passed the breadth threshold. Exiting...."
+        )
+        sys.exit(0)  # Exit the program
 
     data_dict = create_data_dict(data_list)
 
@@ -921,11 +988,19 @@ def main():
     del data_list
     gc.collect()
 
-    save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
+    # save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
 
     allele_changes = calculate_allele_frequency_changes(
         data_dict, args.output_dir, mag_id
     )
+
+    if not args.disable_zero_diff_filtering:
+        logging.info("Filtering zero-diff positions.")
+        allele_changes = filter_zero_diff_positions(
+            allele_changes, args.output_dir, mag_id
+        )
+    else:
+        logging.info("User disabled zero-diff position filtering.")
 
     mean_changes_df = get_mean_change(allele_changes, mag_id, args.output_dir)
 
