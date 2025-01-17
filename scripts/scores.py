@@ -195,8 +195,8 @@ def main():
     logging.info("Reading p-value table.")
     pValue_table = pd.read_csv(args.pValue_table, sep="\t")
 
-    if pValue_table.empty:
-        raise ValueError("Input p-value table is empty.")
+    # if pValue_table.empty:
+    #     raise ValueError("Input p-value table is empty.")
 
     if "MAG_ID" not in pValue_table.columns:
         pValue_table["MAG_ID"] = pValue_table["contig"].str.split(".fa").str[0]
