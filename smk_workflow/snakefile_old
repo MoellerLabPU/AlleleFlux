@@ -292,6 +292,10 @@ rule significance_analysis_per_mag:
         fasta=config["fasta"],
         breath_threshold=config.get("breath_threshold", 0.1),
         min_sample_num=config.get("min_sample_num", 4),
+        # disable_zero_diff_filtering=config.get("disable_zero_diff_filtering", False),
+        disable_zero_diff_filtering=("--disable_zero_diff_filtering"
+                                if config.get("disable_zero_diff_filtering", False)
+                                else ""),
     threads: config["cpus"]["significance_test"]
     resources:
         mem_mb=config["memory"]["significance_test"],
@@ -315,7 +319,8 @@ rule significance_analysis_per_mag:
             --breath_threshold {params.breath_threshold} \
             --min_sample_num {params.min_sample_num} \
             --cpus {threads} \
-            --output_dir {params.outDir} 
+            --output_dir {params.outDir} \
+            {params.disable_zero_diff_filtering}
         """
 
 

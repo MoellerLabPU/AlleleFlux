@@ -147,7 +147,7 @@ def write_output_files(mag_dict, output_dir):
 
     # Write output files for each MAG ID
     for mag_id, sample_info_list in mag_dict.items():
-        output_file_path = os.path.join(output_dir, f"{mag_id}_samples.tsv")
+        output_file_path = os.path.join(output_dir, f"{mag_id}_metadata.tsv")
         with open(output_file_path, "w") as f:
             # Write header
             f.write("sample_id\tsubjectID\ttime\tgroup\treplicate\tfile_path\n")

@@ -2,13 +2,18 @@
 
 # Script paths
 scripts:
-  profile: "/home/suppal/popGenToolKit/scripts/profile_mags.py"
-  generate_mag_metadata: "/home/suppal/popGenToolKit/scripts/generate_mag_metadata.py"
-  significance_test: "/home/suppal/popGenToolKit/scripts/analyze_allele_freq.py"
-  scores: "/home/suppal/popGenToolKit/scripts/scores.py"
-  combine_scores: "/home/suppal/popGenToolKit/scripts/scores_from_combined_table.py"
-  gene_scores: "/home/suppal/popGenToolKit/scripts/gene_scores.py"
-  outlier_detection: "/home/suppal/popGenToolKit/scripts/outliers_genes.py"
+  profile: "/home/suppal/AlleleFlux/scripts/profile_mags.py"
+  generate_mag_metadata: "/home/suppal/AlleleFlux/scripts/generate_mag_metadata.py"
+  quality_control: "/home/suppal/AlleleFlux/scripts/quality_control.py"
+  eligibility_table: "/home/suppal/AlleleFlux/scripts/eligibility_table.py"
+  analyze_alleles: "/home/suppal/AlleleFlux/scripts/analyze_allele_freq.py"
+  two_sample_unpaired: "/home/suppal/AlleleFlux/scripts/two_sample_unpaired.py"
+  two_sample_paired: "/home/suppal/AlleleFlux/scripts/two_sample_paired.py"
+  single_sample: "/home/suppal/AlleleFlux/scripts/single_sample.py"
+  scores: "/home/suppal/AlleleFlux/scripts/scores.py"
+  combine_scores: "/home/suppal/AlleleFlux/scripts/scores_from_combined_table.py"
+  gene_scores: "/home/suppal/AlleleFlux/scripts/gene_scores.py"
+  outlier_detection: "/home/suppal/AlleleFlux/scripts/outliers_genes.py"
 
 # Inputs
 bamDir: "/workdir1/sidd/for_sam/new_instrain/alignments"
@@ -16,11 +21,12 @@ fasta: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"
 prodigal: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"
 metadata_file: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
 gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
-# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/check_blacklist/mag_list
-blacklist_file: "/workdir1/sidd/for_sam/new_instrain/check_blacklist/blacklist.tsv"
+# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/debug_erros_smk/no_zero_diff_flag/mag_list
+# blacklist_file: "/workdir1/sidd/for_sam/new_instrain/debug_erros_smk/no_zero_diff_flag/blacklist.tsv"
 
 # Outputs
-root_out: "/workdir1/sidd/for_sam/new_instrain/check_blacklist"
+root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"
+# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags"
 
 # Parameters
 timepoints_combinations:
@@ -31,20 +37,23 @@ groups_combinations:
   - ["fat", "control"]
 
 min_sample_num: 4
-breath_threshold: 0.1
+breadth_threshold: 0.1
+disable_zero_diff_filtering: False
 
 # group_by_column: "MAG_ID"
 p_value_threshold: 0.05
 
 # Resources
-# logDir: "/workdir1/sidd/src/snakemake/logs"
 cpus:
   profile: 8
+  quality_control: 8
+  analyze_alleles: 8
   significance_test: 16
 
 memory:
   profile: 10000 # 10 GB
-  significance_test: 100000 # 100 GB
+  analyze_alleles: 70000 # 80 GB
+  # significance_test: 100000 # 100 GB
 
 time: # days-HH:MM:SS
   profile: "08:00:00"

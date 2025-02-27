@@ -1,4 +1,4 @@
-name: popgenToolkit
+name: AlleleFlux
 channels:
   - conda-forge
   - bioconda

@@ -61,7 +61,7 @@ def process_mag_files(args):
         - If the breadth is above the threshold, the function adds the breadth and genome size to the DataFrame and returns it.
     """
     sample_id, filepath, mag_id, breath_threshold = args
-    df = pd.read_csv(filepath, sep="\t", dtype={"gene_id": str})
+    df = pd.read_csv(filepath, sep="\t")
     # Add sample_id column
     df["sample_id"] = sample_id
     # Add metadata columns
@@ -229,7 +229,7 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     ]
 
     if not common_subjectIDs:
-        raise ValueError(
+        logging.error(
             f"No common subjectIDs found between the {timepoint_1} and {timepoint_2}."
         )
         sys.exit(42)
@@ -286,16 +286,15 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
 
     allele_changes = pd.concat(results, ignore_index=True)
 
-    # Save the allele frequency changes
-    # allele_changes.to_csv(
-    #     os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.tsv.gz"),
-    #     sep="\t",
-    #     index=False,
-    #     compression="gzip",
-    # )
-
     logging.info(
         f"Allele frequency changes saved to {output_dir}/{mag_id}_allele_frequency_changes.tsv.gz"
+    )
+    # Save the allele frequency changes
+    allele_changes.to_csv(
+        os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.tsv.gz"),
+        sep="\t",
+        index=False,
+        compression="gzip",
     )
 
     return allele_changes
@@ -344,6 +343,11 @@ def filter_zero_diff_positions(allele_changes, output_dir, mag_id):
     filtered_allele_changes = ac_indexed[keep_mask_ac].copy()
     filtered_allele_changes.reset_index(drop=True, inplace=True)
 
+    logging.info(f"Filtering done. Returning filtered DataFrame.")
+
+    logging.info(
+        f"Saving allele frequency changes with no zero diff position to {output_dir}/{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
+    )
     # Save the allele frequency changes
     filtered_allele_changes.to_csv(
         os.path.join(
@@ -352,10 +356,6 @@ def filter_zero_diff_positions(allele_changes, output_dir, mag_id):
         sep="\t",
         index=False,
         compression="gzip",
-    )
-
-    logging.info(
-        f"Allele frequency changes with no zero diff positions saved to {output_dir}/{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
     )
 
     return filtered_allele_changes
@@ -406,16 +406,377 @@ def get_mean_change(allele_changes, mag_id, output_dir):
     # Optionally, rename 'subjectID' to 'subjectID_count' to make it clear it's a count
     mean_changes_df.rename(columns={"subjectID": "subjectID_count"}, inplace=True)
 
+    logging.info(
+        f"Saving mean change in allele frequency for MAG {mag_id} to {output_dir}"
+    )
+
     mean_changes_df.to_csv(
         os.path.join(output_dir, f"{mag_id}_allele_frequency_changes_mean.tsv.gz"),
         index=False,
         sep="\t",
         compression="gzip",
     )
-    logging.info(
-        f"Mean change in allele frequency for MAG {mag_id} saved to {output_dir}"
-    )
     return mean_changes_df
+
+
+def perform_tests(mean_changes_df, mag_id, output_dir, cpus, min_sample_num=4):
+    # Get unique groups
+    groups = mean_changes_df["group"].unique()
+    if len(groups) != 2:
+        raise ValueError(
+            f"Expected exactly 2 groups for paired tests, but found {len(groups)} groups: {groups}. Exiting...."
+        )
+
+    group_1, group_2 = groups
+
+    # Check that pairing key exists
+    if "replicate" not in mean_changes_df.columns:
+        logging.error("Column 'replicate' not found in the data.")
+        raise ValueError("Column 'replicate' not found in the data.")
+
+    # Group the data
+    logging.info("Grouping data by contig, gene_id and position")
+    grouped = mean_changes_df.groupby(["contig", "gene_id", "position"], dropna=False)
+    # import itertools
+
+    # grouped = list(itertools.islice(grouped, 1000000))
+
+    num_tests = len(grouped)
+
+    logging.info(
+        f"Performing {num_tests:,} unpaired tests between {group_1} and {group_2} using {cpus} cores."
+    )
+    func_unpaired = partial(
+        run_unpaired_tests,
+        group_1=group_1,
+        group_2=group_2,
+        min_sample_num=min_sample_num,
+    )
+    perform_unpaired_tests(
+        func_unpaired, grouped, group_1, group_2, cpus, num_tests, output_dir, mag_id
+    )
+
+    logging.info(
+        f"Performing {num_tests:,} paired tests (paired by replicate) between {group_1} and {group_2} using {cpus} cores."
+    )
+    func_paired = partial(
+        run_paired_tests,
+        group_1=group_1,
+        group_2=group_2,
+        min_sample_num=min_sample_num,
+    )
+    perform_paired_tests(func_paired, grouped, cpus, num_tests, output_dir, mag_id)
+
+    logging.info(f"Performing tests for {num_tests:,} positions using {cpus} cores.")
+    func_one_sample = partial(
+        run_one_sample_tests,
+        groups=groups,
+        min_sample_num=min_sample_num,
+    )
+
+    perform_one_sample_tests(
+        func_one_sample, grouped, cpus, num_tests, output_dir, mag_id
+    )
+
+
+def perform_unpaired_tests(
+    func_unpaired, grouped, group_1, group_2, cpus, num_tests, output_dir, mag_id
+):
+    start_time = time.time()
+
+    with Pool(processes=cpus) as pool:
+        results_iter = pool.imap_unordered(func_unpaired, grouped)
+        records = []
+        for result in tqdm(
+            results_iter, desc="Performing significance tests", total=num_tests
+        ):
+            name_tuple, p_values, num_samples_group1, num_samples_group2, notes = result
+            contig, gene_id, position = name_tuple
+            record = {
+                "contig": contig,
+                "gene_id": gene_id,
+                "position": position,
+                **p_values,
+                f"num_samples_{group_1}": num_samples_group1,
+                f"num_samples_{group_2}": num_samples_group2,
+                "notes": notes,
+            }
+            records.append(record)
+
+    end_time = time.time()
+    logging.info(
+        f"2 sample unpaired tests performed in {end_time - start_time:.2f} seconds"
+    )
+    test_results = pd.DataFrame(records)
+    # Identify p-value columns
+    p_value_columns = [col for col in test_results.columns if "_p_value" in col]
+
+    # Remove rows where all p-value columns are NaN
+    test_results.dropna(subset=p_value_columns, how="all", inplace=True)
+
+    logging.info(
+        f"Saving 2 sample unpaired significance results for MAG {mag_id} to {output_dir}"
+    )
+    test_results.to_csv(
+        os.path.join(output_dir, f"{mag_id}_two_sample_unpaired.tsv.gz"),
+        index=False,
+        sep="\t",
+        compression="gzip",
+    )
+
+
+def run_unpaired_tests(args, group_1, group_2, min_sample_num):
+    name_tuple, group = args
+    # Separate the data into two groups
+    group1 = group[group["group"] == group_1]
+    group2 = group[group["group"] == group_2]
+
+    # Initialize p_values with NaN
+    p_values = {}
+    notes = ""
+    for nucleotide in NUCLEOTIDES:
+        p_values[f"{nucleotide}_p_value_tTest"] = np.nan
+        p_values[f"{nucleotide}_p_value_MannWhitney"] = np.nan
+
+    # Counts of samples in each group
+    num_samples_group1 = group1.shape[0]
+    num_samples_group2 = group2.shape[0]
+
+    # Only perform the t-test if both groups have at least min_sample_num data points
+    if num_samples_group1 >= min_sample_num and num_samples_group2 >= min_sample_num:
+        for nucleotide in NUCLEOTIDES:
+            nuc_col = f"{nucleotide}_diff_mean"
+            mean1 = np.mean(group1[nuc_col])
+            mean2 = np.mean(group2[nuc_col])
+            # ddof of 1 is used as we are calculating sample variance. "0" is used for population variance
+            var1 = np.var(group1[nuc_col], ddof=1)
+            var2 = np.var(group2[nuc_col], ddof=1)
+            # In t-test if both groups have identical values, the p-value is NaN, eg. 5,5,5,5 and 5,5,5,5,5,5,5,5
+            # I'm setting it 1 for consistency with Mann Whitney
+            if var1 == 0 and var2 == 0 and mean1 == mean2:
+                p_values[f"{nucleotide}_p_value_tTest"] = 1
+                notes += f"{nucleotide}: identical values in both groups, p-value for t-test is set to 1; "
+            else:
+                # Perform t-test
+                res_para = stats.ttest_ind(
+                    group1[nuc_col],
+                    group2[nuc_col],
+                    equal_var=False,
+                    nan_policy="raise",
+                    alternative="two-sided",
+                )
+                p_values[f"{nucleotide}_p_value_tTest"] = res_para.pvalue
+
+            # Perform Mann-Whitney U test
+            res_non_para = stats.mannwhitneyu(
+                group1[nuc_col],
+                group2[nuc_col],
+                alternative="two-sided",
+                nan_policy="raise",  # No NaN values should be present. But if present a ValueError will be raised
+            )
+            p_values[f"{nucleotide}_p_value_MannWhitney"] = res_non_para.pvalue
+
+    return (name_tuple, p_values, num_samples_group1, num_samples_group2, notes)
+
+
+def perform_paired_tests(func_unpaired, grouped, cpus, num_tests, output_dir, mag_id):
+    start_time = time.time()
+
+    with Pool(processes=cpus) as pool:
+        results_iter = pool.imap_unordered(func_unpaired, grouped)
+        records = []
+        for result in tqdm(
+            results_iter, desc="Performing paired significance tests", total=num_tests
+        ):
+            name_tuple, p_values, num_pairs, notes = result
+            contig, gene_id, position = name_tuple
+            record = {
+                "contig": contig,
+                "gene_id": gene_id,
+                "position": position,
+                **p_values,
+                "num_pairs": num_pairs,
+                "notes": notes,
+            }
+            records.append(record)
+
+    end_time = time.time()
+    logging.info(f"Paired tests performed in {end_time - start_time:.2f} seconds")
+    test_results = pd.DataFrame(records)
+    # Identify p-value columns
+    p_value_columns = [col for col in test_results.columns if "_p_value" in col]
+
+    # Remove rows where all p-value columns are NaN
+    test_results.dropna(subset=p_value_columns, how="all", inplace=True)
+
+    logging.info(
+        f"Saving 2 sample paired significance results for MAG {mag_id} to {output_dir}"
+    )
+    test_results.to_csv(
+        os.path.join(output_dir, f"{mag_id}_two_sample_paired.tsv.gz"),
+        index=False,
+        sep="\t",
+        compression="gzip",
+    )
+
+
+def run_paired_tests(args, group_1, group_2, min_sample_num):
+    name_tuple, group = args
+    # Separate the data into two groups
+    group1 = group[group["group"] == group_1]
+    group2 = group[group["group"] == group_2]
+
+    # Merge the two groups on 'replicate_id', 'contig', and 'position'
+    merged_data = pd.merge(
+        group1,
+        group2,
+        on=["replicate", "contig", "position"],
+        suffixes=("_group1", "_group2"),
+        how="inner",
+    )
+
+    # Initialize p_values with NaN
+    p_values = {}
+    notes = ""
+    for nucleotide in NUCLEOTIDES:
+        p_values[f"{nucleotide}_p_value_paired_tTest"] = np.nan
+        p_values[f"{nucleotide}_p_value_Wilcoxon"] = np.nan
+
+    # Number of pairs
+    num_pairs = merged_data.shape[0]
+
+    # Only perform the tests if there are at least min_sample_num pairs
+    if num_pairs >= min_sample_num:
+        for nucleotide in NUCLEOTIDES:
+            data1 = merged_data[f"{nucleotide}_diff_mean_group1"]
+            data2 = merged_data[f"{nucleotide}_diff_mean_group2"]
+            # Check for identical values
+            d = data1 - data2
+            if np.all(d == 0):
+                p_values[f"{nucleotide}_p_value_paired_tTest"] = (
+                    1.0  # Paired t-test outputs NaN if both groups have identical values
+                )
+                p_values[f"{nucleotide}_p_value_Wilcoxon"] = (
+                    1.0  # Wilcoxon gives an error if both groups have identical values
+                )
+                notes += f"{nucleotide}: identical values in both groups, p-value for both tests is set to 1; "
+            else:
+                # Perform paired t-test
+                res_ttest = stats.ttest_rel(
+                    data1,
+                    data2,
+                    nan_policy="raise",
+                    alternative="two-sided",
+                )
+                p_values[f"{nucleotide}_p_value_paired_tTest"] = res_ttest.pvalue
+
+                res_wilcoxon = stats.wilcoxon(
+                    data1,
+                    data2,
+                    alternative="two-sided",
+                    nan_policy="raise",
+                )
+                p_values[f"{nucleotide}_p_value_Wilcoxon"] = res_wilcoxon.pvalue
+
+    return (name_tuple, p_values, num_pairs, notes)
+
+
+def perform_one_sample_tests(
+    func_one_sample, grouped, cpus, num_tests, output_dir, mag_id
+):
+    start_time = time.time()
+
+    with Pool(processes=cpus) as pool:
+        results_iter = pool.imap_unordered(func_one_sample, grouped)
+        records = []
+        for result in tqdm(
+            results_iter, desc="Performing one-sample tests", total=num_tests
+        ):
+            name_tuple, p_values, num_samples_dict, notes = result
+            contig, gene_id, position = name_tuple
+            record = {
+                "contig": contig,
+                "gene_id": gene_id,
+                "position": position,
+                **p_values,
+                **num_samples_dict,
+                "notes": notes,
+            }
+            records.append(record)
+
+    end_time = time.time()
+    logging.info(f"Tests performed in {end_time - start_time:.2f} seconds")
+    test_results = pd.DataFrame(records)
+    # Identify p-value columns
+    p_value_columns = [col for col in test_results.columns if "_p_value" in col]
+
+    # Remove rows where all p-value columns are NaN
+    test_results.dropna(subset=p_value_columns, how="all", inplace=True)
+    logging.info(
+        f"Saving single-sample significance results for MAG {mag_id} to {output_dir}"
+    )
+    test_results.to_csv(
+        os.path.join(output_dir, f"{mag_id}_single_sample.tsv.gz"),
+        index=False,
+        sep="\t",
+        compression="gzip",
+    )
+
+
+def run_one_sample_tests(args, groups, min_sample_num):
+    name_tuple, group = args
+    # Initialize p_values with NaN and notes
+    p_values = {}
+    notes = ""
+    num_samples_dict = {}
+    # For each group
+    for group_name in groups:
+        group_data = group[group["group"] == group_name]
+        num_samples_group = group_data.shape[0]
+        # Set the number of samples
+        key_num_samples = f"num_samples_{group_name}"
+        num_samples_dict[key_num_samples] = num_samples_group
+
+        # Initialize p-values for all nucleotides for this group to NaN
+        for nucleotide in NUCLEOTIDES:
+            p_values[f"{nucleotide}_p_value_tTest_{group_name}"] = np.nan
+            p_values[f"{nucleotide}_p_value_Wilcoxon_{group_name}"] = np.nan
+
+        # Only perform the tests if the group has at least min_sample_num data points
+        if num_samples_group >= min_sample_num:
+            for nucleotide in NUCLEOTIDES:
+                nuc_col = f"{nucleotide}_diff_mean"
+                data = group_data[nuc_col]
+                # Check for zero variance and zero mean ie. 0,0,0,0. T-test is NA, and wilcoxon gives an error is this case. P-value is set at 1.
+                var = np.var(data, ddof=1)
+                mean = np.mean(data)
+                if var == 0 and mean == 0:
+                    # Store p-value as 1
+                    p_values[f"{nucleotide}_p_value_tTest_{group_name}"] = 1.0
+                    p_values[f"{nucleotide}_p_value_Wilcoxon_{group_name}"] = 1.0
+
+                    notes += f"{nucleotide} in {group_name}: identical values, p-value for both tests is set to 1; "
+                else:
+                    # Perform one-sample tests
+                    res_tTest = stats.ttest_1samp(
+                        data,
+                        0.0,
+                        alternative="two-sided",
+                        nan_policy="raise",
+                    )
+                    p_values[f"{nucleotide}_p_value_tTest_{group_name}"] = (
+                        res_tTest.pvalue
+                    )
+
+                    # Perform Wilcoxon signed-rank test
+                    res_wilcoxon = stats.wilcoxon(
+                        data, alternative="two-sided", nan_policy="raise"
+                    )
+                    p_values[f"{nucleotide}_p_value_Wilcoxon_{group_name}"] = (
+                        res_wilcoxon.pvalue
+                    )
+
+    return (name_tuple, p_values, num_samples_dict, notes)
 
 
 def main():
@@ -475,6 +836,14 @@ def main():
     )
 
     parser.add_argument(
+        "--min_sample_num",
+        help="Minimum number of samples per group to perform the significance test",
+        type=int,
+        default=4,
+        metavar="int",
+    )
+
+    parser.add_argument(
         "--output_dir",
         help="Path to output directory",
         type=str,
@@ -524,7 +893,7 @@ def main():
     del data_list
     gc.collect()
 
-    # save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
+    save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
 
     allele_changes = calculate_allele_frequency_changes(
         data_dict, args.output_dir, mag_id
@@ -538,7 +907,11 @@ def main():
     else:
         logging.info("User disabled zero-diff position filtering.")
 
-    get_mean_change(allele_changes, mag_id, args.output_dir)
+    mean_changes_df = get_mean_change(allele_changes, mag_id, args.output_dir)
+
+    perform_tests(
+        mean_changes_df, mag_id, args.output_dir, args.cpus, args.min_sample_num
+    )
 
     end_time = time.time()
     logging.info(f"Total time taken: {end_time-start_time:.2f} seconds")
