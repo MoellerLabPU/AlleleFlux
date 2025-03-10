@@ -14,6 +14,16 @@ NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 
 def run_tTest(group1, group2):
+    """
+    Perform a paired t-test on two related samples of scores.
+
+    Parameters:
+    group1 (array-like): The first set of scores.
+    group2 (array-like): The second set of scores.
+
+    Returns:
+    float: The p-value of the t-test.
+    """
     t_stat, t_p = stats.ttest_rel(
         group1,
         group2,
@@ -24,6 +34,19 @@ def run_tTest(group1, group2):
 
 
 def run_wilcoxon(group1, group2):
+    """
+    Perform the Wilcoxon signed-rank test on two related samples.
+
+    Parameters:
+    group1 (array-like): The first set of observations.
+    group2 (array-like): The second set of observations.
+
+    Returns:
+    float: The p-value of the test.
+
+    Raises:
+    ValueError: If the input arrays contain NaN values.
+    """
     w_stat, w_p = stats.wilcoxon(
         group1,
         group2,
@@ -34,6 +57,23 @@ def run_wilcoxon(group1, group2):
 
 
 def paired_test_for_nucleotide(values, test_type):
+    """
+    Conducts a paired statistical test (t-test or Wilcoxon test) on a list of nucleotide values.
+
+    Parameters:
+    values (list or array-like): A list or array of nucleotide values to be tested.
+    test_type (str): The type of test to perform. Options are "t-test", "wilcoxon", "both", or "either".
+
+    Returns:
+    tuple: A tuple containing the p-values of the tests. If test_type is "t-test", returns (t_p, None).
+           If test_type is "wilcoxon", returns (None, w_p). If test_type is "both" or "either", returns (t_p, w_p).
+
+    Notes:
+    - If the number of values is less than or equal to 3, the function returns (1, None) for "t-test" and (None, 1) for "wilcoxon".
+    - If the number of values is odd, the value closest to the median is removed before conducting the test.
+    - If the values in both groups are identical, the function returns (1, None) for "t-test" and (None, 1) for "wilcoxon".
+    - The function uses `run_tTest` and `run_wilcoxon` to perform the actual statistical tests.
+    """
     # Assign p-values of 1 if there are less than 3 values. List of 3 will be converted to 2.
     # paired test using 2 value for t-test generally gives NaN and 1 for wilcoxon
     if len(values) <= 3:
@@ -89,6 +129,22 @@ def paired_test_for_nucleotide(values, test_type):
 
 
 def process_group(group_df, test_type):
+    """
+    Processes a group of nucleotide data and performs paired tests for each nucleotide.
+
+    Parameters:
+        group_df (pd.DataFrame): A DataFrame containing nucleotide data. It must have columns
+                                 named '{nuc}_diff_mean' for each nucleotide in NUCLEOTIDES.
+        test_type (str): The type of test to perform on the nucleotide values.
+
+    Returns:
+        dict: A dictionary where keys are nucleotides and values are lists of p-values
+              resulting from the paired tests.
+
+    Raises:
+        ValueError: If any NA values are found in the required columns or if any NaN p-values
+                    are encountered in the results.
+    """
     pvalues = {}
     for nuc in NUCLEOTIDES:
         col = f"{nuc}_diff_mean"
@@ -109,6 +165,23 @@ def process_group(group_df, test_type):
 
 
 def process_site(args):
+    """
+    Processes a genomic site to determine if it should be removed based on statistical tests.
+    Only remove the site only if ALL 4 nuleotides have nuc_remove as True.
+    If any one nucleotide has nuc_remove as False, then remove_site is False.
+
+    Parameters:
+        args (tuple): A tuple containing:
+            - (contig, position) (tuple): The contig and position of the site.
+            - group_df (DataFrame): A DataFrame containing the group data for the site.
+            - alpha (float): The significance level for the statistical tests.
+            - test_type (str): The type of statistical test to perform. Can be "t-test", "wilcoxon", "both", or "either".
+
+    Returns:
+        tuple: A tuple containing:
+            - (contig, position) (tuple): The contig and position of the site.
+            - remove_site (bool): A boolean indicating whether the site should be removed (True) or not (False).
+    """
     (contig, position), group_df, alpha, test_type = args
     pvals = process_group(group_df, test_type=test_type)
     remove_site = True  # assume removal unless one nucleotide prevents it
@@ -123,8 +196,7 @@ def process_site(args):
         elif test_type == "either":
             # Remove if either test is non-significant.
             nuc_remove = (t_p >= alpha) or (w_p >= alpha)
-        else:
-            raise ValueError(f"Unknown test type: {test_type}")
+
         if not nuc_remove:
             remove_site = False
             break
@@ -132,6 +204,19 @@ def process_site(args):
 
 
 def filter_sites_parallel(grouped, alpha, test_type, cpus):
+    """
+    Filters sites in parallel using multiprocessing.
+
+    Parameters:
+        grouped (iterable): An iterable of grouped data, where each element is a tuple
+                            ((contig, position), group_df).
+        alpha (float): The significance level for the statistical test.
+        test_type (str): The type of statistical test to perform.
+        cpus (int): The number of CPU cores to use for parallel processing.
+
+    Returns:
+        list: A list of sites to remove, where each site is represented by its (contig, position).
+    """
     groups = list(grouped)  # list of ((contig, position), group_df)
     args_list = [
         ((contig, position), group_df, alpha, test_type)
@@ -193,13 +278,13 @@ def main():
     start_time = time.time()
 
     logging.info("Reading input file")
-    df = pd.read_csv(args.mean_changes_fPath, sep="\t")
+    df = pd.read_csv(args.mean_changes_fPath, sep="\t", dtype={"gene_id": str})
 
     # Group data by "contig" and "position" (including groups with NA keys).
     grouped = df.groupby(["contig", "position"], dropna=False)
 
     logging.info(
-        f"Determining sites to remove based on paired tests using {args.cpus} cpus."
+        f"Determining sites to remove based on paired tests using {args.cpus} cpus. Test type is set to {args.test_type}"
     )
     sites_to_remove = filter_sites_parallel(
         grouped, args.alpha, args.test_type, args.cpus
@@ -208,7 +293,7 @@ def main():
 
     # Remove these sites from the DataFrame.
     removal_index = pd.MultiIndex.from_tuples(
-        sites_to_remove, names=["contig", "position"]
+        sites_to_remove, names=["contig", "pogsition"]
     )
     df_filtered = (
         df.set_index(["contig", "position"])

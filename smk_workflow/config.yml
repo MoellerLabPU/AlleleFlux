@@ -3,15 +3,16 @@
 # Script paths
 scripts:
   profile: "/home/suppal/AlleleFlux/scripts/profile_mags.py"
-  generate_mag_metadata: "/home/suppal/AlleleFlux/scripts/generate_mag_metadata.py"
+  generate_mag_metadata: "/home/suppal/AlleleFlux/scripts/mag_metadata.py"
   quality_control: "/home/suppal/AlleleFlux/scripts/quality_control.py"
   eligibility_table: "/home/suppal/AlleleFlux/scripts/eligibility_table.py"
   analyze_alleles: "/home/suppal/AlleleFlux/scripts/analyze_allele_freq.py"
+  preprocess_two_sample: "/home/suppal/AlleleFlux/scripts/preprocess_two_sample.py"
   two_sample_unpaired: "/home/suppal/AlleleFlux/scripts/two_sample_unpaired.py"
   two_sample_paired: "/home/suppal/AlleleFlux/scripts/two_sample_paired.py"
   single_sample: "/home/suppal/AlleleFlux/scripts/single_sample.py"
   scores: "/home/suppal/AlleleFlux/scripts/scores.py"
-  combine_scores: "/home/suppal/AlleleFlux/scripts/scores_from_combined_table.py"
+  taxa_scores: "/home/suppal/AlleleFlux/scripts/group_scores.py"
   gene_scores: "/home/suppal/AlleleFlux/scripts/gene_scores.py"
   outlier_detection: "/home/suppal/AlleleFlux/scripts/outliers_genes.py"
 
@@ -25,8 +26,8 @@ gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
 # blacklist_file: "/workdir1/sidd/for_sam/new_instrain/debug_erros_smk/no_zero_diff_flag/blacklist.tsv"
 
 # Outputs
-root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"
-# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags"
+# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"
+root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags"
 
 # Parameters
 timepoints_combinations:
@@ -39,6 +40,10 @@ groups_combinations:
 min_sample_num: 4
 breadth_threshold: 0.1
 disable_zero_diff_filtering: False
+alpha: 0.05
+test_type: "both"
+preprocess_two_sample: True
+# max_zero_count: 4
 
 # group_by_column: "MAG_ID"
 p_value_threshold: 0.05
@@ -48,11 +53,11 @@ cpus:
   profile: 8
   quality_control: 8
   analyze_alleles: 8
-  significance_test: 16
+  significance_test: 8
 
 memory:
   profile: 10000 # 10 GB
-  analyze_alleles: 70000 # 80 GB
+  analyze_alleles: 70000 # 70 GB
   # significance_test: 100000 # 100 GB
 
 time: # days-HH:MM:SS

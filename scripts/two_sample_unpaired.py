@@ -161,7 +161,9 @@ def main():
 
     args = parser.parse_args()
 
-    mean_changes_df = pd.read_csv(args.mean_changes_fPath, sep="\t")
+    mean_changes_df = pd.read_csv(
+        args.mean_changes_fPath, sep="\t", dtype={"gene_id": str}
+    )
 
     # Get unique groups
     groups = mean_changes_df["group"].unique()

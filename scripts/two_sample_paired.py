@@ -9,6 +9,7 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
+import supress_warning
 from scipy import stats
 from tqdm import tqdm
 
@@ -163,7 +164,9 @@ def main():
 
     args = parser.parse_args()
 
-    mean_changes_df = pd.read_csv(args.mean_changes_fPath, sep="\t")
+    mean_changes_df = pd.read_csv(
+        args.mean_changes_fPath, sep="\t", dtype={"gene_id": str}
+    )
 
     # Get unique groups
     groups = mean_changes_df["group"].unique()

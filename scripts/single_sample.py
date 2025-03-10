@@ -20,7 +20,7 @@ NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
     logging.info(
-        f"Removing positions where more than {max_zero_count} replicates have _diff_mean value zero for all nucleotides."
+        f"Preprocessing: Removing positions where more than {max_zero_count} replicates have _diff_mean value zero for all nucleotides."
     )
 
     # List the columns we want to check.
@@ -90,7 +90,7 @@ def perform_one_sample_tests(
         f"Saving single-sample significance results for MAG {mag_id} to {output_dir}"
     )
     test_results.to_csv(
-        os.path.join(output_dir, f"{mag_id}_{group}_single_sample.tsv.gz"),
+        os.path.join(output_dir, f"{mag_id}_single_sample_{group}.tsv.gz"),
         index=False,
         sep="\t",
         compression="gzip",
@@ -204,11 +204,14 @@ def main():
 
     args = parser.parse_args()
 
-    mean_changes_df = pd.read_csv(args.mean_changes_fPath, sep="\t")
+    mean_changes_df = pd.read_csv(
+        args.mean_changes_fPath, sep="\t", dtype={"gene_id": str}
+    )
+
     # Filter the dataframe to only include positions from the specified group.
     mean_changes_df = mean_changes_df[mean_changes_df["group"] == args.group]
     logging.info(
-        f"Data filtered for group '{args.group}', resulting in {mean_changes_df.shape[0]} rows."
+        f"Data filtered for group '{args.group}', resulting in {mean_changes_df.shape[0]:,} rows."
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -222,6 +225,8 @@ def main():
             mag_id=args.mag_id,
             group=args.group,
         )
+    else:
+        logging.info("User has disabled preprocessing and filtering of data.")
 
     # Check if dataframe is empty after preprocessing.
     if mean_changes_df.empty:

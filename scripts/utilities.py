@@ -103,18 +103,18 @@ def load_mag_metadata_file(mag_metadata_file, mag_id, breath_threshold):
     return metadata_dict, sample_files_with_mag_id
 
 
-def extract_test_columns(df):
-    p_value_columns = [col for col in df.columns if "p_value" in col]
+def extract_relevant_columns(df, capture_str):
+    str_columns = [col for col in df.columns if capture_str in col]
 
     test_columns_dict = {}
 
-    for col in p_value_columns:
-        if "p_value_" in col:
-            # Everything after 'p_value' is part of the test name
-            test_name = col.split("p_value_")[1]
+    for col in str_columns:
+        if capture_str in col:
+            # Everything after 'capture_str' is part of the test name
+            test_name = col.split(capture_str)[-1]
         else:
             raise ValueError(
-                f"Column {col} does not contain 'p_value' in expected format."
+                f"Column {col} does not contain {capture_str} in expected format."
             )
 
         test_columns_dict.setdefault(test_name, []).append(col)

@@ -62,6 +62,7 @@ def process_mag_files(args):
     """
     sample_id, filepath, mag_id, breath_threshold = args
     df = pd.read_csv(filepath, sep="\t", dtype={"gene_id": str})
+
     # Add sample_id column
     df["sample_id"] = sample_id
     # Add metadata columns

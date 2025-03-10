@@ -4,7 +4,7 @@ import logging
 import os
 
 import pandas as pd
-from utilities import calculate_score, extract_test_columns
+from utilities import calculate_score, extract_relevant_columns
 
 
 def read_gtdb(gtdb_fpath):
@@ -76,7 +76,7 @@ def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
     if group_by_column not in allowed_columns:
         raise ValueError(f"Invalid group_by_column. Must be one of {allowed_columns}")
 
-    test_columns_dict = extract_test_columns(df)
+    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
     # Compute significance scores for all tests and merge them
     merged_results = calculate_score(
         df, test_columns_dict, group_by_column, p_value_threshold
@@ -99,6 +99,12 @@ def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
         merged_results, group_taxonomy, on=group_by_column, how="left"
     )
 
+    final_table = reorder_columns(final_table, relevant_taxa_columns, group_by_column)
+
+    return final_table
+
+
+def reorder_columns(final_table, relevant_taxa_columns, group_by_column):
     # Reorder columns: taxonomy columns first, then total_sites_per_group, and all test columns
     test_total_cols = [
         c for c in final_table.columns if c.startswith("total_sites_per_group_")
@@ -122,7 +128,6 @@ def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
         ).reset_index(drop=True)
 
     final_table["grouped_by"] = group_by_column
-
     return final_table
 
 
@@ -195,8 +200,8 @@ def main():
     logging.info("Reading p-value table.")
     pValue_table = pd.read_csv(args.pValue_table, sep="\t")
 
-    # if pValue_table.empty:
-    #     raise ValueError("Input p-value table is empty.")
+    if pValue_table.empty:
+        raise ValueError("Input p-value table is empty.")
 
     if "MAG_ID" not in pValue_table.columns:
         pValue_table["MAG_ID"] = pValue_table["contig"].str.split(".fa").str[0]
@@ -206,6 +211,7 @@ def main():
 
     logging.info("Calculating significance score.")
     final_table = get_scores(merged_df, args.group_by_column, args.pValue_threshold)
+
     if not args.out_fPath:
         baseDir = os.path.dirname(args.pValue_table)
         outFpath = os.path.join(baseDir, f"significant_taxa_{args.group_by_column}.tsv")

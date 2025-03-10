@@ -4,12 +4,12 @@ import logging
 import os
 
 import pandas as pd
-from utilities import calculate_score, extract_test_columns
+from utilities import calculate_score, extract_relevant_columns
 
 
 def get_scores(df, p_value_threshold=0.05):
 
-    test_columns_dict = extract_test_columns(df)
+    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
     # First Output: Overlapping genes are kept as combined entities
     group_scores_combined = calculate_score(
         df, test_columns_dict, "gene_id", p_value_threshold

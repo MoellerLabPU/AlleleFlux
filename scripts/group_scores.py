@@ -4,32 +4,11 @@ import logging
 import os
 
 import pandas as pd
+from utilities import extract_relevant_columns
 
 
-def extract_relevant_columns(df):
-    # Identify all columns that contain "sites_per_group"
-    sites_per_group_columns = [col for col in df.columns if "sites_per_group" in col]
-
-    columns_dict = {}
-
-    for col in sites_per_group_columns:
-        # Extract the test name from the column name by splitting on "sites_per_group_"
-        # Example: "total_sites_per_group_tTest" -> split on "sites_per_group_" -> ["total_", "tTest"]
-        # test_name = "tTest"
-        if "sites_per_group_" in col:
-            test_name = col.split("sites_per_group_")[-1]
-        else:
-            # In case there's no underscore after 'sites_per_group', we just get the substring following it
-            test_name = col.split("sites_per_group")[-1].lstrip("_")
-
-        columns_dict.setdefault(test_name, []).append(col)
-
-    logging.info(f"Detected tests: {list(columns_dict.keys())}")
-    return columns_dict
-
-
-def calculate_scores(df, group_col):
-    columns_dict = extract_relevant_columns(df)
+def group_scores(df, group_col):
+    columns_dict = extract_relevant_columns(df, capture_str="sites_per_group_")
     logging.info(f"Calculating scores for {len(columns_dict)} tests.")
 
     taxonomy_order = [
@@ -73,6 +52,7 @@ def calculate_scores(df, group_col):
 
     # Perform the aggregation
     grouped = df.groupby(group_col).agg(agg_dict).reset_index()
+    grouped = grouped.rename(columns={"MAG_ID": "unique_MAGs"})
 
     # Compute the new scores for each test
     for test_name, cols in columns_dict.items():
@@ -88,7 +68,7 @@ def calculate_scores(df, group_col):
 
     final_table = pd.merge(group_taxonomy, grouped, on=group_col, how="left")
     final_table["grouped_by"] = group_col
-    return grouped
+    return final_table
 
 
 def main():
@@ -118,7 +98,8 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.input_df, sep="\t")
-    grouped_scores = calculate_scores(df, args.group_by_column)
+    grouped_scores = group_scores(df, args.group_by_column)
+
     if not args.out_fPath:
         baseDir = os.path.dirname(args.input_df)
         outFpath = os.path.join(baseDir, f"grouped_scores_{args.group_by_column}.tsv")
