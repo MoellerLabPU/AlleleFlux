@@ -4,20 +4,15 @@ import logging
 import os
 import sys
 import time
-from functools import partial
 from multiprocessing import Pool, cpu_count
 
-import numpy as np
 import pandas as pd
-from Bio import SeqIO
-from scipy import stats
-from tqdm import tqdm
 from utilities import calculate_mag_sizes, load_mag_metadata_file
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 
-def init_worker(metadata, mag_sizes):
+def init_worker(metadata, mag_sizes, data_type):
     """
     Initialize worker process with metadata and MAG sizes.
 
@@ -33,8 +28,10 @@ def init_worker(metadata, mag_sizes):
     """
     global metadata_dict
     global mag_size_dict
+    global DATA_TYPE
     metadata_dict = metadata
     mag_size_dict = mag_sizes
+    DATA_TYPE = data_type
 
 
 def process_mag_files(args):
@@ -69,8 +66,12 @@ def process_mag_files(args):
     metadata_info = metadata_dict.get(sample_id)
     df["group"] = metadata_info["group"]
     df["subjectID"] = metadata_info["subjectID"]
-    df["time"] = metadata_info["time"]
     df["replicate"] = metadata_info["replicate"]
+
+    # For longitudinal data, add time column if available.
+    if DATA_TYPE == "longitudinal" and "time" in metadata_info:
+        df["time"] = metadata_info["time"]
+
     # This adds MAG_ID as the first column
     df.insert(0, "MAG_ID", mag_id)
 
@@ -125,7 +126,7 @@ def calculate_frequencies(df, mag_id):
     return df
 
 
-def save_nucleotide_frequencies(data_dict, output_dir, mag_id):
+def save_allele_frequencies(data_dict, output_dir, mag_id):
     mag_df = pd.concat(
         [df for subject_dict in data_dict.values() for df in subject_dict.values()],
         ignore_index=True,
@@ -134,7 +135,7 @@ def save_nucleotide_frequencies(data_dict, output_dir, mag_id):
     os.makedirs(output_dir, exist_ok=True)
     logging.info(f"Saving nucleotide frequencies for MAG {mag_id} to {output_dir}")
     mag_df.to_csv(
-        os.path.join(output_dir, f"{mag_id}_nucleotide_frequencies.tsv.gz"),
+        os.path.join(output_dir, f"{mag_id}_allele_frequency_longitudnal.tsv.gz"),
         index=False,
         sep="\t",
         compression="gzip",
@@ -302,64 +303,135 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     return allele_changes
 
 
-def filter_zero_diff_positions(allele_changes, output_dir, mag_id):
+def filter_constant_positions(allele_df, output_dir, mag_id, data_type):
     """
-    Filters out positions where the sum of the difference values across all samples for all nucleotides is zero.
+    Filter positions where allele frequencies do not change across samples.
 
-    Args:
-        allele_changes (pd.DataFrame): DataFrame containing allele frequency changes with columns for contig, position,
-                                       and nucleotide frequency differences (e.g., 'A_diff', 'T_diff', 'G_diff', 'C_diff').
+    For single data type, it removes positions where all nucleotide frequencies
+    are constant across all samples.
 
-    Returns:
-        pd.DataFrame: A filtered DataFrame with positions where the sum of the difference values across all samples
-                      for all nucleotides is zero removed.
+    For longitudinal data type, it removes 'zero-diff positions' where the sum
+    of frequency differences across all samples for all nucleotides is zero.
+
+    Parameters
+    ----------
+    allele_df : pandas.DataFrame
+        DataFrame containing allele frequency data with columns for nucleotides (A, T, G, C)
+        and positions information (contig, position)
+    output_dir : str
+        Directory where filtered output files will be saved
+    mag_id : str
+        Identifier for the metagenome-assembled genome (MAG)
+    data_type : str
+        Type of analysis to perform, either 'single' or 'longitudinal'
+
+    Returns
+    -------
+    pandas.DataFrame or None
+        For 'longitudinal' data type, returns DataFrame with zero-diff positions filtered out.
+        For 'single' data type, returns None (results are saved to file only).
+
+    Notes
+    -----
+    - For 'single' data type, saves filtered data to '[output_dir]/[mag_id]_allele_frequency_no_constant.tsv.gz'
+    - For 'longitudinal' data type, saves filtered data to '[output_dir]/[mag_id]_allele_frequency_changes_no_zero-diff.tsv.gz'
     """
-    logging.info(
-        f"Identifying positions where sum of the difference values across all samples for all nucleotides is zero, called zero-diff positions"
-    )
 
-    diff_cols = [f"{nuc}_diff" for nuc in NUCLEOTIDES]
+    grouped_df = allele_df.groupby(["contig", "position"], dropna=False)
 
-    # Group by (contig, position) and sum the _diff columns for each group.
-    # This gives us, for each (contig, position), the total difference across all samples.
-    grouped_sums = allele_changes.groupby(["contig", "position"], dropna=False)[
-        diff_cols
-    ].sum()
+    if data_type == "single":
+        logging.info(
+            f"Identifying positions where allele frequency values across all samples for each nucleotide is constant"
+        )
+        # Compute the number of unique values for each frequency column
+        agg = grouped_df[NUCLEOTIDES].nunique()
 
-    # Find positions where ALL of the diff-sums are zero.
-    is_all_zero = (
-        (grouped_sums["A_frequency_diff"] == 0)
-        & (grouped_sums["T_frequency_diff"] == 0)
-        & (grouped_sums["G_frequency_diff"] == 0)
-        & (grouped_sums["C_frequency_diff"] == 0)
-    )
-    # multi-index of (contig, gene_id, position)
-    zero_positions = is_all_zero[is_all_zero].index
+        # Create a boolean mask that is True if at least one frequency column has more than one unique value
+        groups_to_keep = (agg > 1).any(axis=1)
 
-    logging.info(f"Found {len(zero_positions):,} zero-diff positions.")
+        positions_kept = groups_to_keep.sum()
+        total_positions = agg.shape[0]
+        positions_removed = total_positions - positions_kept
 
-    # Filter those positions OUT of allele_changes
-    logging.info(f"Filtering zero-diff positions")
-    ac_indexed = allele_changes.set_index(["contig", "position"], drop=False)
-    keep_mask_ac = ~ac_indexed.index.isin(zero_positions)
-    filtered_allele_changes = ac_indexed[keep_mask_ac].copy()
-    filtered_allele_changes.reset_index(drop=True, inplace=True)
+        logging.info(f"Found {positions_removed:,} constant positions. Filtering...")
 
-    # Save the allele frequency changes
-    filtered_allele_changes.to_csv(
-        os.path.join(
-            output_dir, f"{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
-        ),
-        sep="\t",
-        index=False,
-        compression="gzip",
-    )
+        # groups_to_keep is a Series with MultiIndex (contig, position) and boolean values.
+        # Select the groups (the index) where the condition is True.
+        keep_index = groups_to_keep[groups_to_keep].index
 
-    logging.info(
-        f"Allele frequency changes with no zero diff positions saved to {output_dir}/{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
-    )
+        # Filter the original DataFrame to keep only rows that belong to the selected groups.
+        filtered_df = (
+            allele_df.set_index(["contig", "position"]).loc[keep_index].reset_index()
+        )
+        logging.info(
+            f"Total positions: {total_positions:,}, Positions kept: {positions_kept:,}, Positions removed: {positions_removed:,}"
+        )
 
-    return filtered_allele_changes
+        # Save the allele frequency changes
+        filtered_df.to_csv(
+            os.path.join(output_dir, f"{mag_id}_allele_frequency_no_constant.tsv.gz"),
+            sep="\t",
+            index=False,
+            compression="gzip",
+        )
+        logging.info(
+            f"Allele frequency changes with no constant positions saved to {output_dir}/{mag_id}_allele_frequency_no_constant.tsv.gz"
+        )
+        return None
+
+    elif data_type == "longitudinal":
+
+        logging.info(
+            f"Identifying positions where sum of the difference values across all samples for all nucleotides is zero, called zero-diff positions"
+        )
+
+        diff_cols = [f"{nuc}_diff" for nuc in NUCLEOTIDES]
+
+        # Group by (contig, position) and sum the _diff columns for each group.
+        # This gives us, for each (contig, position), the total difference across all samples.
+        grouped_sums = grouped_df[diff_cols].sum()
+
+        # Find positions where ALL of the diff-sums are zero.
+        is_all_zero = (
+            (grouped_sums["A_frequency_diff"] == 0)
+            & (grouped_sums["T_frequency_diff"] == 0)
+            & (grouped_sums["G_frequency_diff"] == 0)
+            & (grouped_sums["C_frequency_diff"] == 0)
+        )
+        # multi-index of (contig, gene_id, position)
+        zero_positions = is_all_zero[is_all_zero].index
+
+        logging.info(f"Found {len(zero_positions):,} zero-diff positions.")
+
+        # Filter those positions OUT of allele_df
+        logging.info(f"Filtering zero-diff positions")
+        ac_indexed = allele_df.set_index(["contig", "position"], drop=False)
+        keep_mask_ac = ~ac_indexed.index.isin(zero_positions)
+        filtered_allele_changes = ac_indexed[keep_mask_ac].copy()
+        filtered_allele_changes.reset_index(drop=True, inplace=True)
+
+        total_positions = grouped_sums.shape[0]
+        positions_removed = len(zero_positions)
+        positions_kept = total_positions - positions_removed
+        logging.info(
+            f"Total positions: {total_positions:,}, Positions kept: {positions_kept:,}, Positions removed: {positions_removed:,}"
+        )
+
+        # Save the allele frequency changes
+        filtered_allele_changes.to_csv(
+            os.path.join(
+                output_dir, f"{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
+            ),
+            sep="\t",
+            index=False,
+            compression="gzip",
+        )
+
+        logging.info(
+            f"Allele frequency changes with no zero diff positions saved to {output_dir}/{mag_id}_allele_frequency_changes_no_zero-diff.tsv.gz"
+        )
+
+        return filtered_allele_changes
 
 
 def get_mean_change(allele_changes, mag_id, output_dir):
@@ -419,6 +491,47 @@ def get_mean_change(allele_changes, mag_id, output_dir):
     return mean_changes_df
 
 
+def process_single_data(data_list, output_dir, mag_id, disable_filtering):
+    allele_df = pd.concat(data_list, ignore_index=True)
+
+    output_fpath = os.path.join(output_dir, f"{mag_id}_allele_frequency_single.tsv.gz")
+    logging.info(f"Writing allele frequencies (single data) to {output_fpath}")
+    allele_df.to_csv(output_fpath, sep="\t", index=False, compression="gzip")
+
+    if not disable_filtering:
+        logging.info("Filtering constant allele frequency positions (single data).")
+
+        # Call your vectorized filtering function for single data.
+        filtered_df = filter_constant_positions(
+            allele_df, output_dir, mag_id, data_type="single"
+        )
+    else:
+        logging.info("User disabled filtering of constant positions.")
+
+    return filtered_df
+
+
+def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
+    data_dict = create_data_dict(data_list)
+
+    # Free memory from data_list.
+    del data_list
+    gc.collect()
+
+    allele_changes = calculate_allele_frequency_changes(data_dict, output_dir, mag_id)
+
+    if not disable_filtering:
+        logging.info("Filtering zero-diff positions for longitudinal data.")
+        allele_changes = filter_constant_positions(
+            allele_changes, output_dir, mag_id, data_type="longitudinal"
+        )
+    else:
+        logging.info("User disabled zero-diff filtering for longitudinal data.")
+
+    get_mean_change(allele_changes, mag_id, output_dir)
+    return allele_changes
+
+
 def main():
     logging.basicConfig(
         format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
@@ -459,20 +572,30 @@ def main():
         default=0.1,
         metavar="float",
     )
+    parser.add_argument(
+        "--data_type",
+        help="Is the data from a single timepoint or from a time series (longitudinal)?",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
+    )
 
     parser.add_argument(
-        "--disable_zero_diff_filtering",
-        help="Do not remove positions where change in allele frequency for each nucleotide's for in samples sums to zero across. Default is to do the filtering.",
+        "--disable_filtering",
+        help="""
+        For single: Do not remove positions where all nucleotide frequencies are constant across all samples.
+        For longitudinal: Do not remove positions where change in allele frequency 
+        for each nucleotide's samples sums to zero across. Default is to do the filtering.
+        """,
         action="store_true",
         default=False,
     )
 
     parser.add_argument(
         "--cpus",
-        help=f"Number of processors to use.",
-        default=cpu_count(),
-        metavar="int",
+        help="Number of processors to use.",
         type=int,
+        default=cpu_count(),
     )
 
     parser.add_argument(
@@ -491,7 +614,7 @@ def main():
 
     # Load per-MAG metadata file and get required data structures
     metadata_dict, sample_files_with_mag_id = load_mag_metadata_file(
-        args.mag_metadata_file, mag_id, args.breath_threshold
+        args.mag_metadata_file, mag_id, args.breath_threshold, data_type=args.data_type
     )
 
     # Process the samples
@@ -505,7 +628,7 @@ def main():
     with Pool(
         processes=number_of_processes,
         initializer=init_worker,
-        initargs=(metadata_dict, mag_size_dict),
+        initargs=(metadata_dict, mag_size_dict, args.data_type),
     ) as pool:
         data_list = list(
             pool.imap_unordered(process_mag_files, sample_files_with_mag_id)
@@ -518,28 +641,15 @@ def main():
             f"No samples for MAG {mag_id} passed the breadth threshold. Exiting...."
         )
         sys.exit(0)  # Exit the program
-
-    data_dict = create_data_dict(data_list)
-
-    # Release memory from data_list
-    del data_list
-    gc.collect()
-
-    # save_nucleotide_frequencies(data_dict, args.output_dir, mag_id)
-
-    allele_changes = calculate_allele_frequency_changes(
-        data_dict, args.output_dir, mag_id
-    )
-
-    if not args.disable_zero_diff_filtering:
-        logging.info("Filtering zero-diff positions.")
-        allele_changes = filter_zero_diff_positions(
-            allele_changes, args.output_dir, mag_id
+    os.makedirs(args.output_dir, exist_ok=True)
+    if args.data_type == "single":
+        allele_df = process_single_data(
+            data_list, args.output_dir, mag_id, args.disable_filtering
         )
-    else:
-        logging.info("User disabled zero-diff position filtering.")
-
-    get_mean_change(allele_changes, mag_id, args.output_dir)
+    elif args.data_type == "longitudinal":
+        allele_changes = process_longitudinal_data(
+            data_list, args.output_dir, mag_id, args.disable_filtering
+        )
 
     end_time = time.time()
     logging.info(f"Total time taken: {end_time-start_time:.2f} seconds")

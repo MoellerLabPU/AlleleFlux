@@ -4,6 +4,7 @@ import logging
 import warnings
 from multiprocessing import Pool, cpu_count
 
+import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 
@@ -21,6 +22,7 @@ def run_model(args):
         "position": position,
         "n_samples": len(sub_df),
     }
+    notes = ""
 
     for freq_col in freq_cols:
         nucleotide = freq_col.split("_")[0]
@@ -28,35 +30,54 @@ def run_model(args):
         with warnings.catch_warnings(record=True) as w:
             # https://docs.python.org/3/library/warnings.html#the-warnings-filter
             warnings.simplefilter("default")
-            # Fit Linear Mixed Model
-            model = smf.mixedlm(
-                f"{freq_col} ~ group", data=sub_df, groups=sub_df["replicate"]
-            )
-            result = model.fit()
-            # Dynamically extract the coefficient for `group`
-            coef_names = [name for name in result.params.index if "group" in name]
-            if coef_names:
-                coef_name = coef_names[0]
-                # https://www.statsmodels.org/stable/generated/statsmodels.regression.mixed_linear_model.MixedLMResults.html#statsmodels.regression.mixed_linear_model.MixedLMResults
-                position_result[f"{nucleotide}_coef"] = result.params.get(
-                    coef_name, None
+            try:
+                # Fit Linear Mixed Model
+                model = smf.mixedlm(
+                    f"{freq_col} ~ group", data=sub_df, groups=sub_df["replicate"]
                 )
-                position_result[f"{nucleotide}_p_value"] = result.pvalues.get(
-                    coef_name, None
+                result = model.fit()
+            except np.linalg.LinAlgError as e:
+                print(contig, position, sub_df)
+
+            # Set p-value as 1 is there are no unique values for the nucleotide
+            # But still run the model to capture warnings
+            if sub_df[freq_col].nunique() == 1:
+                notes += (
+                    f"{nucleotide} has only one unique value, p-value is set to 1; "
                 )
-                # Get the t-value for the coefficient
-                position_result[f"{nucleotide}_t_value (z-score)"] = result.tvalues.get(
-                    coef_name, None
-                )
+                position_result[f"{nucleotide}_coef"] = 0
+                position_result[f"{nucleotide}_p_value"] = 1
+                position_result[f"{nucleotide}_t_value (z-score)"] = np.nan
             else:
-                raise ValueError(f"Could not find coefficient for {freq_col}")
+                # Dynamically extract the coefficient for `group`
+                coef_names = [name for name in result.params.index if "group" in name]
+                if coef_names:
+                    coef_name = coef_names[0]
+                    # https://www.statsmodels.org/stable/generated/statsmodels.regression.mixed_linear_model.MixedLMResults.html#statsmodels.regression.mixed_linear_model.MixedLMResults
+                    position_result[f"{nucleotide}_coef"] = result.params.get(
+                        coef_name, None
+                    )
+                    position_result[f"{nucleotide}_p_value"] = result.pvalues.get(
+                        coef_name, None
+                    )
+                    # Get the t-value for the coefficient
+                    position_result[f"{nucleotide}_t_value (z-score)"] = (
+                        result.tvalues.get(coef_name, None)
+                    )
+                else:
+                    raise ValueError(
+                        f"Could not find coefficient for {freq_col}, sub_df:\n {sub_df}"
+                    )
             # Append any captured warnings to warnings_list.
             for warn in w:
                 warnings_list.append(str(warn.message))
+
+        # Add the warnings to the result dictionary
         position_result[f"{nucleotide}_warnings"] = (
             "; ".join(warnings_list) if warnings_list else ""
         )
         position_result[f"{nucleotide}_n_warnings"] = len(warnings_list)
+    position_result["notes"] = notes
     return position_result
 
 
@@ -107,11 +128,7 @@ def main():
         group_counts = sub_df.groupby("group").size()  # Count samples per group
 
         # Ensure both groups meet the min_sample_num threshold
-        if (
-            group_counts
-            >= args.min_sample_num
-            # Ensure both groups meet criteria
-        ).sum() == 2:
+        if (group_counts >= args.min_sample_num).sum() == 2:
             grouped_positions.append((contig, position, sub_df))
 
     logging.info(f"Found {len(grouped_positions):,} unique (contig, position) groups.")
@@ -133,7 +150,7 @@ def main():
 
     # Save the results to CSV.
     results_df.to_csv(args.outPath, index=False)
-    logging.info(f"LME modeling complete. Results saved to {args.outPath}")
+    logging.info(f"LMM modeling complete. Results saved to {args.outPath}")
 
 
 if __name__ == "__main__":

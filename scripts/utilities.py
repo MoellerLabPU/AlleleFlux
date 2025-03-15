@@ -39,7 +39,9 @@ def calculate_mag_sizes(fasta_file):
     return mag_sizes
 
 
-def load_mag_metadata_file(mag_metadata_file, mag_id, breath_threshold):
+def load_mag_metadata_file(
+    mag_metadata_file, mag_id, breath_threshold, data_type="longitudinal"
+):
     """
     Load MAG metadata from a file and process it.
 
@@ -60,35 +62,41 @@ def load_mag_metadata_file(mag_metadata_file, mag_id, breath_threshold):
     logging.info(f"Loading MAG metadata from file: {mag_metadata_file}")
     df = pd.read_csv(mag_metadata_file, sep="\t")
 
-    # Ensure required columns are present
-    required_columns = {
-        "sample_id",
-        "file_path",
-        "subjectID",
-        "group",
-        "time",
-        "replicate",
-    }
+    if data_type == "longitudinal":
+        required_columns = {
+            "sample_id",
+            "file_path",
+            "subjectID",
+            "group",
+            "time",
+            "replicate",
+        }
+    elif data_type == "single":  # single data
+        required_columns = {"sample_id", "file_path", "subjectID", "group", "replicate"}
+
     missing_columns = required_columns - set(df.columns)
     if missing_columns:
         raise ValueError(f"Missing columns in mag metadata file: {missing_columns}")
 
-    # Convert columns to string
-    df = df.astype(
-        {
-            "sample_id": str,
-            "file_path": str,
-            "subjectID": str,
-            "group": str,
-            "time": str,
-            "replicate": str,
-        }
-    )
-
-    # Build metadata_dict
-    metadata_dict = df.set_index("sample_id")[
-        ["group", "time", "subjectID", "replicate"]
-    ].to_dict(orient="index")
+    # Convert columns to string (only for the ones we require)
+    common_cast = {
+        "sample_id": str,
+        "file_path": str,
+        "subjectID": str,
+        "group": str,
+        "replicate": str,
+    }
+    if data_type == "longitudinal":
+        cast_dict = {**common_cast, "time": str}
+        df = df.astype(cast_dict)
+        metadata_dict = df.set_index("sample_id")[
+            ["group", "time", "subjectID", "replicate"]
+        ].to_dict(orient="index")
+    else:
+        df = df.astype(common_cast)
+        metadata_dict = df.set_index("sample_id")[
+            ["group", "subjectID", "replicate"]
+        ].to_dict(orient="index")
 
     # Build sample_files_with_mag_id: list of (sample_id, file_path, mag_id, breath_threshold)
     sample_files_with_mag_id = (
