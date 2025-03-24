@@ -7,10 +7,13 @@ import pandas as pd
 from utilities import calculate_score, extract_relevant_columns
 
 
-def get_scores(df, p_value_threshold=0.05):
+def get_scores(df, p_value_threshold=0.05, is_lmm=False):
 
-    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
+    test_columns_dict = extract_relevant_columns(
+        df, capture_str="p_value_", lmm_format=is_lmm
+    )
     # First Output: Overlapping genes are kept as combined entities
+    logging.info("Calculating scores for combined genes.")
     group_scores_combined = calculate_score(
         df, test_columns_dict, "gene_id", p_value_threshold
     )
@@ -24,11 +27,13 @@ def get_scores(df, p_value_threshold=0.05):
     # Trim whitespace from gene_ids
     df_individual["gene_id"] = df_individual["gene_id"].str.strip()
     # Calculate group scores
+    logging.info("Calculating scores for individual genes.")
     group_scores_individual = calculate_score(
         df_individual, test_columns_dict, "gene_id", p_value_threshold
     )
 
     # Third Output: Overlapping Genes Only
+    logging.info("Calculating scores for overlapping genes.")
     overlapping_rows = df[df["gene_id"].str.contains(",", na=False)].copy()
     if not overlapping_rows.empty:
         group_scores_overlapping = calculate_score(
@@ -77,7 +82,7 @@ def main():
         help="Path to output directory.",
         type=str,
         required=True,
-        metavar="filepath",
+        metavar="dirpath",
     )
 
     parser.add_argument(
@@ -86,6 +91,12 @@ def main():
         metavar="str",
         type=str,
         default="sample",
+    )
+    parser.add_argument(
+        "--lmm_format",
+        help="Set to true if processing output from LMM.py script.",
+        action="store_true",
+        default=False,
     )
 
     args = parser.parse_args()
@@ -102,7 +113,7 @@ def main():
     logging.info("Calculating significant scores...")
 
     group_scores_combined, group_scores_individual, group_scores_overlapping = (
-        get_scores(df, args.pValue_threshold)
+        get_scores(df, args.pValue_threshold, args.lmm_format)
     )
 
     # Ensure output directory exists

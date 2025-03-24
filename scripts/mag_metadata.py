@@ -75,34 +75,63 @@ def find_mag_files(root_dir):
     return mag_dict
 
 
-def merge_metadata(mag_dict, metadata_file, timepoints, groups):
+def merge_metadata(mag_dict, metadata_file, timepoints, groups, data_type):
     """
     Merges metadata from a file into a dictionary of metagenome-assembled genomes (MAGs).
 
     Parameters:
         mag_dict (dict): A dictionary where keys are MAG IDs and values are lists of sample information dictionaries.
         metadata_file (str): Path to the metadata file in TSV format containing columns 'sample', 'subjectID', 'group', 'time' and 'replicate'.
-        timepoints (list): List of timepoints to filter the metadata.
+        timepoints (list): List of timepoints to filter the metadata. Required for longitudinal data, optional for single data.
         groups (list): List of groups to filter the metadata.
+        data_type (str): Type of analysis to perform, either 'single' or 'longitudinal'.
 
     Returns:
         dict: The updated mag_dict with metadata fields added to each sample information dictionary.
     """
+
     # Load metadata
     metadata_df = pd.read_csv(
         metadata_file,
         sep="\t",
-        usecols=["sample_id", "subjectID", "group", "time", "replicate"],
     )
+
+    required_cols = ["sample_id", "subjectID", "group", "replicate"]
+    if data_type == "longitudinal" or (data_type == "single" and timepoints):
+        required_cols.append("time")
+
+    missing_columns = set(required_cols) - set(metadata_df.columns)
+    if missing_columns:
+        raise ValueError(f"Missing columns in metadata file: {missing_columns}")
 
     # Ensure 'sample_id' column is a string for consistent matching
     metadata_df["sample_id"] = metadata_df["sample_id"].astype(str)
 
-    # Filter metadata to only include the specified timepoints and groups
-    # This ensures that samples not matching these criteria are excluded
-    metadata_df = metadata_df[
-        metadata_df["time"].isin(timepoints) & metadata_df["group"].isin(groups)
-    ]
+    # Filter metadata based on data type
+    if data_type == "longitudinal":
+        # Filter metadata to only include the specified timepoints and groups
+        metadata_df = metadata_df[
+            metadata_df["time"].isin(timepoints) & metadata_df["group"].isin(groups)
+        ]
+    elif data_type == "single":  # single data type
+        # Filter metadata to only include the specified groups
+        metadata_df = metadata_df[metadata_df["group"].isin(groups)]
+        # Check if there are multiple unique time values in the filtered data
+        if "time" in metadata_df.columns:
+            unique_times = metadata_df["time"].unique()
+            if len(unique_times) > 1 and not timepoints:
+                raise ValueError(
+                    f"Data type is 'single' but metadata contains multiple unique time values: {unique_times}. "
+                    "Please either:\n"
+                    "1. Use --timepoints to specify which timepoint to use, or\n"
+                    "2. Filter your metadata to include only one timepoint, or\n"
+                    "3. Use data_type='longitudinal' if you want to analyze multiple timepoints."
+                )
+        if timepoints:
+            # Filter by timepoint if specified
+            metadata_df = metadata_df[metadata_df["time"] == timepoints[0]]
+            # Remove the time column since we're treating it as single data
+            metadata_df = metadata_df.drop(columns=["time"])
 
     # Create a metadata dictionary for quick lookup
     metadata_dict = metadata_df.set_index("sample_id").to_dict(orient="index")
@@ -124,7 +153,7 @@ def merge_metadata(mag_dict, metadata_file, timepoints, groups):
     return filtered_mag_dict
 
 
-def write_output_files(mag_dict, output_dir):
+def write_output_files(mag_dict, output_dir, data_type):
     """
     Writes output files for each MAG ID in the provided dictionary.
 
@@ -138,6 +167,7 @@ def write_output_files(mag_dict, output_dir):
                      information dictionary should have the keys "sample_id",
                      "subjectID", "group", "replicate" and "file_path".
     output_dir (str): The directory where the output files will be written.
+    data_type (str): Type of analysis to perform, either 'single' or 'longitudinal'.
 
     Returns:
     None
@@ -145,22 +175,21 @@ def write_output_files(mag_dict, output_dir):
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
+    # Define columns based on data type
+    columns = ["sample_id", "subjectID", "group", "replicate", "file_path"]
+    if data_type == "longitudinal":
+        columns.insert(2, "time")  # Insert time after subjectID
+
     # Write output files for each MAG ID
     for mag_id, sample_info_list in mag_dict.items():
         output_file_path = os.path.join(output_dir, f"{mag_id}_metadata.tsv")
         with open(output_file_path, "w") as f:
             # Write header
-            f.write("sample_id\tsubjectID\ttime\tgroup\treplicate\tfile_path\n")
+            f.write("\t".join(columns) + "\n")
+            # Write data rows
             for sample_info in sample_info_list:
-                sample_id = sample_info["sample_id"]
-                subjectID = sample_info["subjectID"]
-                group = sample_info["group"]
-                time = sample_info["time"]
-                replicate = sample_info["replicate"]
-                file_path = sample_info["file_path"]
-                f.write(
-                    f"{sample_id}\t{subjectID}\t{time}\t{group}\t{replicate}\t{file_path}\n"
-                )
+                row = [sample_info[col] for col in columns]
+                f.write("\t".join(str(val) for val in row) + "\n")
         logging.info(f"Output written for MAG {mag_id}: {output_file_path}")
 
 
@@ -182,15 +211,15 @@ def main():
     parser.add_argument(
         "--metadata",
         type=str,
-        help="Path to the metadata TSV file to merge with the main data. Should contain columns 'sample_id', 'subjectID', 'replicate', 'group' and 'time'.",
+        help="Path to the metadata TSV file to merge with the main data. Should contain columns 'sample_id', 'subjectID', 'replicate', 'group' and optionally 'time'.",
         required=True,
     )
 
     parser.add_argument(
         "--timepoints",
-        nargs=2,
-        help="Two timepoints to include.",
-        required=True,
+        nargs="*",
+        help="Two timepoints to include. Required for longitudinal data, optional for single data.",
+        required=False,
     )
 
     parser.add_argument(
@@ -201,6 +230,14 @@ def main():
     )
 
     parser.add_argument(
+        "--data_type",
+        help="Is the data from a single timepoint or from a time series (longitudinal)",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
+    )
+
+    parser.add_argument(
         "--outDir",
         help="Path to the directory where output files will be saved.",
         required=True,
@@ -208,9 +245,23 @@ def main():
     )
     args = parser.parse_args()
 
+    # Validate arguments based on data type
+    if args.data_type == "longitudinal" and len(args.timepoints) != 2:
+        raise ValueError(
+            "--timepoints is required for longitudinal data type and must be exactly two"
+        )
+
+    if args.data_type == "single" and args.timepoints:
+        if len(args.timepoints) > 1:
+            raise ValueError(
+                f"Only provide one timepoint for single data type. Provided: {args.timepoints}"
+            )
+
     mag_dict = find_mag_files(args.rootDir)
-    mag_dict = merge_metadata(mag_dict, args.metadata, args.timepoints, args.groups)
-    write_output_files(mag_dict, args.outDir)
+    mag_dict = merge_metadata(
+        mag_dict, args.metadata, args.timepoints, args.groups, args.data_type
+    )
+    write_output_files(mag_dict, args.outDir, args.data_type)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,43 @@ def init_worker(metadata, mag_sizes):
 
 
 def process_mag_files(args):
+    """
+    Process a MAG (Metagenome-Assembled Genome) profile file and calculate coverage statistics.
+
+    This function reads a coverage profile for a specific MAG in a sample and determines
+    whether it passes the breadth of coverage threshold. The function uses global dictionaries
+    `metadata_dict` and `mag_size_dict` to access sample metadata and MAG sizes.
+
+    Parameters
+    ----------
+    args : tuple
+        A tuple containing:
+        - sample_id (str): Identifier for the sample
+        - profile_fPath (str): Path to the coverage profile file
+        - mag_id (str): Identifier for the MAG
+        - breadth_threshold (float): Minimum required breadth of coverage (0.0-1.0)
+
+    Returns
+    -------
+    dict
+        A dictionary containing coverage statistics and metadata:
+        - sample_id: Sample identifier
+        - MAG_ID: MAG identifier
+        - file_path: Path to the analyzed profile
+        - group: Sample group from metadata
+        - subjectID: Subject identifier from metadata
+        - replicate: Replicate information from metadata
+        - time: Time point (if available in metadata)
+        - genome_size: Size of the MAG in base pairs
+        - breadth: Calculated breadth of coverage (proportion of genome covered)
+        - breadth_threshold_passed: Boolean indicating if breadth threshold was met
+        - breadth_fail_reason: Explanation if threshold not met
+
+    Notes
+    -----
+    Breadth of coverage is calculated as the number of positions with at least
+    1x coverage divided by the total genome size.
+    """
     sample_id, profile_fPath, mag_id, breadth_threshold = args
 
     # Build a dictionary to store coverage stats
@@ -42,13 +79,15 @@ def process_mag_files(args):
         "file_path": profile_fPath,
         "group": metadata_dict[sample_id]["group"],
         "subjectID": metadata_dict[sample_id]["subjectID"],
-        "time": metadata_dict[sample_id]["time"],
         "replicate": metadata_dict[sample_id]["replicate"],
         "genome_size": mag_size_dict.get(mag_id, 0),
         "breadth": None,
         "breadth_threshold_passed": False,
         "breadth_fail_reason": "",
     }
+    # Add time if available in metadata
+    if "time" in metadata_dict[sample_id]:
+        result["time"] = metadata_dict[sample_id]["time"]
 
     # Check if MAG size is known
     mag_size = mag_size_dict.get(mag_id)
@@ -74,7 +113,43 @@ def process_mag_files(args):
     return result
 
 
-def check_timepoints(df):
+def check_timepoints(df, data_type):
+    """
+    Check if MAGs (Metagenome-Assembled Genomes) are present in two timepoints for each subject.
+    This function verifies that subjects have data from exactly two timepoints for longitudinal analysis.
+    For single datatype, it skips the timepoint checks and sets two_timepoints_passed to match breadth_threshold_passed.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input dataframe containing sample data with 'subjectID', 'time', and 'breadth_threshold_passed' columns
+    data_type : str
+        Type of data analysis, either "single" or assumed to be longitudinal
+
+    Returns
+    -------
+    pandas.DataFrame
+        The input dataframe with an additional 'two_timepoints_passed' column indicating samples
+        that come from subjects with exactly 2 timepoints
+
+    Raises
+    ------
+    ValueError
+        If more than 2 unique timepoints are found in the passed samples
+
+    Notes
+    -----
+    - For longitudinal analysis, the function ensures there are exactly 2 unique timepoints globally
+    - A sample is marked as passing if its subject has data at both timepoints and the sample has passed
+      the breadth threshold
+    - Logs information about subjects with valid timepoints
+    """
+    # For single datatype, skip timepoint checks
+    if data_type == "single":
+        # Set two_timepoints_passed to match breadth_threshold_passed for single data type
+        df["two_timepoints_passed"] = df["breadth_threshold_passed"]
+        return df
+
     # Initialize columns
     df["two_timepoints_passed"] = False
 
@@ -113,6 +188,40 @@ def check_timepoints(df):
 
 
 def add_subject_count_per_group(df):
+    """
+    Add columns for subject count and replicate count per group to the DataFrame.
+
+    This function calculates the number of unique subjects and replicates for each group
+    in the dataset, but only considers samples that have passed timepoint validation
+    (where 'two_timepoints_passed' is True). It then adds these counts as new columns
+    to the original DataFrame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame containing at least the following columns:
+        - 'two_timepoints_passed': Boolean indicating if the sample has passed timepoint validation
+        - 'group': Group identifier
+        - 'subjectID': Subject identifier
+        - 'replicate': Replicate identifier
+
+    Returns
+    -------
+    pandas.DataFrame
+        The input DataFrame with two new columns added:
+        - 'subjects_per_group': Number of unique subjects in the group (NaN for invalid samples)
+        - 'replicates_per_group': Number of unique replicates in the group (NaN for invalid samples)
+
+    Raises
+    ------
+    ValueError
+        If more than 2 unique groups are found in the valid samples.
+
+    Notes
+    -----
+    If no valid samples are found, both new columns will be set to NaN for all rows.
+    The function logs a summary of subject and replicate counts per group for valid samples.
+    """
     # Get samples that passed timepoint validation
     valid_subjects = df[df["two_timepoints_passed"]]
 
@@ -158,6 +267,38 @@ def add_subject_count_per_group(df):
 
 
 def count_paired_replicates(df):
+    """
+    Count the number of paired replicates per group in the dataset.
+
+    This function identifies valid subjects (those that passed both timepoints) and counts
+    replicates that appear in both groups. It ensures exactly two groups exist in the valid
+    samples dataset.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame containing the following columns:
+        - 'two_timepoints_passed': Boolean indicating if the sample has two valid timepoints
+        - 'group': The experimental group identifier
+        - 'replicate': The replicate identifier for the sample
+
+    Returns
+    -------
+    pandas.DataFrame
+        The original DataFrame with an additional column:
+        - 'paired_replicates_per_group': Number of replicates per group that have samples in both groups.
+          NaN for samples that failed timepoint check or whose replicate isn't paired.
+
+    Raises
+    ------
+    ValueError
+        If more than two unique groups are found in the valid samples.
+
+    Notes
+    -----
+    A "paired" replicate is one that has samples in both groups. This function helps identify
+    balanced experimental designs by counting the number of such replicates per group.
+    """
     valid_subjects = df[df["two_timepoints_passed"]]
 
     # Check that there are exactly 2 unique groups in the valid samples.
@@ -206,11 +347,19 @@ def count_paired_replicates(df):
 
 
 def process_mag(args):
-    mag_id, metadata_file, mag_size_dict, output_dir, breadth_threshold, cpus = args
+    (
+        mag_id,
+        metadata_file,
+        mag_size_dict,
+        output_dir,
+        breadth_threshold,
+        cpus,
+        data_type,
+    ) = args
     logging.info(f"Processing MAG: {mag_id}")
 
     metadata_dict, sample_files_with_mag_id = load_mag_metadata_file(
-        metadata_file, mag_id, breadth_threshold
+        metadata_file, mag_id, breadth_threshold, data_type
     )
 
     if not sample_files_with_mag_id:
@@ -235,8 +384,8 @@ def process_mag(args):
     # Build results DataFrame
     df_results = pd.DataFrame(results_list)
 
-    # Check that each subject has exactly 2 timepoints.
-    df_results = check_timepoints(df_results)
+    # Check that each subject has exactly 2 timepoints (for longitudinal data only)
+    df_results = check_timepoints(df_results, data_type)
 
     # Count the number of unique subjects and replicates per group
     df_results = add_subject_count_per_group(df_results)
@@ -260,7 +409,6 @@ def main():
         description="Script to detect which samples for a MAG pass the breadth threshold and output a pass/fail table.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # parser.add_argument("--magID", required=True, help="MAG ID to process")
     parser.add_argument(
         "--rootDir",
         required=True,
@@ -280,6 +428,14 @@ def main():
     )
     parser.add_argument(
         "--output_dir", required=True, help="Directory to write output table."
+    )
+
+    parser.add_argument(
+        "--data_type",
+        help="Is the data from a single timepoint or from a time series (longitudinal)",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
     )
 
     args = parser.parse_args()
@@ -303,6 +459,7 @@ def main():
             args.output_dir,
             args.breadth_threshold,
             args.cpus,
+            args.data_type,
         )
         for metadata_file in metadata_files
     ]

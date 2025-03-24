@@ -496,7 +496,7 @@ def process_single_data(data_list, output_dir, mag_id, disable_filtering):
 
     output_fpath = os.path.join(output_dir, f"{mag_id}_allele_frequency_single.tsv.gz")
     logging.info(f"Writing allele frequencies (single data) to {output_fpath}")
-    allele_df.to_csv(output_fpath, sep="\t", index=False, compression="gzip")
+    # allele_df.to_csv(output_fpath, sep="\t", index=False, compression="gzip")
 
     if not disable_filtering:
         logging.info("Filtering constant allele frequency positions (single data).")
@@ -508,8 +508,6 @@ def process_single_data(data_list, output_dir, mag_id, disable_filtering):
     else:
         logging.info("User disabled filtering of constant positions.")
 
-    return filtered_df
-
 
 def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
     data_dict = create_data_dict(data_list)
@@ -517,6 +515,12 @@ def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
     # Free memory from data_list.
     del data_list
     gc.collect()
+
+    output_fpath = os.path.join(
+        output_dir, f"{mag_id}_allele_frequency_longitudnal.tsv.gz"
+    )
+    logging.info(f"Writing allele frequencies (longitudinal data) to {output_fpath}")
+    # save_allele_frequencies(data_dict, output_dir, mag_id)
 
     allele_changes = calculate_allele_frequency_changes(data_dict, output_dir, mag_id)
 
@@ -529,7 +533,6 @@ def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
         logging.info("User disabled zero-diff filtering for longitudinal data.")
 
     get_mean_change(allele_changes, mag_id, output_dir)
-    return allele_changes
 
 
 def main():
@@ -643,11 +646,9 @@ def main():
         sys.exit(0)  # Exit the program
     os.makedirs(args.output_dir, exist_ok=True)
     if args.data_type == "single":
-        allele_df = process_single_data(
-            data_list, args.output_dir, mag_id, args.disable_filtering
-        )
+        process_single_data(data_list, args.output_dir, mag_id, args.disable_filtering)
     elif args.data_type == "longitudinal":
-        allele_changes = process_longitudinal_data(
+        process_longitudinal_data(
             data_list, args.output_dir, mag_id, args.disable_filtering
         )
 

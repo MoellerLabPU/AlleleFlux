@@ -57,7 +57,7 @@ def perform_paired_tests(func_paired, grouped_df, cpus, num_tests, output_dir, m
     )
 
 
-def run_paired_tests(args, group_1, group_2, min_sample_num):
+def run_paired_tests(args, group_1, group_2, min_sample_num, data_type="longitudinal"):
     name_tuple, grouped_df = args
     # Separate the data into two groups
     group1 = grouped_df[grouped_df["group"] == group_1]
@@ -85,8 +85,14 @@ def run_paired_tests(args, group_1, group_2, min_sample_num):
     # Only perform the tests if there are at least min_sample_num pairs
     if num_pairs >= min_sample_num:
         for nucleotide in NUCLEOTIDES:
-            data1 = merged_data[f"{nucleotide}_diff_mean_group1"]
-            data2 = merged_data[f"{nucleotide}_diff_mean_group2"]
+            # Use either diff_mean columns (longitudinal) or direct values (single)
+            if data_type == "longitudinal":
+                data1 = merged_data[f"{nucleotide}_diff_mean_group1"]
+                data2 = merged_data[f"{nucleotide}_diff_mean_group2"]
+            else:  # Single data
+                data1 = merged_data[f"{nucleotide}_group1"]
+                data2 = merged_data[f"{nucleotide}_group2"]
+
             # Check for identical values
             d = data1 - data2
             if np.all(d == 0):
@@ -129,9 +135,9 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--mean_changes_fPath",
+        "--input_df",
         required=True,
-        help="Path to mean changes dataframe",
+        help="Path to mean changes dataframe or allele frequency dataframe",
         type=str,
     )
     parser.add_argument(
@@ -162,14 +168,29 @@ def main():
         required=True,
     )
 
-    args = parser.parse_args()
-
-    mean_changes_df = pd.read_csv(
-        args.mean_changes_fPath, sep="\t", dtype={"gene_id": str}
+    parser.add_argument(
+        "--data_type",
+        help="Type of data to analyze: longitudinal or single",
+        type=str,
+        choices=["longitudinal", "single"],
+        default="longitudinal",
     )
 
+    args = parser.parse_args()
+
+    input_file = args.input_df
+    logging.info(f"Loading data from {input_file}")
+
+    # Load the input data
+    if args.data_type == "longitudinal":
+        logging.info("Processing longitudinal data")
+        input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
+    else:
+        logging.info("Processing single data")
+        input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
+
     # Get unique groups
-    groups = mean_changes_df["group"].unique()
+    groups = input_df["group"].unique()
     if len(groups) != 2:
         raise ValueError(
             f"Expected exactly 2 groups for 2-sample tests tests, but found {len(groups)} groups: {groups}. Exiting...."
@@ -179,9 +200,7 @@ def main():
 
     # Group the data
     logging.info("Grouping data by contig, gene_id and position")
-    grouped_df = mean_changes_df.groupby(
-        ["contig", "gene_id", "position"], dropna=False
-    )
+    grouped_df = input_df.groupby(["contig", "gene_id", "position"], dropna=False)
 
     num_tests = len(grouped_df)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -194,6 +213,7 @@ def main():
         group_1=group_1,
         group_2=group_2,
         min_sample_num=args.min_sample_num,
+        data_type=args.data_type,
     )
     perform_paired_tests(
         func_paired, grouped_df, args.cpus, num_tests, args.output_dir, args.mag_id

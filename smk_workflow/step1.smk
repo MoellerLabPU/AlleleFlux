@@ -1,34 +1,18 @@
-import os
-import pandas as pd
-from glob import glob
-from collections import defaultdict
-from multiprocessing import Pool
-import logging
+"""
+Workflow for Step 1: Sample Profiling and Eligibility Table Generation
+This workflow is designed to profile samples based on BAM files and generate eligibility table
+to be used by step 2.
+"""
 
 
-# Load the configuration file
-configfile: os.path.join(workflow.basedir, "config.yml")
+# Include modular workflow components
+include: "common.smk"
 
 
-OUTDIR = config["root_out"]
-# Automatically detect sample IDs based on filenames in the directory
 samples = [
     os.path.basename(bam).split(".")[0]
     for bam in glob(os.path.join(config["bamDir"], "*.sorted.bam"))
 ]
-
-
-timepoints_labels = [
-    f"{tp[0]}_{tp[1]}" for tp in config["timepoints_combinations"]
-]  # ["T1_T2", "T2_T3"]
-groups_labels = [
-    f"{gr[0]}_{gr[1]}" for gr in config["groups_combinations"]
-]  # ["G1_G2", "G2_G4"]
-
-
-wildcard_constraints:
-    groups="[a-zA-Z0-9_-]+",  # Allow alphanumeric, underscores, and hyphens
-    timepoints="[a-zA-Z0-9_-]+",
 
 
 localrules:
@@ -39,7 +23,7 @@ rule all:
     input:
         expand(os.path.join(OUTDIR, "profiles", "{sample}.sorted"), sample=samples),
         expand(
-            os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}"),
+            os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}.tsv"),
             timepoints=timepoints_labels,
             groups=groups_labels,
         ),
@@ -94,25 +78,20 @@ rule generate_metadata:
     params:
         rootDir=os.path.join(OUTDIR, "profiles"),
         scriptPath=config["scripts"]["generate_mag_metadata"],
+        data_type=config["data_type"],
+        group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
+        timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
     resources:
         time=config["time"]["general"],
-    # log:
-    #     os.path.join(config["logDir"], "generate_metadata", "{timepoints}-{groups}.log"),
     shell:
         """
-        # Extract the two timepoints and groups from the wildcard strings
-        TP1=$(echo {wildcards.timepoints} | cut -d'_' -f1)
-        TP2=$(echo {wildcards.timepoints} | cut -d'_' -f2)
-        G1=$(echo {wildcards.groups} | cut -d'_' -f1)
-        G2=$(echo {wildcards.groups} | cut -d'_' -f2)
-
         python {params.scriptPath} \
             --rootDir {params.rootDir} \
             --metadata {input.metadata} \
             --outDir {output.outDir} \
-            --timepoints $TP1 $TP2 \
-            --groups $G1 $G2 
-         
+            {params.group_args} \
+            --data_type {params.data_type} \
+            {params.timepoint_args}
         """
 
 
@@ -127,6 +106,7 @@ rule qc:
     params:
         breadth_threshold=config["breadth_threshold"],
         scriptPath=config["scripts"]["quality_control"],
+        data_type=config["data_type"],
     threads: config["cpus"]["quality_control"]
     resources:
         time=config["time"]["general"],
@@ -137,7 +117,8 @@ rule qc:
             --fasta {input.fasta} \
             --breadth_threshold {params.breadth_threshold} \
             --cpus {threads} \
-            --output_dir {output.outDir}
+            --output_dir {output.outDir} \
+            --data_type {params.data_type}
         """
 
 
@@ -145,10 +126,11 @@ rule eligibility_table:
     input:
         qc_dir=os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}"),
     output:
-        out_fPath=os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}"),
+        out_fPath=os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}.tsv"),
     params:
         min_sample_num=config["min_sample_num"],
         script=config["scripts"]["eligibility_table"],
+        data_type=config["data_type"],
     resources:
         time=config["time"]["general"],
     shell:
@@ -156,5 +138,6 @@ rule eligibility_table:
         python {params.script} \
             --qc_dir {input.qc_dir} \
             --min_sample_num {params.min_sample_num} \
-            --output_file {output.out_fPath}
+            --output_file {output.out_fPath} \
+            --data_type {params.data_type}
         """

@@ -128,14 +128,14 @@ def paired_test_for_nucleotide(values, test_type):
         return (t_p, w_p)
 
 
-def process_group(group_df, test_type):
+def process_group(group_df, test_type, data_type="longitudinal"):
     """
     Processes a group of nucleotide data and performs paired tests for each nucleotide.
 
     Parameters:
-        group_df (pd.DataFrame): A DataFrame containing nucleotide data. It must have columns
-                                 named '{nuc}_diff_mean' for each nucleotide in NUCLEOTIDES.
+        group_df (pd.DataFrame): A DataFrame containing nucleotide data.
         test_type (str): The type of test to perform on the nucleotide values.
+        data_type (str): The type of data ('longitudinal' or 'single').
 
     Returns:
         dict: A dictionary where keys are nucleotides and values are lists of p-values
@@ -147,7 +147,12 @@ def process_group(group_df, test_type):
     """
     pvalues = {}
     for nuc in NUCLEOTIDES:
-        col = f"{nuc}_diff_mean"
+        # Column name varies depending on data_type
+        if data_type == "longitudinal":
+            col = f"{nuc}_diff_mean"
+        else:  # single
+            col = f"{nuc}"
+
         values = group_df[col].values
         if pd.isnull(values).any():
             raise ValueError(f"NA values found in column '{col}'")
@@ -176,14 +181,15 @@ def process_site(args):
             - group_df (DataFrame): A DataFrame containing the group data for the site.
             - alpha (float): The significance level for the statistical tests.
             - test_type (str): The type of statistical test to perform. Can be "t-test", "wilcoxon", "both", or "either".
+            - data_type (str): The type of data ('longitudinal' or 'single').
 
     Returns:
         tuple: A tuple containing:
             - (contig, position) (tuple): The contig and position of the site.
             - remove_site (bool): A boolean indicating whether the site should be removed (True) or not (False).
     """
-    (contig, position), group_df, alpha, test_type = args
-    pvals = process_group(group_df, test_type=test_type)
+    (contig, position), group_df, alpha, test_type, data_type = args
+    pvals = process_group(group_df, test_type=test_type, data_type=data_type)
     remove_site = True  # assume removal unless one nucleotide prevents it
     for nuc, (t_p, w_p) in pvals.items():
         if test_type == "t-test":
@@ -203,7 +209,7 @@ def process_site(args):
     return ((contig, position), remove_site)
 
 
-def filter_sites_parallel(grouped, alpha, test_type, cpus):
+def filter_sites_parallel(grouped, alpha, test_type, cpus, data_type="longitudinal"):
     """
     Filters sites in parallel using multiprocessing.
 
@@ -213,13 +219,14 @@ def filter_sites_parallel(grouped, alpha, test_type, cpus):
         alpha (float): The significance level for the statistical test.
         test_type (str): The type of statistical test to perform.
         cpus (int): The number of CPU cores to use for parallel processing.
+        data_type (str): The type of data ('longitudinal' or 'single').
 
     Returns:
         list: A list of sites to remove, where each site is represented by its (contig, position).
     """
     groups = list(grouped)  # list of ((contig, position), group_df)
     args_list = [
-        ((contig, position), group_df, alpha, test_type)
+        ((contig, position), group_df, alpha, test_type, data_type)
         for (contig, position), group_df in groups
     ]
     with Pool(processes=cpus) as pool:
@@ -255,6 +262,14 @@ def main():
 
     parser.add_argument("--output_fPath", required=True, help="Path to output file")
     parser.add_argument("--alpha", type=float, default=0.05, help="Significance level")
+
+    parser.add_argument(
+        "--data_type",
+        help="Is the data from a single timepoint or from a time series (longitudinal)?",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
+    )
     parser.add_argument(
         "--test_type",
         choices=["t-test", "wilcoxon", "both", "either"],
@@ -284,16 +299,16 @@ def main():
     grouped = df.groupby(["contig", "position"], dropna=False)
 
     logging.info(
-        f"Determining sites to remove based on paired tests using {args.cpus} cpus. Test type is set to {args.test_type}"
+        f"Determining sites to remove based on paired tests using {args.cpus} cpus. Test type is set to {args.test_type}. Data type is {args.data_type}"
     )
     sites_to_remove = filter_sites_parallel(
-        grouped, args.alpha, args.test_type, args.cpus
+        grouped, args.alpha, args.test_type, args.cpus, args.data_type
     )
     logging.info(f"Removing {len(sites_to_remove):,} sites")
 
     # Remove these sites from the DataFrame.
     removal_index = pd.MultiIndex.from_tuples(
-        sites_to_remove, names=["contig", "pogsition"]
+        sites_to_remove, names=["contig", "position"]
     )
     df_filtered = (
         df.set_index(["contig", "position"])

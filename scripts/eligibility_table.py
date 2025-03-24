@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 
-def generate_test_eligibility_table(qc_dir, min_sample_num):
+def generate_test_eligibility_table(qc_dir, min_sample_num, data_type):
     # Get all QC files in the directory that match *_QC.tsv
     file_list = glob.glob(os.path.join(qc_dir, "*_QC.tsv"))
     if not file_list:
@@ -53,13 +53,18 @@ def generate_test_eligibility_table(qc_dir, min_sample_num):
         pivot[f"paired_replicates_per_group_{g1}"] >= min_sample_num
     ) & (pivot[f"paired_replicates_per_group_{g2}"] >= min_sample_num)
 
-    # For single-sample test eligibility, compute per group:
-    pivot[f"single_sample_eligible_{g1}"] = (
-        pivot[f"replicates_per_group_{g1}"] >= min_sample_num
-    )
-    pivot[f"single_sample_eligible_{g2}"] = (
-        pivot[f"replicates_per_group_{g2}"] >= min_sample_num
-    )
+    # For single-sample test eligibility, compute per group based on data_type:
+    if data_type == "longitudinal":
+        pivot[f"single_sample_eligible_{g1}"] = (
+            pivot[f"replicates_per_group_{g1}"] >= min_sample_num
+        )
+        pivot[f"single_sample_eligible_{g2}"] = (
+            pivot[f"replicates_per_group_{g2}"] >= min_sample_num
+        )
+    else:
+        # Set single sample eligibility columns to NaN for single timepointdata
+        pivot[f"single_sample_eligible_{g1}"] = np.nan
+        pivot[f"single_sample_eligible_{g2}"] = np.nan
 
     return pivot
 
@@ -89,11 +94,19 @@ def main():
         help="Output file for eligibility summary table",
         type=str,
     )
+    
+    parser.add_argument(
+        "--data_type",
+        help="Is the data from a single timepoint or from a time series (longitudinal)",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
+    )
 
     args = parser.parse_args()
 
     eligibility_table = generate_test_eligibility_table(
-        args.qc_dir, args.min_sample_num
+        args.qc_dir, args.min_sample_num, args.data_type
     )
     eligibility_table.to_csv(args.output_file, sep="\t", index=False)
     logging.info(f"Eligibility summary table written to {args.output_file}")

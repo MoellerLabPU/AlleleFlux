@@ -111,22 +111,44 @@ def load_mag_metadata_file(
     return metadata_dict, sample_files_with_mag_id
 
 
-def extract_relevant_columns(df, capture_str):
-    str_columns = [col for col in df.columns if capture_str in col]
+def extract_relevant_columns(df, capture_str, lmm_format=False):
+    """
+    Extract columns from DataFrame based on a capture string pattern.
 
-    test_columns_dict = {}
+    Parameters:
+        df (pandas.DataFrame): DataFrame containing columns to extract.
+        capture_str (str): String pattern to look for in column names.
+        lmm_format (bool, optional): If True, handle LMM-style column names (e.g. 'A_p_value')
+                                     instead of the default format ('A_frequency_p_value_Wilcoxon').
 
-    for col in str_columns:
-        if capture_str in col:
+    Returns:
+        dict: Dictionary mapping test names to lists of relevant column names.
+    """
+    if lmm_format:
+        # Handle LMM.py output format (e.g., 'A_p_value', 'T_p_value', etc.)
+        nucleotides = ["A", "T", "G", "C"]
+        str_columns = [
+            col
+            for col in df.columns
+            if col.endswith("_p_value") and col.split("_")[0] in nucleotides
+        ]
+        if not str_columns:
+            raise ValueError(f"No columns found containing '{capture_str}'")
+
+        test_columns_dict = {"lmm": str_columns}
+        logging.info(f"Detected LMM p-value columns: {str_columns}")
+    else:
+        test_columns_dict = {}
+        str_columns = [col for col in df.columns if capture_str in col]
+        if not str_columns:
+            raise ValueError(f"No columns found containing '{capture_str}'")
+
+        for col in str_columns:
             # Everything after 'capture_str' is part of the test name
             test_name = col.split(capture_str)[-1]
-        else:
-            raise ValueError(
-                f"Column {col} does not contain {capture_str} in expected format."
-            )
 
-        test_columns_dict.setdefault(test_name, []).append(col)
-    logging.info(f"Detected tests: {list(test_columns_dict.keys())}")
+            test_columns_dict.setdefault(test_name, []).append(col)
+        logging.info(f"Detected tests: {list(test_columns_dict.keys())}")
     return test_columns_dict
 
 
@@ -140,9 +162,18 @@ def calculate_score(df, test_columns_dict, group_by_column, p_value_threshold=0.
         subdf = df[subset_cols].copy()
         subdf.dropna(subset=test_cols, how="all", inplace=True)
 
-        # Check for NaNs in all p-value columns and drop
-        if subdf[test_cols].isnull().values.any():
-            raise ValueError("NaNs found in p-value column.")
+        # Check for NaNs in p-value columns and log them instead of raising an error
+        nan_counts = subdf[test_cols].isnull().sum().sum()
+        if nan_counts > 0:
+            logging.warning(
+                f"Found {nan_counts} NaN values in {test_name} p-value columns. NAs will be skipped in calculations."
+            )
+            # Count NaNs per group for detailed logging
+            nan_per_group = (
+                subdf[subdf[test_cols].isnull().any(axis=1)]
+                .groupby(group_by_column)
+                .size()
+            )
 
         # The `dropna=False` ensures that groups with NaN values are included as a separate group
         grouped = subdf.groupby(group_by_column, dropna=False)
@@ -152,6 +183,7 @@ def calculate_score(df, test_columns_dict, group_by_column, p_value_threshold=0.
 
         # Identify significant sites
         significant_col = f"is_significant_{test_name}"
+        # This returns False for cells with NAs
         subdf[significant_col] = subdf[test_cols].lt(p_value_threshold).any(axis=1)
 
         # Number of significant sites per group

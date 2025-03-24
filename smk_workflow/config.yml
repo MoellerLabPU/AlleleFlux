@@ -27,13 +27,17 @@ gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
 
 # Outputs
 # root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"
-root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags"
+root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
+# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
 
 # Parameters
+# single or longitudinal
+data_type: "single"
 timepoints_combinations:
-  - ["pre", "end"]
-  - ["end", "post"]
-
+  # - ["pre", "end"]
+  # - ["end", "post"]
+  - ["end"]
+  
 groups_combinations:
   - ["fat", "control"]
 
@@ -57,7 +61,7 @@ cpus:
 
 memory:
   profile: 10000 # 10 GB
-  analyze_alleles: 70000 # 70 GB
+  analyze_alleles: 100000 # 70 GB
   # significance_test: 100000 # 100 GB
 
 time: # days-HH:MM:SS

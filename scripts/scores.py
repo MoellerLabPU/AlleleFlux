@@ -61,7 +61,7 @@ def parse_classification(classification_str):
     return taxon_dict
 
 
-def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
+def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05, is_lmm=False):
 
     allowed_columns = [
         "MAG_ID",
@@ -76,7 +76,12 @@ def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
     if group_by_column not in allowed_columns:
         raise ValueError(f"Invalid group_by_column. Must be one of {allowed_columns}")
 
-    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
+    # Extract relevant columns, handling LMM.py output if specified
+
+    test_columns_dict = extract_relevant_columns(
+        df, capture_str="p_value_", lmm_format=is_lmm
+    )
+
     # Compute significance scores for all tests and merge them
     merged_results = calculate_score(
         df, test_columns_dict, group_by_column, p_value_threshold
@@ -187,10 +192,16 @@ def main():
 
     parser.add_argument(
         "--out_fPath",
-        help="Path to output file.",
+        help="Path to output file. Default is `significant_score_<group_by_column>.tsv`.",
         type=str,
         metavar="filepath",
-        default="significant_score_<group_by_column>.tsv",
+    )
+
+    parser.add_argument(
+        "--lmm_format",
+        help="Set to true if processing output from LMM.py script.",
+        action="store_true",
+        default=False,
     )
 
     args = parser.parse_args()
@@ -210,7 +221,9 @@ def main():
     merged_df = pd.merge(pValue_table, gtdb_df, on="MAG_ID", how="left")
 
     logging.info("Calculating significance score.")
-    final_table = get_scores(merged_df, args.group_by_column, args.pValue_threshold)
+    final_table = get_scores(
+        merged_df, args.group_by_column, args.pValue_threshold, args.lmm_format
+    )
 
     if not args.out_fPath:
         baseDir = os.path.dirname(args.pValue_table)
