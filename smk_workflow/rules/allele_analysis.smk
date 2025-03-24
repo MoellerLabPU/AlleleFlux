@@ -18,12 +18,12 @@ rule analyze_alleles:
             (
                 "{mag}_allele_frequency_no_constant.tsv.gz"
                 if (
-                    config["data_type"] == "single"
+                    DATA_TYPE == "single"
                     and not config.get("disable_zero_diff_filtering", False)
                 )
                 else (
                     "{mag}_allele_frequency_single.tsv.gz"
-                    if config["data_type"] == "single"
+                    if DATA_TYPE == "single"
                     else "{mag}_allele_frequency_changes_mean.tsv.gz"
                 )
             ),
@@ -42,8 +42,8 @@ rule analyze_alleles:
             if config.get("disable_zero_diff_filtering", False)
             else ""
         ),
-        # Use the data_type directly from config
-        data_type=config["data_type"],
+        # Use the global DATA_TYPE variable
+        data_type=DATA_TYPE,
     threads: config["cpus"]["analyze_alleles"]
     resources:
         mem_mb=config["memory"]["analyze_alleles"],
@@ -61,7 +61,6 @@ rule analyze_alleles:
             {params.disable_zero_diff_filtering}
             """
 
-
 rule preprocess_two_sample:
     input:
         os.path.join(
@@ -71,12 +70,12 @@ rule preprocess_two_sample:
             (
                 "{mag}_allele_frequency_no_constant.tsv.gz"
                 if (
-                    config["data_type"] == "single"
+                    DATA_TYPE == "single"
                     and not config.get("disable_zero_diff_filtering", False)
                 )
                 else (
                     "{mag}_allele_frequency_single.tsv.gz"
-                    if config["data_type"] == "single"
+                    if DATA_TYPE == "single"
                     else "{mag}_allele_frequency_changes_mean.tsv.gz"
                 )
             ),
@@ -88,7 +87,7 @@ rule preprocess_two_sample:
             "preprocessed_two_sample_{timepoints}-{groups}",
             (
                 "{mag}_allele_frequency_preprocessed.tsv.gz"
-                if config["data_type"] == "single"
+                if DATA_TYPE == "single"
                 else "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
             ),
         ),
@@ -96,7 +95,7 @@ rule preprocess_two_sample:
         scriptPath=config["scripts"]["preprocess_two_sample"],
         alpha=config.get("alpha", 0.05),
         test_type=config.get("test_type", "t-test"),
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
     threads: config["cpus"]["quality_control"]
     resources:
         time=config["time"]["general"],

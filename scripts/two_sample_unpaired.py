@@ -179,13 +179,9 @@ def main():
     input_file = args.input_df
     logging.info(f"Loading data from {input_file}")
 
-    # Load the input data depending on the data type
-    if args.data_type == "longitudinal":
-        logging.info("Processing longitudinal data")
-        input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
-    else:
-        logging.info("Processing single data")
-        input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
+    # Load the input data
+    logging.info("Reading input dataframe..")
+    input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
 
     # Get unique groups
     groups = input_df["group"].unique()

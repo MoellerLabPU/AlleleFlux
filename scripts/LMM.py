@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import logging
+import os
 import warnings
 from multiprocessing import Pool, cpu_count
 
@@ -47,25 +48,18 @@ def has_perfect_separation(sub_df, freq_col):
     return (group_stats["var"] == 0).all() and (group_stats["mean"].nunique() > 1)
 
 
-def detect_column_suffix(sub_df):
+def detect_column_suffix(data_type):
     # Identify if the columns are mean changes or raw frequencies
     base_freq_cols = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
-    freq_cols = []
-    # Identify if the columns are mean changes or raw frequencies
-    for col in base_freq_cols:
-        if f"{col}_diff_mean" in sub_df.columns:
-            freq_cols.append(f"{col}_diff_mean")
-        elif col in sub_df.columns:
-            freq_cols.append(col)
-        else:
-            raise ValueError(
-                f"Neither '{col}' nor '{col}_diff_mean' found in dataframe columns."
-            )
+    if data_type == "longitudinal":
+        freq_cols = [f"{nuc}_diff_mean" for nuc in base_freq_cols]
+    elif data_type == "single":
+        freq_cols = base_freq_cols
     return freq_cols
 
 
 def run_model(args):
-    contig, gene_id, position, sub_df = args
+    contig, gene_id, position, sub_df, data_type = args
 
     position_result = {
         "contig": contig,
@@ -81,7 +75,9 @@ def run_model(args):
         position_result[f"{nucleotide}_t_value (z-score)"] = t_value
         position_result["notes"] += note
 
-    freq_cols = detect_column_suffix(sub_df)
+    # Detect the suffix of the columns based on the data type
+    # This is used to determine if the columns are mean changes or raw frequencies
+    freq_cols = detect_column_suffix(data_type)
 
     for freq_col in freq_cols:
         nucleotide = freq_col.split("_")[0]
@@ -217,6 +213,14 @@ def main():
         default=4,
         help="Minimum number of samples per group required to perform the test.",
     )
+
+    parser.add_argument(
+        "--data_type",
+        help="Type of data to analyze: longitudinal or single",
+        type=str,
+        choices=["longitudinal", "single"],
+        default="longitudinal",
+    )
     parser.add_argument(
         "--cpus",
         help="Number of processors to use.",
@@ -224,8 +228,14 @@ def main():
         default=cpu_count(),
     )
     parser.add_argument(
-        "--outPath",
-        help="Path to output file",
+        "--output_dir",
+        help="Path to output directory.",
+        type=str,
+        required=True,
+    )
+    parser.add_argument(
+        "--mag_id",
+        help="MAG ID to process",
         type=str,
         required=True,
     )
@@ -243,7 +253,9 @@ def main():
 
         # Ensure both groups meet the min_sample_num threshold
         if (group_counts >= args.min_sample_num).sum() == 2:
-            grouped_positions.append((contig, gene_id, position, sub_df))
+            grouped_positions.append(
+                (contig, gene_id, position, sub_df, args.data_type)
+            )
 
     logging.info(
         f"Found {len(grouped_positions):,} unique (contig, gene_id, position) groups."
@@ -276,11 +288,23 @@ def main():
         logging.info(f"Removed {removed_count:,} rows with all NaN p-values.")
 
     # Save the results to CSV.
-    if args.outPath.endswith(".gz"):
-        results_df.to_csv(args.outPath, index=False, sep="\t", compression="gzip")
-    else:
-        results_df.to_csv(args.outPath, index=False, sep="\t")
-    logging.info(f"LMM modeling complete. Results saved to {args.outPath}")
+    # if args.outPath.endswith(".gz"):
+    #     results_df.to_csv(args.outPath, index=False, sep="\t", compression="gzip")
+    # else:
+    #     results_df.to_csv(args.outPath, index=False, sep="\t")
+    # logging.info(f"LMM modeling complete. Results saved to {args.outPath}")
+
+    logging.info(f"Saving LMM results for MAG {args.mag_id} to {args.output_dir}")
+    results_df.to_csv(
+        os.path.join(args.output_dir, f"{args.mag_id}_lmm.tsv.gz"),
+        index=False,
+        sep="\t",
+        compression="gzip",
+    )
+
+    logging.info(
+        f"LMM modeling complete. Results saved to {os.path.join(args.output_dir, f'{args.mag_id}_lmm.tsv.gz')}"
+    )
 
 
 if __name__ == "__main__":

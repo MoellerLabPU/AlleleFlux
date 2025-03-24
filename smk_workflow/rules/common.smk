@@ -10,14 +10,14 @@ import logging
 configfile: os.path.join(workflow.basedir, "config.yml")
 
 
-# Get the data_type from the config
-data_type = config["data_type"]
+# Define the global data_type variable to be used across all Snakemake files
+DATA_TYPE = config["analysis_options"]["data_type"]
 
 OUTDIR = config["root_out"]
 
-if data_type == "single":
+if DATA_TYPE == "single":
     OUTDIR = os.path.join(OUTDIR, "single_timepoint")
-elif data_type == "longitudinal":
+elif DATA_TYPE == "longitudinal":
     OUTDIR = os.path.join(OUTDIR, "longitudinal")
 
 timepoints_labels = [
@@ -39,7 +39,7 @@ wildcard_constraints:
     groups=f"({'|'.join(groups_labels)})",
     timepoints=f"({'|'.join(timepoints_labels)})",
     taxon="(domain|phylum|class|order|family|genus|species)",
-    test_type="(two_sample_unpaired|two_sample_paired|single_sample)",
+    test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm)",
     group_str=group_str_regex,
 
 

@@ -35,6 +35,7 @@ rule gene_scores:
         outDir=os.path.join(
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
+        lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
     resources:
         time=config["time"]["general"],
     shell:
@@ -43,7 +44,8 @@ rule gene_scores:
             --pValue_table {input.pvalue_table} \
             --pValue_threshold {params.pValue_threshold} \
             --output_dir {params.outDir} \
-            --prefix {params.prefix} 
+            --prefix {params.prefix} \
+            {params.lmm_format}
         """
 
 

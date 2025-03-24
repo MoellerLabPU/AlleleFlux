@@ -20,6 +20,7 @@ rule significance_score_per_MAG:
         scriptPath=config["scripts"]["scores"],
         group_by_column="MAG_ID",
         pValue_threshold=config.get("p_value_threshold", 0.05),
+        lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
     resources:
         time=config["time"]["general"],
     shell:
@@ -29,9 +30,9 @@ rule significance_score_per_MAG:
             --pValue_table {input.pvalue_table} \
             --group_by_column {params.group_by_column} \
             --pValue_threshold {params.pValue_threshold} \
-            --out_fPath {output}
+            --out_fPath {output} \
+            {params.lmm_format}
         """
-
 
 rule combine_MAG_scores:
     input:
@@ -94,7 +95,6 @@ rule combine_MAG_scores:
 
         logging.info(f"Writing combined scores to {output.concatenated}")
         combined_df.to_csv(output.concatenated, sep="\t", index=False)
-
 
 rule taxa_scores:
     input:

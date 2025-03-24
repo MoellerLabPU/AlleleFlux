@@ -133,7 +133,7 @@ def extract_relevant_columns(df, capture_str, lmm_format=False):
             if col.endswith("_p_value") and col.split("_")[0] in nucleotides
         ]
         if not str_columns:
-            raise ValueError(f"No columns found containing '{capture_str}'")
+            raise ValueError("No LMM p-value columns found.")
 
         test_columns_dict = {"lmm": str_columns}
         logging.info(f"Detected LMM p-value columns: {str_columns}")

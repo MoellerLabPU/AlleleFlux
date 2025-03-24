@@ -6,7 +6,7 @@ to be used by step 2.
 
 
 # Include modular workflow components
-include: "common.smk"
+include: "rules/common.smk"
 
 
 samples = [
@@ -78,7 +78,7 @@ rule generate_metadata:
     params:
         rootDir=os.path.join(OUTDIR, "profiles"),
         scriptPath=config["scripts"]["generate_mag_metadata"],
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
     resources:
@@ -106,7 +106,7 @@ rule qc:
     params:
         breadth_threshold=config["breadth_threshold"],
         scriptPath=config["scripts"]["quality_control"],
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
     threads: config["cpus"]["quality_control"]
     resources:
         time=config["time"]["general"],
@@ -130,7 +130,7 @@ rule eligibility_table:
     params:
         min_sample_num=config["min_sample_num"],
         script=config["scripts"]["eligibility_table"],
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
     resources:
         time=config["time"]["general"],
     shell:

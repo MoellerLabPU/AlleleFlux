@@ -1,7 +1,7 @@
 def get_two_sample_inputs():
     preprocess_enabled = config.get("preprocess_two_sample", False)
     if preprocess_enabled:
-        if config["data_type"] == "single":
+        if DATA_TYPE == "single":
             two_sample_input = os.path.join(
                 OUTDIR,
                 "significance_tests",
@@ -17,7 +17,7 @@ def get_two_sample_inputs():
             )
     else:
         # Input file depends on data_type and filtering options
-        if config["data_type"] == "single":
+        if DATA_TYPE == "single":
             if not config.get("disable_zero_diff_filtering", False):
                 # When single data type and filtering is not disabled
                 two_sample_input = os.path.join(
@@ -60,7 +60,7 @@ rule two_sample_unpaired:
             OUTDIR, "significance_tests", "two_sample_unpaired_{timepoints}-{groups}"
         ),
         scriptPath=config["scripts"]["two_sample_unpaired"],
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
     threads: config["cpus"]["significance_test"]
     resources:
         time=config["time"]["significance_test"],
@@ -92,7 +92,7 @@ rule two_sample_paired:
             OUTDIR, "significance_tests", "two_sample_paired_{timepoints}-{groups}"
         ),
         scriptPath=config["scripts"]["two_sample_paired"],
-        data_type=config["data_type"],
+        data_type=DATA_TYPE,
     threads: config["cpus"]["significance_test"]
     resources:
         time=config["time"]["significance_test"],
@@ -147,4 +147,36 @@ rule single_sample:
             --cpus {threads} \
             --output_dir {params.outDir} \
             {params.max_zero_flag}
+            """
+
+
+rule lmm_analysis:
+    input:
+        input_df=get_two_sample_inputs(),
+    output:
+        os.path.join(
+            OUTDIR,
+            "significance_tests",
+            "lmm_{timepoints}-{groups}",
+            "{mag}_lmm.tsv.gz",
+        ),
+    params:
+        min_sample_num=config["min_sample_num"],
+        outDir=os.path.join(
+            OUTDIR, "significance_tests", "lmm_{timepoints}-{groups}"
+        ),
+        scriptPath=config["scripts"]["lmm"],
+        data_type=DATA_TYPE,
+    threads: config["cpus"]["significance_test"]
+    resources:
+        time=config["time"]["significance_test"],
+    shell:
+        """
+        python {params.scriptPath} \
+            --input_df {input.input_df} \
+            --min_sample_num {params.min_sample_num} \
+            --cpus {threads} \
+            --output_dir {params.outDir} \
+            --data_type {params.data_type} \
+            --mag_id {wildcards.mag}
             """

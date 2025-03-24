@@ -15,6 +15,7 @@ scripts:
   taxa_scores: "/home/suppal/AlleleFlux/scripts/group_scores.py"
   gene_scores: "/home/suppal/AlleleFlux/scripts/gene_scores.py"
   outlier_detection: "/home/suppal/AlleleFlux/scripts/outliers_genes.py"
+  lmm: "/home/suppal/AlleleFlux/scripts/LMM.py"
 
 # Inputs
 bamDir: "/workdir1/sidd/for_sam/new_instrain/alignments"
@@ -31,8 +32,7 @@ root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
 # root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
 
 # Parameters
-# single or longitudinal
-data_type: "single"
+
 timepoints_combinations:
   # - ["pre", "end"]
   # - ["end", "post"]
@@ -40,6 +40,13 @@ timepoints_combinations:
   
 groups_combinations:
   - ["fat", "control"]
+  
+# Analysis options
+analysis_options:
+  use_lmm: True
+  use_significance_tests: True  # Controls whether to run two-sample and single-sample tests
+  data_type: "single" # single or longitudinal
+
 
 min_sample_num: 4
 breadth_threshold: 0.1

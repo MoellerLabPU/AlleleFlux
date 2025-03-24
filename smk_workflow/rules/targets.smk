@@ -10,7 +10,7 @@ def get_allele_analysis_targets():
             # Add targets for each eligible MAG
             for mag in eligible_mags:
                 # Different output files based on data_type and filtering options
-                if config["data_type"] == "single":
+                if DATA_TYPE == "single":
                     if not config.get("disable_zero_diff_filtering", False):
                         # When single data type and filtering is not disabled
                         targets.append(
@@ -46,30 +46,13 @@ def get_allele_analysis_targets():
 def get_taxa_scores_targets():
     targets = []
     tax_levels = ["phylum", "class", "order", "family", "genus", "species"]
+    
     # For two-sample tests, group_str is empty.
-    for tp in timepoints_labels:
-        for gr in groups_labels:
-            for test_type in ["two_sample_unpaired", "two_sample_paired"]:
-                group_str = ""  # no group marker for two-sample tests
-                for taxon in tax_levels:
-                    targets.append(
-                        os.path.join(
-                            OUTDIR,
-                            "scores",
-                            "processed",
-                            "combined",
-                            f"scores_{test_type}-{tp}-{gr}{group_str}-{taxon}.tsv",
-                        )
-                    )
-    # For single-sample tests, group_str is "_" plus the sample group.
-    # Only include if data_type is longitudinal
-    if config["data_type"] == "longitudinal":
+    if config["analysis_options"].get("use_significance_tests", True):
         for tp in timepoints_labels:
             for gr in groups_labels:
-                sample_entries = get_single_sample_entries(tp, gr)
-                unique_groups = sorted(set([grp for mag, grp in sample_entries]))
-                for grp in unique_groups:
-                    group_str = f"_{grp}"
+                for test_type in ["two_sample_unpaired", "two_sample_paired"]:
+                    group_str = ""  # no group marker for two-sample tests
                     for taxon in tax_levels:
                         targets.append(
                             os.path.join(
@@ -77,21 +60,91 @@ def get_taxa_scores_targets():
                                 "scores",
                                 "processed",
                                 "combined",
-                                f"scores_single_sample-{tp}-{gr}{group_str}-{taxon}.tsv",
+                                f"scores_{test_type}-{tp}-{gr}{group_str}-{taxon}.tsv",
                             )
                         )
+        # For single-sample tests, group_str is "_" plus the sample group.
+        # Only include if data_type is longitudinal
+        if DATA_TYPE == "longitudinal":
+            for tp in timepoints_labels:
+                for gr in groups_labels:
+                    sample_entries = get_single_sample_entries(tp, gr)
+                    unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                    for grp in unique_groups:
+                        group_str = f"_{grp}"
+                        for taxon in tax_levels:
+                            targets.append(
+                                os.path.join(
+                                    OUTDIR,
+                                    "scores",
+                                    "processed",
+                                    "combined",
+                                    f"scores_single_sample-{tp}-{gr}{group_str}-{taxon}.tsv",
+                                )
+                            )
+    
+    # Add LMM taxa targets if LMM is enabled
+    if config["analysis_options"].get("use_lmm", False):
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                group_str = ""  # no group marker for LMM
+                for taxon in tax_levels:
+                    targets.append(
+                        os.path.join(
+                            OUTDIR,
+                            "scores",
+                            "processed",
+                            "combined",
+                            f"scores_lmm-{tp}-{gr}{group_str}-{taxon}.tsv",
+                        )
+                    )
+                    
     return targets
 
 
 def get_outlier_gene_targets():
     targets = []
-    for tp in timepoints_labels:
-        for gr in groups_labels:
-            for test_type in ["two_sample_unpaired", "two_sample_paired"]:
-                group_str = ""  # no group marker for two-sample tests
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
+    
+    # Add significance test outlier targets if enabled
+    if config["analysis_options"].get("use_significance_tests", True):
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                for test_type in ["two_sample_unpaired", "two_sample_paired"]:
+                    group_str = ""  # no group marker for two-sample tests
+                    mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
+                    for mag in mags:
+                        prefix = f"{mag}_{test_type}{group_str}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
+                # Only include single sample targets if data_type is longitudinal
+                if DATA_TYPE == "longitudinal":
+                    sample_entries = get_single_sample_entries(tp, gr)
+                    for mag, grp in sample_entries:
+                        group_str = f"_{grp}"
+                        prefix = f"{mag}_single_sample{group_str}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
+                        
+    # Add LMM outlier targets if enabled
+    if config["analysis_options"].get("use_lmm", False):
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                group_str = ""  # no group marker for LMM
+                mags = get_mags_by_eligibility(tp, gr)
                 for mag in mags:
-                    prefix = f"{mag}_{test_type}{group_str}"
+                    prefix = f"{mag}_lmm{group_str}"
                     base_dir = os.path.join(
                         OUTDIR,
                         "outlier_genes",
@@ -100,26 +153,17 @@ def get_outlier_gene_targets():
                     targets.append(
                         os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
                     )
-            # Only include single sample targets if data_type is longitudinal
-            if config["data_type"] == "longitudinal":
-                sample_entries = get_single_sample_entries(tp, gr)
-                for mag, grp in sample_entries:
-                    group_str = f"_{grp}"
-                    prefix = f"{mag}_single_sample{group_str}"
-                    base_dir = os.path.join(
-                        OUTDIR,
-                        "outlier_genes",
-                        f"{tp}-{gr}",
-                    )
-                    targets.append(
-                        os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                    )
+                    
     return targets
 
 
 # Additional target generation functions can be uncommented as needed
 """
 def get_two_sample_targets(test_type):
+    # Only generate targets if use_significance_tests is enabled
+    if not config["analysis_options"].get("use_significance_tests", True):
+        return []
+        
     # Define subdirectory and file suffix based on the test type.
     if test_type == "two_sample_unpaired":
         subdir = "two_sample_unpaired"
@@ -129,7 +173,7 @@ def get_two_sample_targets(test_type):
         suffix = "_two_sample_paired.tsv.gz"
     else:
         raise ValueError("test_type must be either 'unpaired' or 'paired'")
-
+    
     targets = []
     for tp in timepoints_labels:
         for gr in groups_labels:
@@ -145,6 +189,10 @@ def get_two_sample_targets(test_type):
     return targets
 
 def get_single_sample_targets():
+    # Only generate targets if use_significance_tests is enabled
+    if not config["analysis_options"].get("use_significance_tests", True):
+        return []
+        
     targets = []
     for tp in timepoints_labels:
         for gr in groups_labels:
@@ -154,7 +202,26 @@ def get_single_sample_targets():
                         OUTDIR,
                         "significance_tests",
                         f"single_sample_{tp}-{gr}",
-                        f"{mag}_{group}_single_sample.tsv.gz",
+                        f"{mag}_single_sample_{group}.tsv.gz",
+                    )
+                )
+    return targets
+
+def get_lmm_targets():
+    # Only generate targets if use_lmm is enabled
+    if not config["analysis_options"].get("use_lmm", False):
+        return []
+        
+    targets = []
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            for mag in get_mags_by_eligibility(tp, gr):
+                targets.append(
+                    os.path.join(
+                        OUTDIR,
+                        "significance_tests",
+                        f"lmm_{tp}-{gr}",
+                        f"{mag}_lmm.tsv.gz",
                     )
                 )
     return targets
@@ -176,7 +243,7 @@ def get_significance_scores_targets():
                         )
                     )
     # For single-sample tests - only include if data_type is longitudinal
-    if config["data_type"] == "longitudinal":
+    if DATA_TYPE == "longitudinal":
         for tp in timepoints_labels:
             for gr in groups_labels:
                 sample_entries = get_single_sample_entries(tp, gr)
@@ -210,7 +277,7 @@ def get_combined_scores_targets():
                 )
     # Single-sample tests: group_str is "_" plus the sample group.
     # Only include if data_type is longitudinal
-    if config["data_type"] == "longitudinal":
+    if DATA_TYPE == "longitudinal":
         for tp in timepoints_labels:
             for gr in groups_labels:
                 # get_single_sample_entries returns (mag, group) pairs for a given timepoint and group.
@@ -258,7 +325,7 @@ def get_gene_scores_targets():
                         ]
                     )
             # Only include single sample targets if data_type is longitudinal
-            if config["data_type"] == "longitudinal":
+            if DATA_TYPE == "longitudinal":
                 sample_entries = get_single_sample_entries(tp, gr)
                 for mag, grp in sample_entries:
                     group_str = f"_{grp}"
