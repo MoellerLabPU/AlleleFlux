@@ -17,7 +17,6 @@ rule significance_score_per_MAG:
             "{mag}_score_{test_type}{group_str}.tsv",
         ),
     params:
-        scriptPath=config["scripts"]["scores"],
         group_by_column="MAG_ID",
         pValue_threshold=config.get("p_value_threshold", 0.05),
         lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
@@ -25,7 +24,7 @@ rule significance_score_per_MAG:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-scores \
             --gtdb_taxonomy {input.gtdb_taxonomy} \
             --pValue_table {input.pvalue_table} \
             --group_by_column {params.group_by_column} \
@@ -114,12 +113,12 @@ rule taxa_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
     params:
-        scriptPath=config["scripts"]["taxa_scores"],
+        # No params needed with entry points
     resources:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-taxa-scores \
             --input_df {input.concatenated} \
             --group_by_column {wildcards.taxon} \
             --out_fPath {output} 

@@ -4,7 +4,8 @@ import logging
 import os
 
 import pandas as pd
-from utilities import extract_relevant_columns
+
+from alleleflux.utilities.utilities import extract_relevant_columns
 
 
 def group_scores(df, group_col):

@@ -7,7 +7,8 @@ import time
 from multiprocessing import Pool, cpu_count
 
 import pandas as pd
-from utilities import calculate_mag_sizes, load_mag_metadata_file
+
+from alleleflux.utilities.utilities import calculate_mag_sizes, load_mag_metadata_file
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 

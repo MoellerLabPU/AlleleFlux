@@ -4,7 +4,8 @@ import logging
 import os
 
 import pandas as pd
-from utilities import calculate_score, extract_relevant_columns
+
+from alleleflux.utilities.utilities import calculate_score, extract_relevant_columns
 
 
 def read_gtdb(gtdb_fpath):

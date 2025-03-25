@@ -1,22 +1,5 @@
 # config.yml
 
-# Script paths
-scripts:
-  profile: "/home/suppal/AlleleFlux/scripts/profile_mags.py"
-  generate_mag_metadata: "/home/suppal/AlleleFlux/scripts/mag_metadata.py"
-  quality_control: "/home/suppal/AlleleFlux/scripts/quality_control.py"
-  eligibility_table: "/home/suppal/AlleleFlux/scripts/eligibility_table.py"
-  analyze_alleles: "/home/suppal/AlleleFlux/scripts/analyze_allele_freq.py"
-  preprocess_two_sample: "/home/suppal/AlleleFlux/scripts/preprocess_two_sample.py"
-  two_sample_unpaired: "/home/suppal/AlleleFlux/scripts/two_sample_unpaired.py"
-  two_sample_paired: "/home/suppal/AlleleFlux/scripts/two_sample_paired.py"
-  single_sample: "/home/suppal/AlleleFlux/scripts/single_sample.py"
-  scores: "/home/suppal/AlleleFlux/scripts/scores.py"
-  taxa_scores: "/home/suppal/AlleleFlux/scripts/group_scores.py"
-  gene_scores: "/home/suppal/AlleleFlux/scripts/gene_scores.py"
-  outlier_detection: "/home/suppal/AlleleFlux/scripts/outliers_genes.py"
-  lmm: "/home/suppal/AlleleFlux/scripts/LMM.py"
-
 # Inputs
 bamDir: "/workdir1/sidd/for_sam/new_instrain/alignments"
 fasta: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"
@@ -63,8 +46,8 @@ p_value_threshold: 0.05
 cpus:
   profile: 8
   quality_control: 8
-  analyze_alleles: 8
-  significance_test: 8
+  analyze_alleles: 16
+  significance_test: 16
 
 memory:
   profile: 10000 # 10 GB

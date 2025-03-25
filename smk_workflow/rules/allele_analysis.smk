@@ -34,7 +34,6 @@ rule analyze_alleles:
             "allele_analysis",
             "allele_analysis_{timepoints}-{groups}",
         ),
-        scriptPath=config["scripts"]["analyze_alleles"],
         fasta=config["fasta"],
         breath_threshold=config.get("breath_threshold", 0.1),
         disable_zero_diff_filtering=(
@@ -50,7 +49,7 @@ rule analyze_alleles:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-allele-freq \
             --magID {wildcards.mag} \
             --mag_metadata_file {input.mag_metadata_file} \
             --fasta {params.fasta} \
@@ -92,7 +91,6 @@ rule preprocess_two_sample:
             ),
         ),
     params:
-        scriptPath=config["scripts"]["preprocess_two_sample"],
         alpha=config.get("alpha", 0.05),
         test_type=config.get("test_type", "t-test"),
         data_type=DATA_TYPE,
@@ -101,7 +99,7 @@ rule preprocess_two_sample:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-preprocess-two-sample \
             --mean_changes_fPath {input} \
             --cpus {threads} --alpha {params.alpha} \
             --output_fPath {output.outPath} \

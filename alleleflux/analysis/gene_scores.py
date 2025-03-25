@@ -4,7 +4,8 @@ import logging
 import os
 
 import pandas as pd
-from utilities import calculate_score, extract_relevant_columns
+
+from alleleflux.utilities.utilities import calculate_score, extract_relevant_columns
 
 
 def get_scores(df, p_value_threshold=0.05, is_lmm=False):

@@ -1,6 +1,87 @@
-This repository includes workflow for analyzing changes in allele frequency in bacteria and analyzing their significance.
+# AlleleFlux
 
-# 🖱️ Installation 🖱️
+AlleleFlux is a toolkit for analyzing allele frequencies in metagenomic data.
+
+## Project Structure
+
+```
+AlleleFlux/
+├── scripts/                 # All Python scripts
+│   ├── utilities/           # Utility functions
+│   ├── preprocessing/       # Data preparation scripts
+│   ├── analysis/            # Analysis scripts
+│   └── statistics/          # Statistical scripts
+├── smk_workflow/            # Snakemake workflow
+│   ├── config.yml           # Configuration file
+│   ├── step1.smk            # Workflow step 1
+│   ├── step2.smk            # Workflow step 2
+│   └── rules/               # Snakemake rules
+```
+
+## Installation
+
+To install the package in development mode:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd AlleleFlux
+
+# Install in development mode
+pip install -e .
+```
+
+## Usage
+
+To run the workflow:
+
+```bash
+# Step 1: Profile samples and generate eligibility table
+cd smk_workflow
+snakemake -s step1.smk --profile cornell_profile/
+
+# Step 2: Analyze alleles and calculate scores
+cd smk_workflow
+snakemake -s step2.smk --profile cornell_profile/
+```
+
+### Command-line Scripts
+
+After installation, you can use these commands directly from the command line:
+
+**Analysis scripts:**
+- `alleleflux-profile` - Profile MAGs using alignment files
+- `alleleflux-allele-freq` - Analyze allele frequencies
+- `alleleflux-scores` - Calculate scores based on allele frequencies
+- `alleleflux-taxa-scores` - Calculate taxonomic group scores
+- `alleleflux-gene-scores` - Calculate gene-level scores
+- `alleleflux-outliers` - Detect outlier genes
+
+**Preprocessing scripts:**
+- `alleleflux-metadata` - Generate MAG metadata
+- `alleleflux-qc` - Perform quality control
+- `alleleflux-eligibility` - Generate eligibility tables
+- `alleleflux-preprocess-two-sample` - Preprocess data for two-sample analysis
+
+**Statistics scripts:**
+- `alleleflux-lmm` - Run linear mixed models
+- `alleleflux-single-sample` - Perform single sample statistical tests
+- `alleleflux-two-sample-paired` - Perform paired two-sample tests
+- `alleleflux-two-sample-unpaired` - Perform unpaired two-sample tests
+
+For help with any command, use the `-h` or `--help` flag, e.g.:
+```bash
+alleleflux-profile --help
+```
+
+## Configuration
+
+Edit `smk_workflow/config.yml` to customize:
+- Input/output paths
+- Analysis parameters
+- Resource requirements
+
+# 🖱️ Conda Installation 🖱️
 
 1. Install [`mamba`](https://github.com/conda-forge/miniforge?tab=readme-ov-file#install) using the following commdands:
 

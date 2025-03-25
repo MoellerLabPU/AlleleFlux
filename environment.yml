@@ -1,4 +1,4 @@
-name: AlleleFlux
+name: alleleflux
 channels:
   - conda-forge
   - bioconda
@@ -17,3 +17,6 @@ dependencies:
   - intervaltree
   - snakemake>=8.0.0
   - snakemake-executor-plugin-cluster-generic
+  - pip
+  - pip:
+      - -e .

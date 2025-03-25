@@ -9,7 +9,8 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
-from utilities import calculate_mag_sizes, load_mag_metadata_file
+
+from alleleflux.utilities.utilities import calculate_mag_sizes, load_mag_metadata_file
 
 
 def init_worker(metadata, mag_sizes):

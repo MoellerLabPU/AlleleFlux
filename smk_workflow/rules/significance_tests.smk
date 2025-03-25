@@ -59,14 +59,13 @@ rule two_sample_unpaired:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "two_sample_unpaired_{timepoints}-{groups}"
         ),
-        scriptPath=config["scripts"]["two_sample_unpaired"],
         data_type=DATA_TYPE,
     threads: config["cpus"]["significance_test"]
     resources:
         time=config["time"]["significance_test"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-two-sample-unpaired \
             --input_df {input.input_df} \
             --min_sample_num {params.min_sample_num} \
             --mag_id {wildcards.mag} \
@@ -91,14 +90,13 @@ rule two_sample_paired:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "two_sample_paired_{timepoints}-{groups}"
         ),
-        scriptPath=config["scripts"]["two_sample_paired"],
         data_type=DATA_TYPE,
     threads: config["cpus"]["significance_test"]
     resources:
         time=config["time"]["significance_test"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-two-sample-paired \
             --input_df {input.input_df} \
             --min_sample_num {params.min_sample_num} \
             --mag_id {wildcards.mag} \
@@ -128,7 +126,6 @@ rule single_sample:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "single_sample_{timepoints}-{groups}"
         ),
-        scriptPath=config["scripts"]["single_sample"],
         max_zero_flag=(
             "--max_zero_count " + str(config["max_zero_count"])
             if config.get("max_zero_count", None) is not None
@@ -139,7 +136,7 @@ rule single_sample:
         time=config["time"]["significance_test"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-single-sample \
             --mean_changes_fPath {input.mean_allele_changes} \
             --min_sample_num {params.min_sample_num} \
             --mag_id {wildcards.mag} \
@@ -165,14 +162,13 @@ rule lmm_analysis:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "lmm_{timepoints}-{groups}"
         ),
-        scriptPath=config["scripts"]["lmm"],
         data_type=DATA_TYPE,
     threads: config["cpus"]["significance_test"]
     resources:
         time=config["time"]["significance_test"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-lmm \
             --input_df {input.input_df} \
             --min_sample_num {params.min_sample_num} \
             --cpus {threads} \

@@ -29,7 +29,6 @@ rule gene_scores:
             "{mag}_{test_type}{group_str}_gene_scores_overlapping.tsv",
         ),
     params:
-        scriptPath=config["scripts"]["gene_scores"],
         prefix="{mag}_{test_type}{group_str}",
         pValue_threshold=config.get("p_value_threshold", 0.05),
         outDir=os.path.join(
@@ -40,7 +39,7 @@ rule gene_scores:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-gene-scores \
             --pValue_table {input.pvalue_table} \
             --pValue_threshold {params.pValue_threshold} \
             --output_dir {params.outDir} \
@@ -73,12 +72,12 @@ rule detect_outlier_genes:
             "{mag}_{test_type}{group_str}_outlier_genes.tsv",
         ),
     params:
-        scriptPath=config["scripts"]["outlier_detection"],
+        # No params needed with entry points
     resources:
         time=config["time"]["general"],
     shell:
         """
-        python {params.scriptPath} \
+        alleleflux-outliers \
             --mag_file {input.mag_score} \
             --mag_id {wildcards.mag} \
             --gene_file {input.gene_scores} \

@@ -6,9 +6,10 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
-import supress_warning
 from scipy import stats
 from tqdm import tqdm
+
+import alleleflux.utilities.supress_warning as supress_warning
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
