@@ -7,7 +7,7 @@ rule significance_score_per_MAG:
             "{test_type}_{timepoints}-{groups}",
             "{mag}_{test_type}{group_str}.tsv.gz",
         ),
-        gtdb_taxonomy=config["gtdb_file"],
+        gtdb_taxonomy=config["input"]["gtdb_path"],
     output:
         os.path.join(
             OUTDIR,
@@ -18,10 +18,10 @@ rule significance_score_per_MAG:
         ),
     params:
         group_by_column="MAG_ID",
-        pValue_threshold=config.get("p_value_threshold", 0.05),
+        pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
         lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     shell:
         """
         alleleflux-scores \
@@ -68,7 +68,7 @@ rule combine_MAG_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     run:
         import logging
         import pandas as pd
@@ -112,10 +112,8 @@ rule taxa_scores:
             "combined",
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
-    params:
-        # No params needed with entry points
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     shell:
         """
         alleleflux-taxa-scores \

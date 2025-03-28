@@ -4,20 +4,16 @@ This workflow is designed to profile samples based on BAM files and generate eli
 to be used by step 2.
 """
 
-
 # Include modular workflow components
 include: "rules/common.smk"
 
-
 samples = [
     os.path.basename(bam).split(".")[0]
-    for bam in glob(os.path.join(config["bamDir"], "*.sorted.bam"))
+    for bam in glob(os.path.join(config["input"]["bam_dir"], "*.sorted.bam"))
 ]
-
 
 localrules:
     all,
-
 
 rule all:
     input:
@@ -28,23 +24,21 @@ rule all:
             groups=groups_labels,
         ),
 
-
 #####################################
 # Step 1: Profile Samples
 #####################################
 
-
 rule profile:
     input:
-        bam=os.path.join(config["bamDir"], "{sample}.sorted.bam"),
-        fasta=config["fasta"],
-        prodigal=config["prodigal"],
+        bam=os.path.join(config["input"]["bam_dir"], "{sample}.sorted.bam"),
+        fasta=config["input"]["fasta_path"],
+        prodigal=config["input"]["prodigal_path"],
     output:
         sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}.sorted")),
-    threads: config["cpus"]["profile"]
+    threads: config["resources"]["cpus"]["profile"]
     resources:
-        mem_mb=config["memory"]["profile"],
-        time=config["time"]["profile"],
+        mem_mb=config["resources"]["memory"]["profile"],
+        time=config["resources"]["time"]["profile"],
     params:
         outDir=os.path.join(OUTDIR, "profiles"),
     benchmark:
@@ -60,10 +54,9 @@ rule profile:
         --cpus {threads} --output_dir {params.outDir}
         """
 
-
 rule generate_metadata:
     input:
-        metadata=config["metadata_file"],
+        metadata=config["input"]["metadata_path"],
         # This ensures that generate_metadata is run after all samples are profiled
         sampleDirs=expand(
             os.path.join(OUTDIR, "profiles", "{sample}.sorted"), sample=samples
@@ -80,7 +73,7 @@ rule generate_metadata:
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     shell:
         """
         alleleflux-metadata \
@@ -92,21 +85,20 @@ rule generate_metadata:
             {params.timepoint_args}
         """
 
-
 rule qc:
     input:
         metadata_dir=os.path.join(
             OUTDIR, "inputMetadata", "inputMetadata_{timepoints}-{groups}"
         ),
-        fasta=config["fasta"],
+        fasta=config["input"]["fasta_path"],
     output:
         outDir=directory(os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}")),
     params:
-        breadth_threshold=config["breadth_threshold"],
+        breadth_threshold=config["quality_control"]["breadth_threshold"],
         data_type=DATA_TYPE,
-    threads: config["cpus"]["quality_control"]
+    threads: config["resources"]["cpus"]["quality_control"]
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     shell:
         """
         alleleflux-qc \
@@ -118,17 +110,16 @@ rule qc:
             --data_type {params.data_type}
         """
 
-
 rule eligibility_table:
     input:
         qc_dir=os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}"),
     output:
         out_fPath=os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}.tsv"),
     params:
-        min_sample_num=config["min_sample_num"],
+        min_sample_num=config["quality_control"]["min_sample_num"],
         data_type=DATA_TYPE,
     resources:
-        time=config["time"]["general"],
+        time=config["resources"]["time"]["general"],
     shell:
         """
         alleleflux-eligibility \

@@ -57,17 +57,17 @@ def run_wilcoxon(group1, group2):
     return w_p
 
 
-def paired_test_for_nucleotide(values, test_type):
+def paired_test_for_nucleotide(values, filter_type):
     """
     Conducts a paired statistical test (t-test or Wilcoxon test) on a list of nucleotide values.
 
     Parameters:
     values (list or array-like): A list or array of nucleotide values to be tested.
-    test_type (str): The type of test to perform. Options are "t-test", "wilcoxon", "both", or "either".
+    filter_type (str): The type of test to perform. Options are "t-test", "wilcoxon", "both", or "either".
 
     Returns:
-    tuple: A tuple containing the p-values of the tests. If test_type is "t-test", returns (t_p, None).
-           If test_type is "wilcoxon", returns (None, w_p). If test_type is "both" or "either", returns (t_p, w_p).
+    tuple: A tuple containing the p-values of the tests. If filter_type is "t-test", returns (t_p, None).
+           If filter_type is "wilcoxon", returns (None, w_p). If filter_type is "both" or "either", returns (t_p, w_p).
 
     Notes:
     - If the number of values is less than or equal to 3, the function returns (1, None) for "t-test" and (None, 1) for "wilcoxon".
@@ -78,9 +78,9 @@ def paired_test_for_nucleotide(values, test_type):
     # Assign p-values of 1 if there are less than 3 values. List of 3 will be converted to 2.
     # paired test using 2 value for t-test generally gives NaN and 1 for wilcoxon
     if len(values) <= 3:
-        if test_type == "t-test":
+        if filter_type == "t-test":
             return (1, None)
-        elif test_type == "wilcoxon":
+        elif filter_type == "wilcoxon":
             return (None, 1)
         else:
             return (1, 1)
@@ -107,35 +107,35 @@ def paired_test_for_nucleotide(values, test_type):
     # Check for identical values
     d = group1 - group2
     if np.all(d == 0):
-        if test_type == "t-test":
+        if filter_type == "t-test":
             # Paired t-test outputs NaN if both groups have identical values
             return (1, None)
-        elif test_type == "wilcoxon":
+        elif filter_type == "wilcoxon":
             # Wilcoxon gives an error if both groups have identical values
             return (None, 1)
         else:
             return (1, 1)
 
     # Conduct paired t-test.
-    if test_type == "t-test":
+    if filter_type == "t-test":
         t_p = run_tTest(group1, group2)
         return (t_p, None)
-    elif test_type == "wilcoxon":
+    elif filter_type == "wilcoxon":
         w_p = run_wilcoxon(group1, group2)
         return (None, w_p)
-    elif test_type in ["both", "either"]:
+    elif filter_type in ["both", "either"]:
         t_p = run_tTest(group1, group2)
         w_p = run_wilcoxon(group1, group2)
         return (t_p, w_p)
 
 
-def process_group(group_df, test_type, data_type="longitudinal"):
+def process_group(group_df, filter_type, data_type="longitudinal"):
     """
     Processes a group of nucleotide data and performs paired tests for each nucleotide.
 
     Parameters:
         group_df (pd.DataFrame): A DataFrame containing nucleotide data.
-        test_type (str): The type of test to perform on the nucleotide values.
+        filter_type (str): The type of test to perform on the nucleotide values.
         data_type (str): The type of data ('longitudinal' or 'single').
 
     Returns:
@@ -157,8 +157,8 @@ def process_group(group_df, test_type, data_type="longitudinal"):
         values = group_df[col].values
         if pd.isnull(values).any():
             raise ValueError(f"NA values found in column '{col}'")
-        # pvalues[nuc] = paired_test_for_nucleotide(values, test_type=test_type)
-        nuc_pvals = paired_test_for_nucleotide(values, test_type=test_type)
+        # pvalues[nuc] = paired_test_for_nucleotide(values, filter_type=filter_type)
+        nuc_pvals = paired_test_for_nucleotide(values, filter_type=filter_type)
         # Check that none of the returned p-values are NaN (ignoring None values)
         for p in nuc_pvals:
             if p is not None and np.isnan(p):
@@ -181,7 +181,7 @@ def process_site(args):
             - (contig, position) (tuple): The contig and position of the site.
             - group_df (DataFrame): A DataFrame containing the group data for the site.
             - alpha (float): The significance level for the statistical tests.
-            - test_type (str): The type of statistical test to perform. Can be "t-test", "wilcoxon", "both", or "either".
+            - filter_type (str): The type of statistical test to perform. Can be "t-test", "wilcoxon", "both", or "either".
             - data_type (str): The type of data ('longitudinal' or 'single').
 
     Returns:
@@ -189,18 +189,18 @@ def process_site(args):
             - (contig, position) (tuple): The contig and position of the site.
             - remove_site (bool): A boolean indicating whether the site should be removed (True) or not (False).
     """
-    (contig, position), group_df, alpha, test_type, data_type = args
-    pvals = process_group(group_df, test_type=test_type, data_type=data_type)
+    (contig, position), group_df, alpha, filter_type, data_type = args
+    pvals = process_group(group_df, filter_type=filter_type, data_type=data_type)
     remove_site = True  # assume removal unless one nucleotide prevents it
     for nuc, (t_p, w_p) in pvals.items():
-        if test_type == "t-test":
+        if filter_type == "t-test":
             nuc_remove = t_p >= alpha
-        elif test_type == "wilcoxon":
+        elif filter_type == "wilcoxon":
             nuc_remove = w_p >= alpha
-        elif test_type == "both":
+        elif filter_type == "both":
             # Remove the site if both tests are not significant
             nuc_remove = (t_p >= alpha) and (w_p >= alpha)
-        elif test_type == "either":
+        elif filter_type == "either":
             # Remove if either test is non-significant.
             nuc_remove = (t_p >= alpha) or (w_p >= alpha)
 
@@ -210,7 +210,7 @@ def process_site(args):
     return ((contig, position), remove_site)
 
 
-def filter_sites_parallel(grouped, alpha, test_type, cpus, data_type="longitudinal"):
+def filter_sites_parallel(grouped, alpha, filter_type, cpus, data_type="longitudinal"):
     """
     Filters sites in parallel using multiprocessing.
 
@@ -218,7 +218,7 @@ def filter_sites_parallel(grouped, alpha, test_type, cpus, data_type="longitudin
         grouped (iterable): An iterable of grouped data, where each element is a tuple
                             ((contig, position), group_df).
         alpha (float): The significance level for the statistical test.
-        test_type (str): The type of statistical test to perform.
+        filter_type (str): The type of statistical test to perform.
         cpus (int): The number of CPU cores to use for parallel processing.
         data_type (str): The type of data ('longitudinal' or 'single').
 
@@ -227,7 +227,7 @@ def filter_sites_parallel(grouped, alpha, test_type, cpus, data_type="longitudin
     """
     groups = list(grouped)  # list of ((contig, position), group_df)
     args_list = [
-        ((contig, position), group_df, alpha, test_type, data_type)
+        ((contig, position), group_df, alpha, filter_type, data_type)
         for (contig, position), group_df in groups
     ]
     with Pool(processes=cpus) as pool:
@@ -272,7 +272,7 @@ def main():
         default="longitudinal",
     )
     parser.add_argument(
-        "--test_type",
+        "--filter_type",
         choices=["t-test", "wilcoxon", "both", "either"],
         default="t-test",
         help="""
@@ -300,10 +300,10 @@ def main():
     grouped = df.groupby(["contig", "position"], dropna=False)
 
     logging.info(
-        f"Determining sites to remove based on paired tests using {args.cpus} cpus. Test type is set to {args.test_type}. Data type is {args.data_type}"
+        f"Determining sites to remove based on paired tests using {args.cpus} cpus. Filter type is set to {args.filter_type}. Data type is {args.data_type}"
     )
     sites_to_remove = filter_sites_parallel(
-        grouped, args.alpha, args.test_type, args.cpus, args.data_type
+        grouped, args.alpha, args.filter_type, args.cpus, args.data_type
     )
     logging.info(f"Removing {len(sites_to_remove):,} sites")
 

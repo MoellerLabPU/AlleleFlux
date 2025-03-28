@@ -511,6 +511,7 @@ def process_single_data(data_list, output_dir, mag_id, disable_filtering):
 
 
 def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
+    # Create a dictionary of DataFrames for each subjectID and timepoint
     data_dict = create_data_dict(data_list)
 
     # Free memory from data_list.

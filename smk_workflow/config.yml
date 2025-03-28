@@ -1,62 +1,79 @@
-# config.yml
+# AlleleFlux Configuration File
+# ============================
 
-# Inputs
-bamDir: "/workdir1/sidd/for_sam/new_instrain/alignments"
-fasta: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"
-prodigal: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"
-metadata_file: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
-gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
-# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/debug_erros_smk/no_zero_diff_flag/mag_list
-# blacklist_file: "/workdir1/sidd/for_sam/new_instrain/debug_erros_smk/no_zero_diff_flag/blacklist.tsv"
+# Input Files
+# --------------------
+# Path specifications for all required input data
+input:
+  bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files
+  fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
+  prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
+  metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
+  gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
 
-# Outputs
-# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"
-root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
-# root_out: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
+# Output Directory
+# --------------------
+output:
+  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
+  # Alternative output directories (uncomment to use)
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
 
-# Parameters
-
-timepoints_combinations:
-  # - ["pre", "end"]
-  # - ["end", "post"]
-  - ["end"]
+# Analysis Configuration
+# --------------------
+# Core settings that control the type and scope of analysis
+analysis:
+  # Data type - determines the analysis approach
+  data_type: "longitudinal"  # Options: "single" or "longitudinal"
   
-groups_combinations:
-  - ["fat", "control"]
+  # Enable/disable specific analysis modules
+  use_lmm: True             # Linear Mixed Models analysis
+  use_significance_tests: True  # Two-sample and single-sample tests
   
-# Analysis options
-analysis_options:
-  use_lmm: True
-  use_significance_tests: True  # Controls whether to run two-sample and single-sample tests
-  data_type: "single" # single or longitudinal
+  # Timepoints and groups to analyze
+  timepoints_combinations:
+    - ["pre", "post"]       # Currently active timepoint comparison
+    - ["pre", "end"]      # Commented out timepoint comparisons
+    # - ["end", "post"]
+    # - ["end"]             # Single timepoint analysis
+  
+  groups_combinations:
+    - ["fat", "control"]    # Currently active group comparison
 
+# Quality Control Parameters
+# --------------------
+quality_control:
+  min_sample_num: 4         # Minimum number of samples required for analysis
+  breadth_threshold: 0.1    # Minimum coverage breadth across genome
+  disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
 
-min_sample_num: 4
-breadth_threshold: 0.1
-disable_zero_diff_filtering: False
-alpha: 0.05
-test_type: "both"
-preprocess_two_sample: True
-# max_zero_count: 4
+# Statistical Parameters
+# --------------------
+statistics:
+  alpha: 0.05               # Significance threshold for statistical tests
+  filter_type: "t-test"       # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
+  preprocess_two_sample: True  # Whether to preprocess data for two-sample tests
+  max_zero_count: 4         # Maximum number of zero values allowed in single-sample test
+  p_value_threshold: 0.05   # P-value threshold for significance
 
-# group_by_column: "MAG_ID"
-p_value_threshold: 0.05
-
-# Resources
-cpus:
-  profile: 8
-  quality_control: 8
-  analyze_alleles: 16
-  significance_test: 16
-
-memory:
-  profile: 10000 # 10 GB
-  analyze_alleles: 100000 # 70 GB
-  # significance_test: 100000 # 100 GB
-
-time: # days-HH:MM:SS
-  profile: "08:00:00"
-  significance_test: "08:00:00"
-  general: "01:02:00"
+# Compute Resources
+# --------------------
+# Resources allocated to each step of the workflow
+resources:
+  cpus:
+    profile: 8              # CPUs for profiling step
+    quality_control: 8      # CPUs for quality control
+    analyze_alleles: 16     # CPUs for allele analysis
+    significance_test: 16   # CPUs for significance testing
+  
+  memory:
+    profile: 10000          # Memory in MB (10 GB) for profiling
+    analyze_alleles: 100000 # Memory in MB (100 GB) for allele analysis
+    # significance_test: 100000 # Memory in MB for significance testing (currently disabled)
+  
+  time:                     # Runtime limits in format "days-HH:MM:SS"
+    profile: "08:00:00"     # 8 hours for profiling
+    significance_test: "08:00:00"  # 8 hours for significance tests
+    general: "01:02:00"     # 1 hour 2 minutes for general tasks
 
 

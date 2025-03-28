@@ -18,7 +18,7 @@ This directory contains scripts for the AlleleFlux pipeline, organized by functi
   - `profile_mags.py`: Profiling metagenome-assembled genomes
   - `allele_freq.py`: Analyzing allele frequencies
   - `gene_scores.py`: Computing gene scores
-  - `group_scores.py`: Computing scores for taxonomic groups
+  - `taxa_scores.py`: Computing scores for taxonomic groups
   - `scores.py`: General scoring utilities
   - `outliers_genes.py`: Detection of outlier genes
 

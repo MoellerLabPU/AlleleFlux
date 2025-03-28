@@ -19,7 +19,7 @@ requires-python = ">=3.7"
 alleleflux-profile = "alleleflux.analysis.profile_mags:main"
 alleleflux-allele-freq = "alleleflux.analysis.allele_freq:main"
 alleleflux-scores = "alleleflux.analysis.scores:main"
-alleleflux-taxa-scores = "alleleflux.analysis.group_scores:main"
+alleleflux-taxa-scores = "alleleflux.analysis.taxa_scores:main"
 alleleflux-gene-scores = "alleleflux.analysis.gene_scores:main"
 alleleflux-outliers = "alleleflux.analysis.outliers_genes:main"
 

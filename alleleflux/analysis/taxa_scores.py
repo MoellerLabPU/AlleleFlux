@@ -8,7 +8,7 @@ import pandas as pd
 from alleleflux.utilities.utilities import extract_relevant_columns
 
 
-def group_scores(df, group_col):
+def taxa_scores(df, group_col):
     columns_dict = extract_relevant_columns(df, capture_str="sites_per_group_")
     logging.info(f"Calculating scores for {len(columns_dict)} tests.")
 
@@ -99,7 +99,7 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.input_df, sep="\t")
-    grouped_scores = group_scores(df, args.group_by_column)
+    grouped_scores = taxa_scores(df, args.group_by_column)
 
     if not args.out_fPath:
         baseDir = os.path.dirname(args.input_df)
