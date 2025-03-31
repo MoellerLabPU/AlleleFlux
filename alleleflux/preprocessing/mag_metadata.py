@@ -81,7 +81,8 @@ def merge_metadata(mag_dict, metadata_file, timepoints, groups, data_type):
 
     Parameters:
         mag_dict (dict): A dictionary where keys are MAG IDs and values are lists of sample information dictionaries.
-        metadata_file (str): Path to the metadata file in TSV format containing columns 'sample', 'subjectID', 'group', 'time' and 'replicate'.
+        metadata_file (str): Path to the metadata file in TSV format containing columns 'sample', 'subjectID', 'group', 'time'.
+                             The 'replicate' column is optional.
         timepoints (list): List of timepoints to filter the metadata. Required for longitudinal data, optional for single data.
         groups (list): List of groups to filter the metadata.
         data_type (str): Type of analysis to perform, either 'single' or 'longitudinal'.
@@ -96,13 +97,21 @@ def merge_metadata(mag_dict, metadata_file, timepoints, groups, data_type):
         sep="\t",
     )
 
-    required_cols = ["sample_id", "subjectID", "group", "replicate"]
+    # Check for required columns except replicate (we'll handle it specially)
+    required_cols = ["sample_id", "subjectID", "group"]
     if data_type == "longitudinal" or (data_type == "single" and timepoints):
         required_cols.append("time")
 
     missing_columns = set(required_cols) - set(metadata_df.columns)
     if missing_columns:
         raise ValueError(f"Missing columns in metadata file: {missing_columns}")
+
+    # If replicate column doesn't exist, create one using subjectID values
+    if "replicate" not in metadata_df.columns:
+        logging.info(
+            "No 'replicate' column found in metadata. Using 'subjectID' as replicate values."
+        )
+        metadata_df["replicate"] = metadata_df["subjectID"]
 
     # Ensure 'sample_id' column is a string for consistent matching
     metadata_df["sample_id"] = metadata_df["sample_id"].astype(str)

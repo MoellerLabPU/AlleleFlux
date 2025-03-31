@@ -8,23 +8,24 @@ input:
   bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files
   fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
   prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
-  metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
+  # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
+  metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"  # Sample metadata file
   gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
 
 # Output Directory
 # --------------------
 output:
-  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
-  # Alternative output directories (uncomment to use)
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
+  root_dir: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate"
 
 # Analysis Configuration
-# --------------------
+# -----------------------
 # Core settings that control the type and scope of analysis
 analysis:
   # Data type - determines the analysis approach
-  data_type: "longitudinal"  # Options: "single" or "longitudinal"
+  data_type: "single"  # Options: "single" or "longitudinal"
   
   # Enable/disable specific analysis modules
   use_lmm: True             # Linear Mixed Models analysis
@@ -32,23 +33,23 @@ analysis:
   
   # Timepoints and groups to analyze
   timepoints_combinations:
-    - ["pre", "post"]       # Currently active timepoint comparison
-    - ["pre", "end"]      # Commented out timepoint comparisons
+    # - ["pre", "post"]
+    # - ["pre", "end"]
     # - ["end", "post"]
-    # - ["end"]             # Single timepoint analysis
+    - ["end"]             # Single timepoint analysis
   
   groups_combinations:
     - ["fat", "control"]    # Currently active group comparison
 
 # Quality Control Parameters
-# --------------------
+# --------------------------
 quality_control:
   min_sample_num: 4         # Minimum number of samples required for analysis
   breadth_threshold: 0.1    # Minimum coverage breadth across genome
   disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
 
 # Statistical Parameters
-# --------------------
+# ----------------------
 statistics:
   alpha: 0.05               # Significance threshold for statistical tests
   filter_type: "t-test"       # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
@@ -57,7 +58,7 @@ statistics:
   p_value_threshold: 0.05   # P-value threshold for significance
 
 # Compute Resources
-# --------------------
+# -----------------
 # Resources allocated to each step of the workflow
 resources:
   cpus:

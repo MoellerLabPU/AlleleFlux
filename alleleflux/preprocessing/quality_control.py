@@ -66,12 +66,25 @@ def process_mag_files(args):
         - breadth_threshold_passed: Boolean indicating if breadth threshold was met
         - breadth_fail_reason: Explanation if threshold not met
 
+    Raises
+    ------
+    ValueError
+        If more than 2 unique groups are found in the valid samples.
+
     Notes
     -----
     Breadth of coverage is calculated as the number of positions with at least
     1x coverage divided by the total genome size.
     """
     sample_id, profile_fPath, mag_id, breadth_threshold = args
+
+    # Check if there are more than 2 unique groups in the metadata
+    unique_groups = set(
+        metadata_dict[sample_id]["group"] for sample_id in metadata_dict
+    )
+    if len(unique_groups) > 2:
+        msg = f"More than 2 unique groups found: {unique_groups}"
+        raise ValueError(msg)
 
     # Build a dictionary to store coverage stats
     result = {
@@ -213,11 +226,6 @@ def add_subject_count_per_group(df):
         - 'subjects_per_group': Number of unique subjects in the group (NaN for invalid samples)
         - 'replicates_per_group': Number of unique replicates in the group (NaN for invalid samples)
 
-    Raises
-    ------
-    ValueError
-        If more than 2 unique groups are found in the valid samples.
-
     Notes
     -----
     If no valid samples are found, both new columns will be set to NaN for all rows.
@@ -226,14 +234,14 @@ def add_subject_count_per_group(df):
     # Get samples that passed timepoint validation
     valid_subjects = df[df["two_timepoints_passed"]]
 
-    # Check that there are exactly 2 unique groups in the valid samples.
-    unique_groups = valid_subjects["group"].unique()
-    if len(unique_groups) > 2:
-        raise ValueError(f"More than 2 groups found: {unique_groups}")
-
     if valid_subjects.empty:
+        logging.warning("No valid subjects found")
+        # Initialize the columns with NaN values
         df["subjects_per_group"] = np.nan
         df["replicates_per_group"] = np.nan
+        # Set 0 only for valid subjects that passed the timepoint check
+        df.loc[df["two_timepoints_passed"], "subjects_per_group"] = 0
+        df.loc[df["two_timepoints_passed"], "replicates_per_group"] = 0
         return df
 
     # Count unique subjects per group in valid samples
@@ -275,6 +283,10 @@ def count_paired_replicates(df):
     replicates that appear in both groups. It ensures exactly two groups exist in the valid
     samples dataset.
 
+    A "paired replicate" means the same replicate has samples in both experimental groups.
+    This helps identify balanced experimental designs where the same experimental units
+    are measured across different conditions.
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -289,27 +301,25 @@ def count_paired_replicates(df):
         The original DataFrame with an additional column:
         - 'paired_replicates_per_group': Number of replicates per group that have samples in both groups.
           NaN for samples that failed timepoint check or whose replicate isn't paired.
+          Zero (0) for samples that passed timepoint check but have no paired replicates.
 
-    Raises
-    ------
-    ValueError
-        If more than two unique groups are found in the valid samples.
 
     Notes
     -----
-    A "paired" replicate is one that has samples in both groups. This function helps identify
-    balanced experimental designs by counting the number of such replicates per group.
+    - If there are no valid subjects at all, the function returns the DataFrame with
+      'paired_replicates_per_group' column set to NaN for all rows.
+    - If there are valid subjects but no paired replicates, the function sets
+      'paired_replicates_per_group' to 0 for valid subjects (those that passed timepoint check).
+    - For samples that failed the timepoint check, the column is always set to NaN.
     """
     valid_subjects = df[df["two_timepoints_passed"]]
 
-    # Check that there are exactly 2 unique groups in the valid samples.
-    unique_groups = valid_subjects["group"].unique()
-    if len(unique_groups) > 2:
-        raise ValueError(f"More than 2 groups found: {unique_groups}")
-
     if valid_subjects.empty:
-        df["subjects_per_group"] = np.nan
-        df["replicates_per_group"] = np.nan
+        logging.warning("No valid subjects found")
+        # Initialize the column with NaN values
+        df["paired_replicates_per_group"] = np.nan
+        # Set 0 only for valid subjects that passed the timepoint check
+        df.loc[df["two_timepoints_passed"], "paired_replicates_per_group"] = 0
         return df
 
     rep_group_count = (
@@ -318,6 +328,16 @@ def count_paired_replicates(df):
         .reset_index(name="group_count")
     )
     paired_reps = rep_group_count[rep_group_count["group_count"] == 2]["replicate"]
+
+    # Check if there are any paired replicates
+    if paired_reps.empty:
+        logging.warning("No paired replicates found across groups")
+        # Initialize the column with NaN values
+        df["paired_replicates_per_group"] = np.nan
+        # Set 0 only for valid subjects that passed the timepoint check
+        df.loc[df["two_timepoints_passed"], "paired_replicates_per_group"] = 0
+        return df
+
     paired_valid_subjects = valid_subjects[
         valid_subjects["replicate"].isin(paired_reps)
     ]
