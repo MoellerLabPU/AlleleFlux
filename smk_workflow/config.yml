@@ -2,30 +2,30 @@
 # ============================
 
 # Input Files
-# --------------------
+# ------------
 # Path specifications for all required input data
 input:
   bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files
   fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
   prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
-  # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
-  metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"  # Sample metadata file
+  metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
+  # metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"  # Sample metadata file
   gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
 
 # Output Directory
 # --------------------
 output:
-  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
+  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
-  root_dir: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate"
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"
 
 # Analysis Configuration
 # -----------------------
 # Core settings that control the type and scope of analysis
 analysis:
   # Data type - determines the analysis approach
-  data_type: "single"  # Options: "single" or "longitudinal"
+  data_type: "longitudinal"  # Options: "single" or "longitudinal"
   
   # Enable/disable specific analysis modules
   use_lmm: True             # Linear Mixed Models analysis
@@ -33,10 +33,10 @@ analysis:
   
   # Timepoints and groups to analyze
   timepoints_combinations:
-    # - ["pre", "post"]
+    - ["pre", "post"]
     # - ["pre", "end"]
     # - ["end", "post"]
-    - ["end"]             # Single timepoint analysis
+    # - ["end"]             # Single timepoint analysis
   
   groups_combinations:
     - ["fat", "control"]    # Currently active group comparison
@@ -76,5 +76,4 @@ resources:
     profile: "08:00:00"     # 8 hours for profiling
     significance_test: "08:00:00"  # 8 hours for significance tests
     general: "01:02:00"     # 1 hour 2 minutes for general tasks
-
 

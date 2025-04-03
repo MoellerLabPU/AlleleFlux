@@ -92,7 +92,7 @@ def get_taxa_scores_targets():
                                 )
     
     # Add LMM taxa targets if LMM is enabled
-    if config["analysis"].get("use_lmm", False):
+    if config["analysis"].get("use_lmm", True):
         for tp in timepoints_labels:
             for gr in groups_labels:
                 # Only generate targets if there are eligible MAGs
@@ -150,7 +150,7 @@ def get_outlier_gene_targets():
                         )
                         
     # Add LMM outlier targets if enabled
-    if config["analysis"].get("use_lmm", False):
+    if config["analysis"].get("use_lmm", True):
         for tp in timepoints_labels:
             for gr in groups_labels:
                 group_str = ""  # no group marker for LMM
@@ -222,7 +222,7 @@ def get_single_sample_targets():
 
 def get_lmm_targets():
     # Only generate targets if use_lmm is enabled
-    if not config["analysis"].get("use_lmm", False):
+    if not config["analysis"].get("use_lmm", True):
         return []
         
     targets = []
@@ -272,7 +272,7 @@ def get_significance_scores_targets():
                             )
                         )
     # Add LMM scores
-    if config["analysis"].get("use_lmm", False):
+    if config["analysis"].get("use_lmm", True):
         for tp in timepoints_labels:
             for gr in groups_labels:
                 group_str = ""  # no group marker for LMM
@@ -331,7 +331,7 @@ def get_combined_scores_targets():
                                 )
                             )
     # Add LMM targets if enabled
-    if config["analysis"].get("use_lmm", False):
+    if config["analysis"].get("use_lmm", True):
         for tp in timepoints_labels:
             for gr in groups_labels:
                 # Only generate targets if there are eligible MAGs

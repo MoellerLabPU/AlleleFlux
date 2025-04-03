@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-# AlleleFlux Pipeline Runner
+# AlleleFlux Pipeline Runner using Snakemake API
+# A robust script to run the two-step Snakemake workflow using the Snakemake Python API
+
 import argparse
 import logging
 import multiprocessing as mp
 import os
 import signal
-import subprocess
 import sys
 from datetime import datetime
-from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -23,32 +23,26 @@ logging.basicConfig(
 logger = logging.getLogger("AlleleFlux")
 
 # Global variables
-child_proc = None  # Global variable to track the Snakemake process
+current_execution = None  # Track current Snakemake execution
 CONFIG_PATH = os.path.join("smk_workflow", "config.yml")
+STEP1_SNAKEFILE = Path("smk_workflow/step1.smk")
+STEP2_SNAKEFILE = Path("smk_workflow/step2.smk")
 
 
 def signal_handler(sig, frame):
-    """Terminate Snakemake and its entire process group."""
-    global child_proc
+    """Handle signals and cancel running workflow."""
+    global current_execution
     logger.info(
-        f"Received {signal.Signals(sig).name}, terminating Snakemake and subprocesses..."
+        f"Received {signal.Signals(sig).name}, terminating Snakemake workflow..."
     )
 
-    if child_proc is not None:
+    if current_execution is not None:
         try:
-            # Terminate the entire process group
-            pgid = os.getpgid(child_proc.pid)
-            os.killpg(pgid, sig)
-            # Wait for process group to terminate
-            child_proc.wait(timeout=15)
-            logger.info("Snakemake and subprocesses terminated.")
-        except subprocess.TimeoutExpired:
-            logger.warning("Forcing immediate termination with SIGKILL...")
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            logger.info("Process group already terminated.")
+            # Cancel the running workflow
+            current_execution.cancel()
+            logger.info("Snakemake workflow canceled.")
         except Exception as e:
-            logger.error(f"Error terminating process group: {e}")
+            logger.error(f"Error canceling workflow: {e}")
     sys.exit(1)
 
 
@@ -123,54 +117,123 @@ def validate_config(config: Dict[str, Any]) -> bool:
     return validation_passed
 
 
-def run_snakemake(
-    snakefile: str,
+def run_snakemake_api(
+    snakefile: Path,
     config_file: str,
     threads: int,
     profile: Optional[str] = None,
     dry_run: bool = False,
-) -> bool:
-    """Run Snakemake with proper process group isolation."""
-    global child_proc
-    cmd = [
-        "snakemake",
-        "--snakefile",
-        snakefile,
-        "--configfile",
-        config_file,
-        "--cores",
-        str(threads),
-    ]
+    rerun_incomplete: bool = True,
+    force_all: bool = False,
+) -> Tuple[bool, List[str]]:
+    """Run Snakemake workflow using the Snakemake API (version 8+)."""
+    global current_execution
 
-    # Add optional parameters
-    if profile:
-        cmd.extend(["--profile", profile])
+    try:
+        # Import the Snakemake API
+        from snakemake.api import (
+            OutputSettings,
+            ResourceSettings,
+            SnakemakeApi,
+            StorageSettings,
+        )
+    except ImportError:
+        logger.error("Failed to import snakemake.api. Please install Snakemake v8+")
+        return False, []
 
+    # Log workflow start
     if dry_run:
-        cmd.append("-n")
         logger.info(f"{' DRY RUN ':-^80}")
     else:
         logger.info(f"{' RUNNING ':-^80}")
 
-    logger.info(f"Running command: {' '.join(cmd)}")
+    # Log parameters
+    logger.info(f"Running Snakemake with snakefile: {snakefile}")
+    logger.info(f"Configuration file: {config_file}")
+    logger.info(f"Threads: {threads}")
+    if profile:
+        logger.info(f"Profile: {profile}")
+    logger.info(f"Dry run: {dry_run}")
+    logger.info(f"Rerun incomplete: {rerun_incomplete}")
+    logger.info(f"Force all: {force_all}")
 
     try:
-        # Start Snakemake in a new process group with stdout/stderr passed through
-        child_proc = subprocess.Popen(
-            cmd,
-            preexec_fn=os.setsid,  # Isolate process group
-            stdout=None,  # Use parent's stdout (pass through)
-            stderr=None,  # Use parent's stderr (pass through)
-            bufsize=1,  # Line buffered
-            universal_newlines=True,  # Text mode
+        # Create output settings
+        output_settings = OutputSettings(
+            verbose=True,
+            show_failed_logs=True,
+            printshellcmds=True,
         )
-        child_proc.wait()
-        return child_proc.returncode == 0
+
+        # Create resource settings
+        resource_settings = ResourceSettings(
+            cores=threads,
+            # Set other resource limits if needed
+        )
+
+        # Create storage settings with config file
+        # storage_settings = StorageSettings(
+        #     configfiles=[Path(config_file)],
+        # )
+
+        # Add profile if specified
+        profile_settings = None
+        if profile:
+            profile_settings = Path(profile)
+
+        # Create the Snakemake API context
+        with SnakemakeApi(output_settings) as snakemake_api:
+            # Create the workflow
+            workflow_api = snakemake_api.workflow(
+                storage_settings=StorageSettings(),
+                resource_settings=resource_settings,
+                snakefile=snakefile,
+                # profile=profile_settings,
+            )
+
+            # Create the DAG
+            dag_api = workflow_api.dag()
+
+            # Configure execution parameters
+            execution_settings = {
+                "dryrun": dry_run,
+                "force": force_all,
+                "rerun_triggers": ["mtime", "params", "input", "software-env", "code"],
+            }
+
+            if rerun_incomplete:
+                execution_settings["rerun_triggers"].append("incomplete")
+
+            # Execute the workflow
+            execution = dag_api.execute(**execution_settings)
+            current_execution = execution
+
+            # Wait for the execution to complete
+            result = execution.wait()
+
+            # Reset the current execution
+            current_execution = None
+
+            # Check if execution was successful
+            if result.successful:
+                logger.info("Snakemake completed successfully")
+                return True, []
+            else:
+                error_message = (
+                    f": {result.reason}" if hasattr(result, "reason") else ""
+                )
+                logger.error(f"Snakemake execution failed{error_message}")
+                return False, []
+
     except Exception as e:
         logger.error(f"Exception running {snakefile}: {e}")
-        return False
+        import traceback
+
+        logger.error(traceback.format_exc())
+        return False, []
     finally:
-        child_proc = None  # Reset after completion
+        # Ensure current_execution is reset
+        current_execution = None
 
 
 def parse_arguments():
@@ -195,10 +258,9 @@ def parse_arguments():
         help="Perform a dry run (don't execute commands)",
     )
     parser.add_argument(
-        "-v",
         "--version",
         action="version",
-        version=f"AlleleFlux v{version("AlleleFlux")}",
+        version=f"AlleleFlux API Runner v1.0.0",
         help="Show version information and exit",
     )
     runtime_group = parser.add_argument_group("Runtime configuration")
@@ -215,6 +277,26 @@ def parse_arguments():
         type=int,
         default=mp.cpu_count(),
         help="Number of CPU threads to use",
+    )
+    runtime_group.add_argument(
+        "--force-all",
+        action="store_true",
+        help="Force rerunning all steps (equivalent to snakemake --forceall)",
+    )
+    runtime_group.add_argument(
+        "--no-rerun-incomplete",
+        action="store_true",
+        help="Disable automatic rerunning of jobs with incomplete output files",
+    )
+    runtime_group.add_argument(
+        "--step1-only",
+        action="store_true",
+        help="Run only step 1 of the workflow",
+    )
+    runtime_group.add_argument(
+        "--step2-only",
+        action="store_true",
+        help="Run only step 2 of the workflow",
     )
 
     # Input files
@@ -326,23 +408,27 @@ def update_config(config: Dict[str, Any], args) -> Dict[str, Any]:
         config["quality_control"] = {}
 
     # Update quality control parameters if provided
-    if args.min_sample_num is not None:
+    if args.min_sample_num:
         config["quality_control"]["min_sample_num"] = args.min_sample_num
-    if args.breadth_threshold is not None:
+    if args.breadth_threshold:
         config["quality_control"]["breadth_threshold"] = args.breadth_threshold
 
     return config
 
 
-def write_runtime_config(config: Dict[str, Any], outDir) -> str:
+def write_runtime_config(config: Dict[str, Any], out_dir: str) -> str:
     """Write updated config to a runtime file and return its path."""
-    timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
+    timestamp = datetime.now().strftime("%m-%d-%Y_%H:%M:%S")
     runtime_config = f"alleleflux_config_{timestamp}.yml"
-    runtime_config_path = os.path.join(outDir, runtime_config)
+    runtime_config_path = os.path.join(out_dir, runtime_config)
 
     try:
+        os.makedirs(out_dir, exist_ok=True)
         with open(runtime_config_path, "w") as f:
-            yaml.dump(config, f, default_flow_style=False)
+            # Use flow style for lists to maintain original format
+            yaml.dump(
+                config, f, default_flow_style=None, sort_keys=False, default_style=None
+            )
         logger.info(f"Created runtime config file: {runtime_config_path}")
         return runtime_config_path
     except Exception as e:
@@ -351,77 +437,107 @@ def write_runtime_config(config: Dict[str, Any], outDir) -> str:
 
 
 def main():
-    # Register signal handlers for graceful termination
-    signal.signal(signal.SIGTERM, signal_handler)
+    """Main entry point."""
+    # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # Parse command-line arguments
     args = parse_arguments()
 
-    # Load configuration from specified file
-    logger.info(f"Reading config file from: {args.config}")
+    # Load configuration
     config = load_config(args.config)
 
     # Update configuration with command-line arguments
-    updated_config = update_config(config, args)
+    config = update_config(config, args)
 
-    # Check for required parameters
-    missing_params = []
-    for param_name, param_value in [
-        ("BAM directory", updated_config.get("input", {}).get("bam_dir")),
-        ("FASTA file", updated_config.get("input", {}).get("fasta_path")),
-        ("Prodigal file", updated_config.get("input", {}).get("prodigal_path")),
-        ("Metadata file", updated_config.get("input", {}).get("metadata_path")),
-        ("Output directory", updated_config.get("output", {}).get("root_dir")),
-    ]:
-        if not param_value:
-            missing_params.append(param_name)
+    # Validate configuration
+    if not validate_config(config):
+        logger.error("Configuration validation failed. Please check your settings.")
+        sys.exit(1)
 
-    if missing_params:
-        logger.error("Missing required parameters: " + ", ".join(missing_params))
-        logger.error(
-            "Please specify these via command-line arguments or in the config file."
+    # Create runtime config file in output directory
+    output_dir = config.get("output", {}).get("root_dir")
+    if not output_dir:
+        logger.error("Output directory not specified in configuration")
+        sys.exit(1)
+
+    runtime_config_path = write_runtime_config(config, output_dir)
+
+    # Run the workflow
+    success = True
+
+    # Determine which steps to run
+    run_step1 = not args.step2_only
+    run_step2 = not args.step1_only
+
+    # Determine whether to use rerun_incomplete flag
+    rerun_incomplete = not args.no_rerun_incomplete
+
+    # Run Step 1: Sample Profiling and Eligibility Table Generation
+    if run_step1:
+        logger.info(
+            "Starting Step 1: Sample Profiling and Eligibility Table Generation"
         )
+        step1_success, incomplete_files = run_snakemake_api(
+            STEP1_SNAKEFILE,
+            runtime_config_path,
+            args.threads,
+            args.profile,
+            args.dry_run,
+            rerun_incomplete,
+            args.force_all,
+        )
+
+        if not step1_success:
+            if incomplete_files:
+                logger.error(
+                    f"Step 1 failed with incomplete files: {', '.join(incomplete_files)}"
+                )
+            else:
+                logger.error("Step 1 failed")
+
+            # Only exit if step 2 is not requested to run independently
+            if not args.step2_only:
+                sys.exit(1)
+        else:
+            logger.info("Step 1 completed successfully")
+
+        success = success and step1_success
+
+    # Run Step 2: Allele Analysis and Scoring
+    if run_step2:
+        logger.info("Starting Step 2: Allele Analysis and Scoring")
+        step2_success, incomplete_files = run_snakemake_api(
+            STEP2_SNAKEFILE,
+            runtime_config_path,
+            args.threads,
+            args.profile,
+            args.dry_run,
+            rerun_incomplete,
+            args.force_all,
+        )
+
+        if not step2_success:
+            if incomplete_files:
+                logger.error(
+                    f"Step 2 failed with incomplete files: {', '.join(incomplete_files)}"
+                )
+            else:
+                logger.error("Step 2 failed")
+
+            success = False
+        else:
+            logger.info("Step 2 completed successfully")
+
+        success = success and step2_success
+
+    # Final status
+    if success:
+        logger.info("AlleleFlux workflow completed successfully")
+    else:
+        logger.error("AlleleFlux workflow completed with errors")
         sys.exit(1)
-
-    # Write runtime config file
-    runtime_config_path = write_runtime_config(
-        updated_config, updated_config.get("output", {}).get("root_dir")
-    )
-    logger.info(f"Created runtime configuration file: {runtime_config_path}")
-
-    # Workflow 1: Step 1 (Preprocessing)
-    logger.info("=" * 80)
-    logger.info("Starting Step 1: Sample Profiling and Eligibility Table Generation")
-    logger.info("=" * 80)
-
-    if not run_snakemake(
-        "smk_workflow/step1.smk",
-        runtime_config_path,
-        args.threads,
-        args.profile,
-        args.dry_run,
-    ):
-        logger.error("Step 1 failed! Aborting.")
-        sys.exit(1)
-
-    # Workflow 2: Step 2 (Allele Analysis)
-    logger.info("=" * 80)
-    logger.info("Starting Step 2: Allele Analysis and Scoring")
-    logger.info("=" * 80)
-
-    if not run_snakemake(
-        "smk_workflow/step2.smk",
-        runtime_config_path,
-        args.threads,
-        args.profile,
-        args.dry_run,
-    ):
-        logger.error("Step 2 failed!")
-        sys.exit(1)
-
-    logger.info("Pipeline completed successfully!")
-    logger.info(f"Runtime configuration preserved at: {runtime_config_path}")
 
 
 if __name__ == "__main__":
