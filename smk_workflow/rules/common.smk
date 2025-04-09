@@ -41,14 +41,51 @@ wildcard_constraints:
     taxon="(domain|phylum|class|order|family|genus|species)",
     test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm)",
     group_str=group_str_regex,
+    
+# Function to get sample information from metadata file
+def get_sample_info():
+    """
+    Helper function to retrieve sample information.
 
+    This function is responsible for loading and parsing sample metadata,
+    typically from a configuration file or input source. It should return
+    information necessary for processing samples in the workflow.
+
+    Returns:
+        dict or pandas.DataFrame: Sample information containing metadata
+        required for the pipeline execution.
+    """
+    metadata_path = config["input"]["metadata_path"]
+    
+    if not metadata_path:
+        raise ValueError("metadata_path must be provided in the config file")
+    
+    # Read metadata file
+    metadata_df = pd.read_csv(metadata_path, sep="\t")
+    
+    # Validate required columns
+    required_cols = ["sample_id", "bam_path"]
+    missing_cols = [col for col in required_cols if col not in metadata_df.columns]
+    if missing_cols:
+        raise ValueError(f"Metadata file is missing required columns: {', '.join(missing_cols)}")
+    
+    # Create mapping from sample ID to BAM path
+    sample_to_bam_map = dict(zip(metadata_df["sample_id"], metadata_df["bam_path"]))
+    sample_ids = list(metadata_df["sample_id"])
+    
+    # Validate that all BAM files exist
+    for sample_id, bam_path in sample_to_bam_map.items():
+        if not os.path.exists(bam_path):
+            raise ValueError(f"BAM file not found for sample {sample_id}: {bam_path}")
+    
+    return sample_ids, sample_to_bam_map
 
 def get_mags_by_eligibility(timepoints, groups, eligibility_type):
     """
     Read the eligibility file for a given timepoint-group combination and return a list of MAG IDs.
 
     Parameters:
-timepoints (str): The timepoints label
+        timepoints (str): The timepoints label
         groups (str): The groups label
         eligibility_type (str or None):
             - "two_sample_unpaired": only return MAG IDs where unpaired_test_eligible is True.

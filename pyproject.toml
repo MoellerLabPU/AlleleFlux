@@ -35,6 +35,9 @@ alleleflux-single-sample = "alleleflux.statistics.single_sample:main"
 alleleflux-two-sample-paired = "alleleflux.statistics.two_sample_paired:main"
 alleleflux-two-sample-unpaired = "alleleflux.statistics.two_sample_unpaired:main"
 
+# Accessory scripts
+alleleflux-create-mag-mapping = "alleleflux.accessory.create_mag_mapping:main"
+
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"
-"Bug Tracker" = "https://github.com/MoellerLabPU/AlleleFlux/issues" 
+"Bug Tracker" = "https://github.com/MoellerLabPU/AlleleFlux/issues"

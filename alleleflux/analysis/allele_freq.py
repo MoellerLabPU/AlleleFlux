@@ -571,6 +571,14 @@ def main():
         metavar="filepath",
     )
     parser.add_argument(
+        "--mag_mapping_file",
+        help="Path to tab-separated file mapping contig names to MAG IDs. "
+        "Must have columns 'contig_id' and 'mag_id'.",
+        type=str,
+        required=True,
+        metavar="filepath",
+    )
+    parser.add_argument(
         "--breath_threshold",
         help="Breath threshold to use for MAGs.",
         type=float,
@@ -586,7 +594,8 @@ def main():
     )
 
     parser.add_argument(
-        "--disable_filtering",
+        "--disable_zero_diff_filtering",
+        dest="disable_filtering",
         help="""
         For single: Do not remove positions where all nucleotide frequencies are constant across all samples.
         For longitudinal: Do not remove positions where change in allele frequency 
@@ -613,8 +622,9 @@ def main():
 
     args = parser.parse_args()
     start_time = time.time()
-    # Calculate MAG sizes
-    mag_size_dict = calculate_mag_sizes(args.fasta)
+
+    # Calculate MAG sizes using the mapping if provided
+    mag_size_dict = calculate_mag_sizes(args.fasta, args.mag_mapping_file)
     mag_id = args.magID
 
     # Load per-MAG metadata file and get required data structures

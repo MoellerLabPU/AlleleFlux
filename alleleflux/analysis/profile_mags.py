@@ -14,12 +14,15 @@ from Bio import SeqIO
 from intervaltree import IntervalTree
 from tqdm import tqdm
 
+from alleleflux.utilities.utilities import extract_mag_id, load_mag_mapping
+
 # Global variables for BAM and FASTA files in worker processes
 bamfile = None
 reference_fasta = None
+mag_mapping = None
 
 
-def init_worker(bam_path, fasta_path):
+def init_worker(bam_path, fasta_path, mapping=None):
     """
     Initializes worker process by loading BAM and FASTA files.
 
@@ -29,11 +32,12 @@ def init_worker(bam_path, fasta_path):
     Parameters:
     bam_path (str): The file path to the BAM file.
     fasta_path (str): The file path to the reference FASTA file.
+    mapping (dict, optional): Dictionary mapping contig IDs to MAG IDs.
     """
-    global bamfile
-    global reference_fasta
+    global bamfile, reference_fasta, mag_mapping
     bamfile = pysam.AlignmentFile(bam_path, "rb")
     reference_fasta = pysam.FastaFile(fasta_path)
+    mag_mapping = mapping
 
 
 def process_contig(contig_name):
@@ -201,22 +205,6 @@ def extract_contigID(gene_id):
     return contig
 
 
-def extract_mag_name(contig_name):
-    """
-    Extracts the MAG (Metagenome-Assembled Genome) name from a given contig name.
-
-    Parameters:
-        contig_name (str): The name of the contig file, expected to end with ".fa".
-            Example: 'SLG1007_DASTool_bins_35.fa_k141_82760'
-
-    Returns:
-        str: The extracted MAG name, which is the part of the contig name before ".fa".
-            Example: 'SLG1007_DASTool_bins_35'
-    """
-    mag_name = contig_name.split(".fa")[0]
-    return mag_name
-
-
 def create_intervalTree(genes_df):
     """
     Creates an IntervalTree for the genes dataframe.
@@ -349,6 +337,15 @@ def main():
     )
 
     parser.add_argument(
+        "--mag_mapping_file",
+        help="Path to tab-separated file mapping contig names to MAG IDs. "
+        "Must have columns 'contig_name' and 'mag_id'.",
+        type=str,
+        required=True,
+        metavar="filepath",
+    )
+
+    parser.add_argument(
         "--cpus",
         help=f"Number of processors to use.",
         default=mp.cpu_count(),
@@ -362,6 +359,14 @@ def main():
         type=str,
         required=True,
         metavar="filepath",
+    )
+
+    parser.add_argument(
+        "--sampleID",
+        help="Sample identifier to use (overrides automatic extraction from BAM filename)",
+        type=str,
+        required=False,
+        metavar="string",
     )
 
     args = parser.parse_args()
@@ -379,6 +384,9 @@ def main():
         logging.info("FASTA file index not found. Indexing it now..")
         pysam.faidx(args.fasta_path, "-o", args.fasta_path + ".fai")
 
+    # Load MAG mapping if provided
+    mag_mapping_dict = load_mag_mapping(args.mag_mapping_file)
+
     bamfile_main = pysam.AlignmentFile(args.bam_path, "rb")
     contig_list = bamfile_main.references
     # contig_list = [
@@ -393,7 +401,7 @@ def main():
     # Create a mapping from MAG names to their contigs
     mag_contigs = defaultdict(list)
     for contig in contig_list:
-        mag_name = extract_mag_name(contig)
+        mag_name = extract_mag_id(contig, mag_mapping_dict)
         mag_contigs[mag_name].append(contig)
 
     # Load genes data once
@@ -403,7 +411,7 @@ def main():
     with mp.Pool(
         processes=num_processes,
         initializer=init_worker,
-        initargs=(args.bam_path, args.fasta_path),
+        initargs=(args.bam_path, args.fasta_path, mag_mapping_dict),
     ) as pool:
 
         # Process each MAG with a progress bar
@@ -426,7 +434,10 @@ def main():
 
             # Filter genes_df for this MAG
             genes_df_mag = genes_df[
-                genes_df["contig"].apply(extract_mag_name) == mag_name
+                genes_df["contig"].apply(
+                    lambda contig: extract_mag_id(contig, mag_mapping)
+                )
+                == mag_name
             ]
 
             # Create IntervalTree for this MAG
@@ -437,7 +448,8 @@ def main():
                 mapped_positions_df = map_positions_to_genes(df_mag, contig_trees)
 
                 # Write data to file
-                sampleID = Path(args.bam_path).stem
+                # Use provided sampleID if available, otherwise extract from BAM filename
+                sampleID = args.sampleID if args.sampleID else Path(args.bam_path).stem
                 outDir = os.path.join(args.output_dir, sampleID)
                 os.makedirs(outDir, exist_ok=True)
                 outPath = os.path.join(outDir, f"{sampleID}_{mag_name}_profiled.tsv.gz")

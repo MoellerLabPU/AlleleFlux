@@ -1,0 +1,9 @@
+sample_id	bam_path
+S1	/path/to/bamfiles/S1.bam
+S2	/path/to/bamfiles/sample2.bam
+S3	/path/to/bamfiles/patient3_timepoint1.bam
+S4	/path/to/bamfiles/S4_replicate2.bam
+S5	/path/to/bamfiles/S5.sorted.bam
+S6	/path/to/bamfiles/S6_aligned.bam
+S7	/path/to/bamfiles/S7_final.bam
+S8	/path/to/bamfiles/S8_processed.bam

@@ -13,30 +13,93 @@ logging.basicConfig(
 )
 
 
-def calculate_mag_sizes(fasta_file):
+def calculate_mag_sizes(fasta_file, mag_mapping_file=None):
     """
     Calculate the sizes of Metagenome-Assembled Genomes (MAGs) from a FASTA file.
 
     This function parses a given FASTA file and calculates the total size of each MAG
-    by summing the lengths of its contigs. The MAG ID is extracted from the contig ID,
-    which is assumed to be the part of the contig ID before '.fa'.
+    by summing the lengths of its contigs. The MAG ID is determined either from a mapping file
+    or by extracting from the contig ID (default: splits by '.fa').
 
     Parameters:
         fasta_file (str): Path to the input FASTA file containing contig sequences.
+        mag_mapping_file (str, optional): Path to a file mapping contigs to MAG IDs.
 
     Returns:
         dict: A dictionary where keys are MAG IDs and values are the total sizes of the MAGs.
     """
     logging.info("Parsing FASTA file to calculate MAG size.")
+
+    # Load MAG mapping if provided
+    mag_mapping = load_mag_mapping(mag_mapping_file)
+
     mag_sizes = defaultdict(int)
     for record in SeqIO.parse(fasta_file, "fasta"):
         contig_id = record.id
-        # Extract MAG ID from contig ID
-        # The MAG ID is everything before '.fa' in the contig ID
-        mag_id = contig_id.split(".fa")[0]
+        # Extract MAG ID from contig ID using mapping or default method
+        mag_id = extract_mag_id(contig_id, mag_mapping)
         # Accumulate the length of the contig to the MAG's total size
         mag_sizes[mag_id] += len(record.seq)
+
+    logging.info(f"Calculated sizes for {len(mag_sizes)} MAGs")
     return mag_sizes
+
+
+def load_mag_mapping(mapping_file):
+    """
+    Load a MAG-to-contig mapping file.
+
+    Parameters:
+        mapping_file (str): Path to the mapping file (tab-separated values with columns: mag_id, contig_id).
+
+    Returns:
+        dict: A dictionary where keys are contig names and values are MAG IDs.
+
+    Raises:
+        ValueError: If the mapping file is not provided, missing required columns, or cannot be read.
+    """
+    if not mapping_file:
+        raise ValueError(
+            "MAG mapping file is required. Please provide a valid path to a MAG-to-contig mapping file."
+        )
+
+    logging.info(f"Loading MAG-to-contig mapping from: {mapping_file}")
+    df = pd.read_csv(mapping_file, sep="\t")
+
+    required_columns = {"mag_id", "contig_id"}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise ValueError(
+            f"Missing columns in MAG mapping file: {missing_columns}. "
+            f"Required columns are: {required_columns}"
+        )
+
+    # Create a dictionary mapping contig names to MAG IDs
+    mapping = dict(zip(df["contig_id"], df["mag_id"]))
+    logging.info(f"Loaded mapping for {len(mapping)} contigs")
+    return mapping
+
+
+def extract_mag_id(contig_id, mag_mapping):
+    """
+    Extract MAG ID from a contig ID using the provided mapping.
+
+    Parameters:
+        contig_id (str): The contig ID from which to extract the MAG ID.
+        mag_mapping (dict): Dictionary mapping contig IDs to MAG IDs.
+
+    Returns:
+        str: The mapped MAG ID.
+
+    Raises:
+        KeyError: If the contig ID is not found in the mapping.
+    """
+    if contig_id not in mag_mapping:
+        raise KeyError(
+            f"Contig ID '{contig_id}' not found in the MAG mapping. Please ensure your mapping file contains all contigs."
+        )
+
+    return mag_mapping[contig_id]
 
 
 def load_mag_metadata_file(

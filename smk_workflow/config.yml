@@ -5,17 +5,19 @@
 # ------------
 # Path specifications for all required input data
 input:
-  bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files
+  bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files (used for backward compatibility)
   fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
   prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
-  metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"  # Sample metadata file
-  # metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"  # Sample metadata file
+  # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
+  # metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"
+  metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2/longitudinal/profiles/metadata_with_bam_small.tsv"
   gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
+  mag_mapping_path: "/home/suppal/AlleleFlux/dependency_lisences.tsv"      # Path to MAG-to-contig mapping file with columns: mag_id, contig_id
 
 # Output Directory
 # --------------------
 output:
-  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/trouble_mags"  # Root directory for all output files
+  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_profile_new"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"

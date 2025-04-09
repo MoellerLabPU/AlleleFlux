@@ -28,6 +28,7 @@ rule analyze_alleles:
                 )
             ),
         ),
+        mag_mapping_file=config["input"].get("mag_mapping_path", ""),
     params:
         outDir=os.path.join(
             OUTDIR,
@@ -42,7 +43,8 @@ rule analyze_alleles:
             else ""
         ),
         # Use the global DATA_TYPE variable
-        data_type=DATA_TYPE,
+        data_type=DATA_TYPE,        
+
     threads: config["resources"]["cpus"]["analyze_alleles"]
     resources:
         mem_mb=config["resources"]["memory"]["analyze_alleles"],
@@ -57,7 +59,8 @@ rule analyze_alleles:
             --data_type {params.data_type} \
             --cpus {threads} \
             --output_dir {params.outDir} \
-            {params.disable_zero_diff_filtering}
+            {params.disable_zero_diff_filtering} \
+            --mag_mapping_file {input.mag_mapping_file}
             """
 
 

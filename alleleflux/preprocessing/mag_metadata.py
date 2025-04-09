@@ -10,9 +10,9 @@ def find_mag_files(root_dir):
     """
     Finds and organizes MAG (Metagenome-Assembled Genome) files in a given root directory.
 
-    This function iterates over subdirectories in the specified root directory, looking for
-    subdirectories that end with '.sorted'. Within these subdirectories, it searches for files
-    that match the pattern '{subDirectoryName}_{MAG_ID}_profiled.tsv.gz'. It extracts the sample
+    This function iterates over subdirectories in the specified root directory. Each subdirectory
+    is treated as a sample directory. Within these subdirectories, it searches for files
+    that match the pattern '{sample_id}_{MAG_ID}_profiled.tsv.gz'. It extracts the sample
     ID from the subdirectory name and the MAG ID from the filename, and stores this information
     in a dictionary.
 
@@ -31,8 +31,8 @@ def find_mag_files(root_dir):
         >>> mag_files = find_mag_files("/path/to/root_dir")
         >>> print(mag_files)
         {
-            'MAG1': [{'sample_id': 'sample1', 'file_path': '/path/to/root_dir/sample1.sorted/sample1_MAG1_profiled.tsv.gz'}],
-            'MAG2': [{'sample_id': 'sample2', 'file_path': '/path/to/root_dir/sample2.sorted/sample2_MAG2_profiled.tsv.gz'}]
+            'MAG1': [{'sample_id': 'sample1', 'file_path': '/path/to/root_dir/sample1/sample1_MAG1_profiled.tsv.gz'}],
+            'MAG2': [{'sample_id': 'sample2', 'file_path': '/path/to/root_dir/sample2/sample2_MAG2_profiled.tsv.gz'}]
         }
     """
     mag_dict = defaultdict(list)
@@ -41,37 +41,28 @@ def find_mag_files(root_dir):
     for subdir_name in os.listdir(root_dir):
         subdir_path = os.path.join(root_dir, subdir_name)
         if os.path.isdir(subdir_path):
-            # Check if subdirectory name ends with '.sorted'
-            if subdir_name.endswith(".sorted"):
-                logging.info(f"Looking for MAGs in {subdir_name}")
-                # Extract sample ID from subdirectory name
-                sample_id = subdir_name.replace(".sorted", "")
-                # Iterate over files in the subdirectory
-                for filename in os.listdir(subdir_path):
-                    if filename.endswith("_profiled.tsv.gz"):
-
-                        # Extract MAG ID from filename
-                        # Filename format: {subDirectoryName}_{MAG_ID}_profiled.tsv.gz
-                        # We need to remove {subDirectoryName}_ and _profiled.tsv.gz
-                        prefix = subdir_name + "_"
-                        suffix = "_profiled.tsv.gz"
-                        if filename.startswith(prefix) and filename.endswith(suffix):
-                            mag_id = filename[len(prefix) : -len(suffix)]
-                            # Store sample ID and file path in mag_dict under mag_id
-                            file_path = os.path.abspath(
-                                os.path.join(subdir_path, filename)
-                            )
-                            mag_dict[mag_id].append(
-                                {"sample_id": sample_id, "file_path": file_path}
-                            )
-                        else:
-                            logging.info(
-                                f"Filename does not match expected format: {filename}. Skipped."
-                            )
-            else:
-                logging.info(
-                    f"Subdirectory does not match expected format (sampleID.sorted): {subdir_name}. Skipped."
-                )
+            logging.info(f"Looking for MAGs in {subdir_name}")
+            # The subdirectory name is the sample ID
+            sample_id = subdir_name
+            # Iterate over files in the subdirectory
+            for filename in os.listdir(subdir_path):
+                if filename.endswith("_profiled.tsv.gz"):
+                    # Extract MAG ID from filename
+                    # Filename format: {sample_id}_{MAG_ID}_profiled.tsv.gz
+                    # We need to remove {sample_id}_ and _profiled.tsv.gz
+                    prefix = sample_id + "_"
+                    suffix = "_profiled.tsv.gz"
+                    if filename.startswith(prefix) and filename.endswith(suffix):
+                        mag_id = filename[len(prefix) : -len(suffix)]
+                        # Store sample ID and file path in mag_dict under mag_id
+                        file_path = os.path.abspath(os.path.join(subdir_path, filename))
+                        mag_dict[mag_id].append(
+                            {"sample_id": sample_id, "file_path": file_path}
+                        )
+                    else:
+                        logging.info(
+                            f"Filename does not match expected format: {filename}. Skipped."
+                        )
     return mag_dict
 
 
@@ -98,7 +89,7 @@ def merge_metadata(mag_dict, metadata_file, timepoints, groups, data_type):
     )
 
     # Check for required columns except replicate (we'll handle it specially)
-    required_cols = ["sample_id", "subjectID", "group"]
+    required_cols = ["sample_id", "subjectID", "group", "bam_path"]
     if data_type == "longitudinal" or (data_type == "single" and timepoints):
         required_cols.append("time")
 
@@ -220,7 +211,7 @@ def main():
     parser.add_argument(
         "--metadata",
         type=str,
-        help="Path to the metadata TSV file to merge with the main data. Should contain columns 'sample_id', 'subjectID', 'replicate', 'group' and optionally 'time'.",
+        help="Path to the metadata TSV file to merge with the main data. Should contain columns 'sample_id', 'subjectID', 'bam_path', 'group' and optionally 'time' and 'replicate'.",
         required=True,
     )
 

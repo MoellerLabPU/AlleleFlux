@@ -7,51 +7,45 @@ to be used by step 2.
 # Include modular workflow components
 include: "rules/common.smk"
 
-samples = [
-    os.path.basename(bam).split(".")[0]
-    for bam in glob(os.path.join(config["input"]["bam_dir"], "*.sorted.bam"))
-]
+# Get sample information from metadata file
+samples, sample_to_bam_map = get_sample_info()
 
 localrules:
     all,
 
 rule all:
     input:
-        expand(os.path.join(OUTDIR, "profiles", "{sample}.sorted"), sample=samples),
+        expand(os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples),
         expand(
             os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}.tsv"),
             timepoints=timepoints_labels,
             groups=groups_labels,
         ),
 
-#####################################
-# Step 1: Profile Samples
-#####################################
-
 rule profile:
     input:
-        bam=os.path.join(config["input"]["bam_dir"], "{sample}.sorted.bam"),
+        bam=lambda wildcards: sample_to_bam_map[wildcards.sample],
         fasta=config["input"]["fasta_path"],
         prodigal=config["input"]["prodigal_path"],
+        mag_mapping=mag_mapping_path,
     output:
-        sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}.sorted")),
+        sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
     threads: config["resources"]["cpus"]["profile"]
     resources:
         mem_mb=config["resources"]["memory"]["profile"],
         time=config["resources"]["time"]["profile"],
     params:
         outDir=os.path.join(OUTDIR, "profiles"),
-    benchmark:
-        os.path.join(
-            OUTDIR,
-            "benchmarks",
-            "profile_{sample}.tsv",
-        )
     shell:
         """
         alleleflux-profile \
-        --bam_path {input.bam} --fasta_path {input.fasta} --prodigal_fasta {input.prodigal} \
-        --cpus {threads} --output_dir {params.outDir}
+            --bam_path {input.bam} \
+            --fasta_path {input.fasta} \
+            --prodigal_fasta {input.prodigal} \
+            --mag_mapping_file {input.mag_mapping} \
+            --cpus {threads} \
+            --output_dir {params.outDir} \
+            --sampleID {wildcards.sample}
         """
 
 rule generate_metadata:
@@ -59,7 +53,7 @@ rule generate_metadata:
         metadata=config["input"]["metadata_path"],
         # This ensures that generate_metadata is run after all samples are profiled
         sampleDirs=expand(
-            os.path.join(OUTDIR, "profiles", "{sample}.sorted"), sample=samples
+            os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples
         ),
     output:
         outDir=directory(
