@@ -55,6 +55,7 @@ rule generate_metadata:
         sampleDirs=expand(
             os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples
         ),
+        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         outDir=directory(
             os.path.join(
@@ -76,7 +77,8 @@ rule generate_metadata:
             --outDir {output.outDir} \
             {params.group_args} \
             --data_type {params.data_type} \
-            {params.timepoint_args}
+            {params.timepoint_args} \
+            --mag_mapping_file {input.mag_mapping}
         """
 
 rule qc:

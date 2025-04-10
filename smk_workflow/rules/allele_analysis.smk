@@ -28,7 +28,7 @@ rule analyze_alleles:
                 )
             ),
         ),
-        mag_mapping_file=config["input"].get("mag_mapping_path", ""),
+        mag_mapping=config["input"]["mag_mapping_path"],
     params:
         outDir=os.path.join(
             OUTDIR,

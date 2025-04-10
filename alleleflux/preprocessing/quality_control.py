@@ -458,12 +458,20 @@ def main():
         choices=["single", "longitudinal"],
         default="longitudinal",
     )
+    parser.add_argument(
+        "--mag_mapping_file",
+        help="Path to tab-separated file mapping contig names to MAG IDs. "
+        "Must have columns 'contig_name' and 'mag_id'.",
+        type=str,
+        required=True,
+        metavar="filepath",
+    )
 
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    mag_size_dict = calculate_mag_sizes(args.fasta)
+    mag_size_dict = calculate_mag_sizes(args.fasta, args.mag_mapping_file)
 
     metadata_files = glob(os.path.join(args.rootDir, "*_metadata.tsv"))
     if not metadata_files:

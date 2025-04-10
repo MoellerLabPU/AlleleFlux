@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 
-def calculate_mag_sizes(fasta_file, mag_mapping_file=None):
+def calculate_mag_sizes(fasta_file, mag_mapping_file):
     """
     Calculate the sizes of Metagenome-Assembled Genomes (MAGs) from a FASTA file.
 
@@ -23,7 +23,7 @@ def calculate_mag_sizes(fasta_file, mag_mapping_file=None):
 
     Parameters:
         fasta_file (str): Path to the input FASTA file containing contig sequences.
-        mag_mapping_file (str, optional): Path to a file mapping contigs to MAG IDs.
+        mag_mapping_file (str): Path to a file mapping contigs to MAG IDs.
 
     Returns:
         dict: A dictionary where keys are MAG IDs and values are the total sizes of the MAGs.
