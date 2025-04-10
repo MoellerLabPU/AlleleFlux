@@ -19,7 +19,6 @@ from alleleflux.utilities.utilities import extract_mag_id, load_mag_mapping
 # Global variables for BAM and FASTA files in worker processes
 bamfile = None
 reference_fasta = None
-mag_mapping = None
 
 
 def init_worker(bam_path, fasta_path, mapping=None):
@@ -34,10 +33,9 @@ def init_worker(bam_path, fasta_path, mapping=None):
     fasta_path (str): The file path to the reference FASTA file.
     mapping (dict, optional): Dictionary mapping contig IDs to MAG IDs.
     """
-    global bamfile, reference_fasta, mag_mapping
+    global bamfile, reference_fasta
     bamfile = pysam.AlignmentFile(bam_path, "rb")
     reference_fasta = pysam.FastaFile(fasta_path)
-    mag_mapping = mapping
 
 
 def process_contig(contig_name):
@@ -79,6 +77,10 @@ def process_contig(contig_name):
 
         pos = pileupcolumn.reference_pos  # 0-based position
         ref_name = pileupcolumn.reference_name  # Should be the same as contig_name
+
+        # Check if the reference name matches the contig name
+        if ref_name != contig_name:
+            raise ValueError(f"Contig name mismatch: {contig_name} vs {ref_name}")
 
         # Fetch the reference base at this position
         if ref_name not in reference_fasta.references:
@@ -384,7 +386,7 @@ def main():
         logging.info("FASTA file index not found. Indexing it now..")
         pysam.faidx(args.fasta_path, "-o", args.fasta_path + ".fai")
 
-    # Load MAG mapping if provided
+    # Load MAG mappings
     mag_mapping_dict = load_mag_mapping(args.mag_mapping_file)
 
     bamfile_main = pysam.AlignmentFile(args.bam_path, "rb")
@@ -435,7 +437,7 @@ def main():
             # Filter genes_df for this MAG
             genes_df_mag = genes_df[
                 genes_df["contig"].apply(
-                    lambda contig: extract_mag_id(contig, mag_mapping)
+                    lambda contig: extract_mag_id(contig, mag_mapping_dict)
                 )
                 == mag_name
             ]

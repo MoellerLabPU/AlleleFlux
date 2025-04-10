@@ -27,7 +27,7 @@ rule profile:
         bam=lambda wildcards: sample_to_bam_map[wildcards.sample],
         fasta=config["input"]["fasta_path"],
         prodigal=config["input"]["prodigal_path"],
-        mag_mapping=mag_mapping_path,
+        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
     threads: config["resources"]["cpus"]["profile"]

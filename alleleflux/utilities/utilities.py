@@ -76,7 +76,7 @@ def load_mag_mapping(mapping_file):
 
     # Create a dictionary mapping contig names to MAG IDs
     mapping = dict(zip(df["contig_id"], df["mag_id"]))
-    logging.info(f"Loaded mapping for {len(mapping)} contigs")
+    logging.info(f"Loaded mapping for {len(mapping):,} contigs")
     return mapping
 
 
@@ -93,7 +93,13 @@ def extract_mag_id(contig_id, mag_mapping):
 
     Raises:
         KeyError: If the contig ID is not found in the mapping.
+        TypeError: If mag_mapping is None.
     """
+    if mag_mapping is None:
+        raise TypeError(
+            "mag_mapping cannot be None. Check if the mapping was properly initialized."
+        )
+
     if contig_id not in mag_mapping:
         raise KeyError(
             f"Contig ID '{contig_id}' not found in the MAG mapping. Please ensure your mapping file contains all contigs."
