@@ -30,7 +30,9 @@ def find_bam_path(sample_id, bam_dir, extension):
         logging.info(f"Found matche: {matches}")
         return matches[0]
     elif len(matches) >= 1:
-        raise ValueError("More than one match identified.")
+        raise ValueError(
+            f"More than one match identified. {matches} found for {sample_id} in {bam_dir}. Please specify a more precise sample_id or check the directory contents."
+        )
 
 
 def main():
