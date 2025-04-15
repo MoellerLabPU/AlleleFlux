@@ -290,12 +290,12 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     allele_changes = pd.concat(results, ignore_index=True)
 
     # Save the allele frequency changes
-    # allele_changes.to_csv(
-    #     os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.tsv.gz"),
-    #     sep="\t",
-    #     index=False,
-    #     compression="gzip",
-    # )
+    allele_changes.to_csv(
+        os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.tsv.gz"),
+        sep="\t",
+        index=False,
+        compression="gzip",
+    )
 
     logging.info(
         f"Allele frequency changes saved to {output_dir}/{mag_id}_allele_frequency_changes.tsv.gz"
@@ -497,7 +497,7 @@ def process_single_data(data_list, output_dir, mag_id, disable_filtering):
 
     output_fpath = os.path.join(output_dir, f"{mag_id}_allele_frequency_single.tsv.gz")
     logging.info(f"Writing allele frequencies (single data) to {output_fpath}")
-    # allele_df.to_csv(output_fpath, sep="\t", index=False, compression="gzip")
+    allele_df.to_csv(output_fpath, sep="\t", index=False, compression="gzip")
 
     if not disable_filtering:
         logging.info("Filtering constant allele frequency positions (single data).")
@@ -522,7 +522,7 @@ def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
         output_dir, f"{mag_id}_allele_frequency_longitudnal.tsv.gz"
     )
     logging.info(f"Writing allele frequencies (longitudinal data) to {output_fpath}")
-    # save_allele_frequencies(data_dict, output_dir, mag_id)
+    save_allele_frequencies(data_dict, output_dir, mag_id)
 
     allele_changes = calculate_allele_frequency_changes(data_dict, output_dir, mag_id)
 

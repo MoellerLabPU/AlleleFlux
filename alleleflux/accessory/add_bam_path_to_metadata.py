@@ -42,7 +42,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Add BAM file paths to metadata table."
     )
-    parser.add_argument("--metadata", help="Input metadata TSV file")
+    parser.add_argument(
+        "--metadata", help="Input metadata TSV file, with 'sample_id' column"
+    )
     parser.add_argument("--output", help="Output metadata TSV file with BAM paths")
     parser.add_argument(
         "--bam-dir", default=".", help="Directory to search for BAM files"

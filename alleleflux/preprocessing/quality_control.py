@@ -196,7 +196,7 @@ def check_timepoints(df, data_type):
     if not valid_subjects.empty:
         logging.info(f"Subjects with 2 valid timepoints: {len(valid_subjects)}")
     else:
-        logging.warning("No subjects have the MAG in 2 timepoints")
+        logging.warning("No subjects have valid MAG in 2 timepoints")
 
     return df
 

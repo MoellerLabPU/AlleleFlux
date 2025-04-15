@@ -55,7 +55,6 @@ rule generate_metadata:
         sampleDirs=expand(
             os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples
         ),
-        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         outDir=directory(
             os.path.join(
@@ -77,8 +76,7 @@ rule generate_metadata:
             --outDir {output.outDir} \
             {params.group_args} \
             --data_type {params.data_type} \
-            {params.timepoint_args} \
-            --mag_mapping_file {input.mag_mapping}
+            {params.timepoint_args}
         """
 
 rule qc:
@@ -87,6 +85,7 @@ rule qc:
             OUTDIR, "inputMetadata", "inputMetadata_{timepoints}-{groups}"
         ),
         fasta=config["input"]["fasta_path"],
+        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         outDir=directory(os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}")),
     params:
@@ -103,7 +102,8 @@ rule qc:
             --breadth_threshold {params.breadth_threshold} \
             --cpus {threads} \
             --output_dir {output.outDir} \
-            --data_type {params.data_type}
+            --data_type {params.data_type} \
+            --mag_mapping_file {input.mag_mapping}
         """
 
 rule eligibility_table:
