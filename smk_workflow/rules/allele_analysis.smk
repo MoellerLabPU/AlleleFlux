@@ -10,6 +10,7 @@ rule analyze_alleles:
             OUTDIR,
             "eligibility_table_{timepoints}-{groups}.tsv",
         ),
+        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         allele_freq=os.path.join(
             OUTDIR,
@@ -28,7 +29,6 @@ rule analyze_alleles:
                 )
             ),
         ),
-        mag_mapping=config["input"]["mag_mapping_path"],
     params:
         outDir=os.path.join(
             OUTDIR,
@@ -60,7 +60,7 @@ rule analyze_alleles:
             --cpus {threads} \
             --output_dir {params.outDir} \
             {params.disable_zero_diff_filtering} \
-            --mag_mapping_file {input.mag_mapping_file}
+            --mag_mapping_file {input.mag_mapping}
             """
 
 
