@@ -154,10 +154,7 @@ def compute_p_values(mag_fPath, mag_id, gene_fPath):
                 gene_total_sites_col not in gene_df.columns
                 or gene_significant_sites_col not in gene_df.columns
             ):
-                logging.warning(
-                    f"Missing columns for suffix '{suffix}' in gene file. Skipping."
-                )
-                continue
+                raise ValueError(f"Missing columns for suffix '{suffix}' in gene file.")
 
             # Convert from percent to fraction
             mag_score = mag_df.iloc[0][mag_score_col] / 100

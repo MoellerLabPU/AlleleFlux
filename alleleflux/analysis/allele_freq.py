@@ -136,7 +136,7 @@ def save_allele_frequencies(data_dict, output_dir, mag_id):
     os.makedirs(output_dir, exist_ok=True)
     logging.info(f"Saving nucleotide frequencies for MAG {mag_id} to {output_dir}")
     mag_df.to_csv(
-        os.path.join(output_dir, f"{mag_id}_allele_frequency_longitudnal.tsv.gz"),
+        os.path.join(output_dir, f"{mag_id}_allele_frequency_longitudinal.tsv.gz"),
         index=False,
         sep="\t",
         compression="gzip",
@@ -519,7 +519,7 @@ def process_longitudinal_data(data_list, output_dir, mag_id, disable_filtering):
     gc.collect()
 
     output_fpath = os.path.join(
-        output_dir, f"{mag_id}_allele_frequency_longitudnal.tsv.gz"
+        output_dir, f"{mag_id}_allele_frequency_longitudinal.tsv.gz"
     )
     logging.info(f"Writing allele frequencies (longitudinal data) to {output_fpath}")
     save_allele_frequencies(data_dict, output_dir, mag_id)

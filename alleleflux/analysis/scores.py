@@ -5,61 +5,13 @@ import os
 
 import pandas as pd
 
-from alleleflux.utilities.utilities import calculate_score, extract_relevant_columns
-
-
-def read_gtdb(gtdb_fpath):
-    gtdb_df = pd.read_csv(
-        gtdb_fpath,
-        sep="\t",
-        usecols=["user_genome", "classification"],
-    )
-    gtdb_df = gtdb_df.rename(columns={"user_genome": "MAG_ID"})
-    taxon_data = gtdb_df["classification"].apply(parse_classification)
-    taxon_df = pd.DataFrame(taxon_data.tolist())
-    gtdb_df = pd.concat([gtdb_df, taxon_df], axis=1)
-    gtdb_df = gtdb_df.drop(columns=["classification"])
-    return gtdb_df
-
-
-def parse_classification(classification_str):
-    """
-    Parses a taxonomic classification string and returns a dictionary with taxonomic ranks.
-
-    Parameters:
-        classification_str (str): A semicolon-separated string containing taxonomic classifications
-                                  with prefixes (e.g., "d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria").
-
-    Returns:
-        dict: A dictionary where keys are taxonomic ranks (e.g., "domain", "phylum", "class", etc.)
-              and values are the corresponding names from the classification string. If a rank is
-              not specified in the input string, its value will be "unclassified".
-    """
-    # Define taxonomic ranks and prefixes
-    taxonomic_ranks = [
-        "domain",
-        "phylum",
-        "class",
-        "order",
-        "family",
-        "genus",
-        "species",
-    ]
-    rank_prefixes = ["d__", "p__", "c__", "o__", "f__", "g__", "s__"]
-    # Set all taxonomic ranks to unclassified
-    taxon_dict = {rank: "unclassified" for rank in taxonomic_ranks}
-    taxa = classification_str.split(";")
-    for taxon in taxa:
-        for prefix, rank in zip(rank_prefixes, taxonomic_ranks):
-            if taxon.startswith(prefix):
-                # remove the prefix and get the name
-                name = taxon.replace(prefix, "").strip()
-                if name == "":
-                    name = "unclassified"
-                taxon_dict[rank] = name
-                # Exit the loop to avoid further unnecessary iterations
-                break
-    return taxon_dict
+from alleleflux.utilities.utilities import (
+    calculate_score,
+    extract_mag_id,
+    extract_relevant_columns,
+    load_mag_mapping,
+    read_gtdb,
+)
 
 
 def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05, is_lmm=False):
@@ -182,6 +134,14 @@ def main():
         ],
         default="MAG_ID",
     )
+    parser.add_argument(
+        "--mag_mapping_file",
+        help="Path to tab-separated file mapping contig names to MAG IDs. "
+        "Must have columns 'contig_name' and 'mag_id'.",
+        type=str,
+        required=True,
+        metavar="filepath",
+    )
 
     parser.add_argument(
         "--pValue_threshold",
@@ -216,7 +176,10 @@ def main():
         raise ValueError("Input p-value table is empty.")
 
     if "MAG_ID" not in pValue_table.columns:
-        pValue_table["MAG_ID"] = pValue_table["contig"].str.split(".fa").str[0]
+        mag_mapping_dict = load_mag_mapping(args.mag_mapping_file)
+        for contig in pValue_table["contig"]:
+            pValue_table["MAG_ID"] = extract_mag_id(contig, mag_mapping_dict)
+        # pValue_table["MAG_ID"] = pValue_table["contig"].str.split(".fa").str[0]
 
     logging.info("Merging p-value table with GTDB taxonomy.")
     merged_df = pd.merge(pValue_table, gtdb_df, on="MAG_ID", how="left")

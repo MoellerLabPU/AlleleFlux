@@ -99,13 +99,13 @@ def perform_one_sample_tests(
 
 
 def run_one_sample_tests(args, group, min_sample_num):
-    name_tuple, grouped_df = args
+    name_tuple, df_group = args
     # Initialize p_values with NaN and notes
     p_values = {}
     notes = ""
     num_samples_dict = {}
 
-    num_samples = grouped_df.shape[0]
+    num_samples = df_group.shape[0]
     # Set the number of samples
     num_samples_dict[f"num_samples_{group}"] = num_samples
 
@@ -118,7 +118,7 @@ def run_one_sample_tests(args, group, min_sample_num):
     if num_samples >= min_sample_num:
         for nucleotide in NUCLEOTIDES:
             nuc_col = f"{nucleotide}_diff_mean"
-            data = grouped_df[nuc_col]
+            data = df_group[nuc_col]
             # Check for zero variance and zero mean ie. 0,0,0,0. T-test is NA, and wilcoxon gives an error is this case. P-value is set at 1.
             var = np.var(data, ddof=1)
             mean = np.mean(data)

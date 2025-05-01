@@ -22,6 +22,7 @@ alleleflux-scores = "alleleflux.analysis.scores:main"
 alleleflux-taxa-scores = "alleleflux.analysis.taxa_scores:main"
 alleleflux-gene-scores = "alleleflux.analysis.gene_scores:main"
 alleleflux-outliers = "alleleflux.analysis.outliers_genes:main"
+alleleflux-cmh-scores = "alleleflux.analysis.cmh_scores:main"
 
 # Preprocessing scripts
 alleleflux-metadata = "alleleflux.preprocessing.mag_metadata:main"
@@ -34,9 +35,11 @@ alleleflux-lmm = "alleleflux.statistics.LMM:main"
 alleleflux-single-sample = "alleleflux.statistics.single_sample:main"
 alleleflux-two-sample-paired = "alleleflux.statistics.two_sample_paired:main"
 alleleflux-two-sample-unpaired = "alleleflux.statistics.two_sample_unpaired:main"
+alleleflux-cmh = "alleleflux.statistics.CMH:main"
 
 # Accessory scripts
 alleleflux-create-mag-mapping = "alleleflux.accessory.create_mag_mapping:main"
+alleleflux-add-bam-path = "alleleflux.accessory.add_bam_path_to_metadata:main"
 
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"

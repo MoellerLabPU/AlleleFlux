@@ -105,9 +105,9 @@ rule gene_scores:
             if test_type == "lmm":
                 # LMM has only one test
                 columns.extend([
-                    f'total_sites_per_group_paired_{tests[0]}',
-                    f'significant_sites_per_group_paired_{tests[0]}',
-                    f'score_paired_{tests[0]} (%)'
+                    f'total_sites_per_group_{tests[0]}',
+                    f'significant_sites_per_group_{tests[0]}',
+                    f'score_{tests[0]} (%)'
                 ])
             elif test_type == "single_sample" and group:
                 # Add group name to column headers for single_sample
@@ -215,6 +215,133 @@ rule detect_outlier_genes:
                         f'total_sites_gene_{test}', f'significant_sites_gene_{test}',
                         f'p_value_binomial_{test}', f'p_value_poisson_{test}'
                     ])
+            
+            # Create and save the empty DataFrame
+            os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+            empty_df = pd.DataFrame(columns=columns)
+            empty_df.to_csv(output[0], sep='\t', index=False)
+            logging.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
+        else:
+            # Run the outlier detection
+            shell(
+                """
+                alleleflux-outliers \
+                    --mag_file {input.mag_score} \
+                    --mag_id {wildcards.mag} \
+                    --gene_file {input.gene_scores} \
+                    --out_fPath {output}
+                """
+            )
+
+rule cmh_gene_scores:
+    input:
+        pvalue_table=os.path.join(
+            OUTDIR,
+            "significance_tests",
+            "cmh_{timepoints}-{groups}",
+            "{mag}_cmh.tsv.gz",
+        ),
+    output:
+        combined=os.path.join(
+            OUTDIR,
+            "scores",
+            "processed",
+            "gene_scores_{timepoints}-{groups}",
+            "{mag}_cmh_{focus}_gene_scores_combined.tsv",
+        ),
+        individual=os.path.join(
+            OUTDIR,
+            "scores",
+            "processed",
+            "gene_scores_{timepoints}-{groups}",
+            "{mag}_cmh_{focus}_gene_scores_individual.tsv",
+        ),
+        overlapping=os.path.join(
+            OUTDIR,
+            "scores",
+            "processed",
+            "gene_scores_{timepoints}-{groups}",
+            "{mag}_cmh_{focus}_gene_scores_overlapping.tsv",
+        ),
+    params:
+        prefix="{mag}_cmh_{focus}",
+        pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
+        outDir=os.path.join(
+            OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
+        ),
+    resources:
+        time=config["resources"]["time"]["general"],
+    run:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(asctime)s %(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        # Check if input file exists and has gene IDs
+        if check_for_gene_ids(input.pvalue_table):
+            # Execute the gene scores command
+            shell(
+                """
+                alleleflux-gene-scores \
+                    --pValue_table {input.pvalue_table} \
+                    --pValue_threshold {params.pValue_threshold} \
+                    --output_dir {params.outDir} \
+                    --prefix {params.prefix}
+                """
+            )
+        else:
+            # Create empty output files with appropriate columns for CMH test
+            columns = ['gene_id', 'total_sites_per_group_CMH',
+                      'significant_sites_per_group_CMH', 'score_CMH (%)']
+            
+            # Create empty output files to satisfy workflow dependencies
+            os.makedirs(params.outDir, exist_ok=True)
+            empty_df = pd.DataFrame(columns=columns)
+            empty_df.to_csv(output.combined, sep='\t', index=False)
+            empty_df.to_csv(output.individual, sep='\t', index=False)
+            empty_df.to_csv(output.overlapping, sep='\t', index=False)
+            logging.info(f"No gene IDs found in {input.pvalue_table}. Created empty output files.")
+
+
+rule detect_cmh_outlier_genes:
+    input:
+        mag_score=os.path.join(
+            OUTDIR,
+            "scores",
+            "intermediate",
+            "MAG_scores_{timepoints}-{groups}",
+            "{mag}_score_cmh_{focus}.tsv",
+        ),
+        gene_scores=os.path.join(
+            OUTDIR,
+            "scores",
+            "processed",
+            "gene_scores_{timepoints}-{groups}",
+            "{mag}_cmh_{focus}_gene_scores_individual.tsv",
+        ),
+    output:
+        os.path.join(
+            OUTDIR,
+            "outlier_genes",
+            "{timepoints}-{groups}",
+            "{mag}_cmh_{focus}_outlier_genes.tsv",
+        ),
+    resources:
+        time=config["resources"]["time"]["general"],
+    run:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(asctime)s %(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        
+        gene_df = pd.read_csv(input.gene_scores, sep='\t')
+        if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
+            # Create an empty output file with appropriate columns for CMH test
+            columns = ['gene_id', 'mag_score_CMH (%)', 'gene_score_CMH (%)',
+                      'total_sites_gene_CMH', 'significant_sites_gene_CMH',
+                      'p_value_binomial_CMH', 'p_value_poisson_CMH']
             
             # Create and save the empty DataFrame
             os.makedirs(os.path.dirname(output[0]), exist_ok=True)

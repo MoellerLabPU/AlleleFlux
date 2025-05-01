@@ -219,3 +219,51 @@ rule lmm_analysis:
             --data_type {params.data_type} \
             --mag_id {wildcards.mag}
             """
+
+rule cmh_test:
+    input:
+        input_df=os.path.join(
+            OUTDIR,
+            "allele_analysis",
+            "allele_analysis_{timepoints}-{groups}",
+            "{mag}_allele_frequency_longitudinal.tsv.gz"
+        ),
+    output:
+        os.path.join(
+            OUTDIR,
+            "significance_tests",
+            "cmh_{timepoints}-{groups}",
+            "{mag}_cmh.tsv.gz"
+        )
+    params:
+        min_sample_num=config["quality_control"]["min_sample_num"],
+        outDir=os.path.join(
+            OUTDIR, "significance_tests", "cmh_{timepoints}-{groups}"
+        ),
+        data_type=DATA_TYPE,
+        # Conditionally include the preprocessed file argument
+        preprocessed_flag=(
+            "--preprocessed_df " + os.path.join(
+                OUTDIR,
+                "significance_tests",
+                "preprocessed_two_sample_{timepoints}-{groups}",
+                "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
+            )
+            if config["statistics"].get("preprocess_two_sample", False)
+            else ""
+        ),
+    threads: config["resources"]["cpus"]["significance_test"]
+    resources:
+        time=config["resources"]["time"]["significance_test"],
+    shell:
+        """
+        alleleflux-cmh \
+            --input_df {input.input_df} \
+            --min_sample_num {params.min_sample_num} \
+            --mag_id {wildcards.mag} \
+            --data_type {params.data_type} \
+            --cpus {threads} \
+            --output_dir {params.outDir} \
+            {params.preprocessed_flag}
+        """
+

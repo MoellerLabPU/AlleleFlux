@@ -2,7 +2,6 @@ import argparse
 import gc
 import logging
 import os
-import sys
 import time
 from functools import partial
 from multiprocessing import Pool, cpu_count
@@ -58,13 +57,15 @@ def perform_paired_tests(func_paired, grouped_df, cpus, num_tests, output_dir, m
     )
 
 
-def run_paired_tests(args, group_1, group_2, min_sample_num, data_type="longitudinal"):
-    name_tuple, grouped_df = args
+def run_paired_tests(
+    args, group_1_name, group_2_name, min_sample_num, data_type="longitudinal"
+):
+    name_tuple, df_group = args
     # Separate the data into two groups
-    group1 = grouped_df[grouped_df["group"] == group_1]
-    group2 = grouped_df[grouped_df["group"] == group_2]
+    group1 = df_group[df_group["group"] == group_1_name]
+    group2 = df_group[df_group["group"] == group_2_name]
 
-    # Merge the two groups on 'replicate_id', 'contig', and 'position'
+    # Merge the two groups on 'replicate', 'contig', and 'position'
     merged_data = pd.merge(
         group1,
         group2,
@@ -77,7 +78,7 @@ def run_paired_tests(args, group_1, group_2, min_sample_num, data_type="longitud
     p_values = {}
     notes = ""
     for nucleotide in NUCLEOTIDES:
-        p_values[f"{nucleotide}_p_value_paired_tTest"] = np.nan
+        p_values[f"{nucleotide}_p_value_tTest"] = np.nan
         p_values[f"{nucleotide}_p_value_Wilcoxon"] = np.nan
 
     # Number of pairs
@@ -97,7 +98,7 @@ def run_paired_tests(args, group_1, group_2, min_sample_num, data_type="longitud
             # Check for identical values
             d = data1 - data2
             if np.all(d == 0):
-                p_values[f"{nucleotide}_p_value_paired_tTest"] = (
+                p_values[f"{nucleotide}_p_value_tTest"] = (
                     1.0  # Paired t-test outputs NaN if both groups have identical values
                 )
                 p_values[f"{nucleotide}_p_value_Wilcoxon"] = (
@@ -112,7 +113,7 @@ def run_paired_tests(args, group_1, group_2, min_sample_num, data_type="longitud
                     nan_policy="raise",
                     alternative="two-sided",
                 )
-                p_values[f"{nucleotide}_p_value_paired_tTest"] = res_ttest.pvalue
+                p_values[f"{nucleotide}_p_value_tTest"] = res_ttest.pvalue
 
                 res_wilcoxon = stats.wilcoxon(
                     data1,
@@ -207,8 +208,8 @@ def main():
     )
     func_paired = partial(
         run_paired_tests,
-        group_1=group_1,
-        group_2=group_2,
+        group_1_name=group_1,
+        group_2_name=group_2,
         min_sample_num=args.min_sample_num,
         data_type=args.data_type,
     )

@@ -62,12 +62,12 @@ def perform_unpaired_tests(
 
 
 def run_unpaired_tests(
-    args, group_1, group_2, min_sample_num, data_type="longitudinal"
+    args, group_1_name, group_2_name, min_sample_num, data_type="longitudinal"
 ):
-    name_tuple, grouped_df = args
+    name_tuple, df_group = args
     # Separate the data into two groups
-    group1 = grouped_df[grouped_df["group"] == group_1]
-    group2 = grouped_df[grouped_df["group"] == group_2]
+    group1 = df_group[df_group["group"] == group_1_name]
+    group2 = df_group[df_group["group"] == group_2_name]
 
     # Initialize p_values with NaN
     p_values = {}

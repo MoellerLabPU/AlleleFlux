@@ -131,7 +131,7 @@ def merge_metadata(mag_dict, metadata_file, timepoints, groups, data_type):
             # Filter by timepoint if specified
             metadata_df = metadata_df[metadata_df["time"] == timepoints[0]]
             # Remove the time column since we're treating it as single data
-            metadata_df = metadata_df.drop(columns=["time"])
+            # metadata_df = metadata_df.drop(columns=["time"])
 
     # Create a metadata dictionary for quick lookup
     metadata_dict = metadata_df.set_index("sample_id").to_dict(orient="index")

@@ -10,9 +10,9 @@ Required Inputs
    
    Sorted and indexed BAM files from metagenomic samples aligned to reference MAGs (Metagenome-Assembled Genomes).
    
-   * File format: ``.sorted.bam`` (with accompanying ``.sorted.bam.bai`` index file)
-   * Naming convention: ``{sample_id}.sorted.bam``
+   * File format: ``.bam`` (with accompanying ``.bam.bai`` index file)
    * Each BAM file should contain alignments of reads to reference MAGs
+   * BAM files can have any naming convention, as they are referenced through the metadata file
 
 2. **Reference FASTA**
    
@@ -30,12 +30,12 @@ Required Inputs
 
 4. **Metadata File**
    
-   A tab-separated file containing metadata for each sample.
+   A tab-separated file containing metadata for each sample, including BAM file paths.
    
    * File format: ``.txt`` or ``.tsv``
    * Required columns:
      - ``sample_id``: Unique identifier for each sample
-     - ``file_path``: Path to the BAM file for the sample
+     - ``bam_path``: Full path to the BAM file for the sample
      - ``subjectID``: Identifier for the subject/replicate
      - ``group``: Group identifier (e.g., "control", "treatment")
      - ``replicate``: Replicate identifier
@@ -54,15 +54,15 @@ Example Metadata File
 
 .. code-block:: text
 
-    sample_id    file_path                               subjectID    group      replicate    time
-    S1           /path/to/bamfiles/S1.sorted.bam         mouse1       control    A           pre
-    S2           /path/to/bamfiles/S2.sorted.bam         mouse2       control    B           pre
-    S3           /path/to/bamfiles/S3.sorted.bam         mouse3       treatment  A           pre
-    S4           /path/to/bamfiles/S4.sorted.bam         mouse4       treatment  B           pre
-    S5           /path/to/bamfiles/S5.sorted.bam         mouse1       control    A           post
-    S6           /path/to/bamfiles/S6.sorted.bam         mouse2       control    B           post
-    S7           /path/to/bamfiles/S7.sorted.bam         mouse3       treatment  A           post
-    S8           /path/to/bamfiles/S8.sorted.bam         mouse4       treatment  B           post
+    sample_id    bam_path                               subjectID    group      replicate    time
+    S1           /path/to/bamfiles/S1.bam               mouse1       control    A           pre
+    S2           /path/to/bamfiles/sample2.bam          mouse2       control    B           pre
+    S3           /path/to/bamfiles/patient3_t1.bam      mouse3       treatment  A           pre
+    S4           /path/to/bamfiles/S4_rep2.bam          mouse4       treatment  B           pre
+    S5           /path/to/bamfiles/S5.sorted.bam        mouse1       control    A           post
+    S6           /path/to/bamfiles/S6_aligned.bam       mouse2       control    B           post
+    S7           /path/to/bamfiles/S7_final.bam         mouse3       treatment  A           post
+    S8           /path/to/bamfiles/S8_processed.bam     mouse4       treatment  B           post
 
 Configuration File
 -------------------
@@ -72,14 +72,16 @@ Update the ``config.yml`` file with the paths to your input files:
 .. code-block:: yaml
 
     # Inputs
-    bamDir: "/path/to/bamfiles"
-    fasta: "/path/to/reference.fa"
-    prodigal: "/path/to/prodigal_genes.fna"
-    metadata_file: "/path/to/metadata.txt"
-    gtdb_file: "/path/to/gtdb_taxonomy.tsv"
+    input:
+      bam_dir: "/path/to/bamfiles"  # Used for backward compatibility
+      fasta_path: "/path/to/reference.fa"
+      prodigal_path: "/path/to/prodigal_genes.fna"
+      metadata_path: "/path/to/metadata.txt"  # Must include bam_path column
+      gtdb_path: "/path/to/gtdb_taxonomy.tsv"
     
     # Outputs
-    root_out: "/path/to/output_directory"
+    output:
+      root_dir: "/path/to/output_directory"
     
     # Parameters
     timepoints_combinations:
@@ -100,3 +102,32 @@ Update the ``config.yml`` file with the paths to your input files:
     alpha: 0.05
     test_type: "both"
     preprocess_two_sample: True
+
+Adding BAM Paths to Metadata
+---------------------------
+
+AlleleFlux includes a utility script to help you add BAM file paths to your existing metadata file:
+
+.. code-block:: bash
+
+    python alleleflux/accessory/add_bam_path_to_metadata.py \
+        --metadata /path/to/metadata.tsv \
+        --output /path/to/updated_metadata.tsv \
+        --bam-dir /path/to/bamfiles \
+        --bam-extension .bam
+
+This script will:
+
+1. Read your existing metadata file
+2. Search for BAM files in the specified directory that match each sample ID
+3. Add a ``bam_path`` column to your metadata file
+4. Save the updated metadata to a new file
+
+You can then use this updated metadata file with AlleleFlux.
+
+Options:
+  * ``--metadata``: Path to your existing metadata file (required)
+  * ``--output``: Path to save the updated metadata file (required)
+  * ``--bam-dir``: Directory containing BAM files (default: current directory)
+  * ``--bam-extension``: Extension of BAM files (default: .bam)
+  * ``--drop-missing``: Drop samples without matching BAM files (optional)

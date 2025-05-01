@@ -27,7 +27,7 @@ def find_bam_path(sample_id, bam_dir, extension):
     if not matches:
         return None
     elif len(matches) == 1:
-        logging.info(f"Found matche: {matches}")
+        logging.info(f"Found match: {matches}")
         return matches[0]
     elif len(matches) >= 1:
         raise ValueError(
@@ -42,7 +42,8 @@ def main():
         level=logging.DEBUG,
     )
     parser = argparse.ArgumentParser(
-        description="Add BAM file paths to metadata table."
+        description="Add BAM file paths to metadata table.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--metadata", help="Input metadata TSV file, with 'sample_id' column"

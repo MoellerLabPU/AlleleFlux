@@ -26,3 +26,7 @@ rule all:
         # get_combined_scores_targets(),
         get_taxa_scores_targets(),
         get_outlier_gene_targets(),
+        # Include CMH significance test outputs
+        # get_cmh_test_targets(),
+        # get_significance_scores_targets(),
+        # get_combined_scores_targets(),

@@ -65,7 +65,7 @@ def run_model(args):
         "contig": contig,
         "gene_id": gene_id,
         "position": position,
-        "n_samples": len(sub_df),
+        "num_pairs": len(sub_df),
         "notes": "",
     }
 
@@ -191,9 +191,9 @@ def run_model(args):
 
 def main():
     logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
+        format="[%(asctime)s %(levelname)s] %(message)s",
         datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
+        level=logging.INFO,
     )
 
     parser = argparse.ArgumentParser(
@@ -251,7 +251,7 @@ def main():
     ):
         group_counts = sub_df.groupby("group").size()  # Count samples per group
 
-        # Ensure both groups meet the min_sample_num threshold
+        # Ensure BOTH groups meet the min_sample_num threshold
         if (group_counts >= args.min_sample_num).sum() == 2:
             grouped_positions.append(
                 (contig, gene_id, position, sub_df, args.data_type)
@@ -286,13 +286,6 @@ def main():
     removed_count = initial_count - len(results_df)
     if removed_count:
         logging.info(f"Removed {removed_count:,} rows with all NaN p-values.")
-
-    # Save the results to CSV.
-    # if args.outPath.endswith(".gz"):
-    #     results_df.to_csv(args.outPath, index=False, sep="\t", compression="gzip")
-    # else:
-    #     results_df.to_csv(args.outPath, index=False, sep="\t")
-    # logging.info(f"LMM modeling complete. Results saved to {args.outPath}")
 
     logging.info(f"Saving LMM results for MAG {args.mag_id} to {args.output_dir}")
     results_df.to_csv(
