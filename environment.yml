@@ -1,8 +1,8 @@
-name: popgenToolkit
+name: alleleflux
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults # Do not use any otehr channel
 dependencies:
   - python
   - numpy
@@ -17,3 +17,8 @@ dependencies:
   - intervaltree
   - snakemake>=8.0.0
   - snakemake-executor-plugin-cluster-generic
+  - rpy2 # Added for R integration
+  - r-base # Required by rpy2
+  - pip
+  - pip:
+      - -e .

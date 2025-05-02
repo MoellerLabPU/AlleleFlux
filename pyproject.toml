@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "AlleleFlux"
+version = "0.0.1"
+description = "AlleleFlux: A tool for fine grained evolutionary analysis of microbial populations and communities"
+authors = [
+    {name = "Siddhartha Uppal", email = "sidd.uppal96@gmail.com"},
+    {name = "Andrew Moeller", email = "andrew.moeller@princeton.edu"}
+]
+readme = "README.md"
+requires-python = ">=3.7"
+
+
+[project.scripts]
+# Analysis scripts
+alleleflux-profile = "alleleflux.analysis.profile_mags:main"
+alleleflux-allele-freq = "alleleflux.analysis.allele_freq:main"
+alleleflux-scores = "alleleflux.analysis.scores:main"
+alleleflux-taxa-scores = "alleleflux.analysis.taxa_scores:main"
+alleleflux-gene-scores = "alleleflux.analysis.gene_scores:main"
+alleleflux-outliers = "alleleflux.analysis.outliers_genes:main"
+alleleflux-cmh-scores = "alleleflux.analysis.cmh_scores:main"
+
+# Preprocessing scripts
+alleleflux-metadata = "alleleflux.preprocessing.mag_metadata:main"
+alleleflux-qc = "alleleflux.preprocessing.quality_control:main"
+alleleflux-eligibility = "alleleflux.preprocessing.eligibility_table:main"
+alleleflux-preprocess-two-sample = "alleleflux.preprocessing.preprocess_two_sample:main"
+
+# Statistics scripts
+alleleflux-lmm = "alleleflux.statistics.LMM:main"
+alleleflux-single-sample = "alleleflux.statistics.single_sample:main"
+alleleflux-two-sample-paired = "alleleflux.statistics.two_sample_paired:main"
+alleleflux-two-sample-unpaired = "alleleflux.statistics.two_sample_unpaired:main"
+alleleflux-cmh = "alleleflux.statistics.CMH:main"
+
+# Accessory scripts
+alleleflux-create-mag-mapping = "alleleflux.accessory.create_mag_mapping:main"
+alleleflux-add-bam-path = "alleleflux.accessory.add_bam_path_to_metadata:main"
+
+[project.urls]
+"Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"
+"Bug Tracker" = "https://github.com/MoellerLabPU/AlleleFlux/issues"

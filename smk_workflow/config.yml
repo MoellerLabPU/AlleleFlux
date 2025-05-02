@@ -1,53 +1,89 @@
-# config.yml
+# AlleleFlux Configuration File
+# ============================
 
-# Script paths
-scripts:
-  profile: "/home/suppal/popGenToolKit/scripts/profile_mags.py"
-  generate_mag_metadata: "/home/suppal/popGenToolKit/scripts/generate_mag_metadata.py"
-  significance_test: "/home/suppal/popGenToolKit/scripts/analyze_allele_freq.py"
-  scores: "/home/suppal/popGenToolKit/scripts/scores.py"
-  combine_scores: "/home/suppal/popGenToolKit/scripts/scores_from_combined_table.py"
-  gene_scores: "/home/suppal/popGenToolKit/scripts/gene_scores.py"
-  outlier_detection: "/home/suppal/popGenToolKit/scripts/outliers_genes.py"
+# Input Files
+# ------------
+# Path specifications for all required input data
+input:
+  bam_dir: "/workdir1/sidd/for_sam/new_instrain/alignments"           # Directory containing BAM files (used for backward compatibility)
+  fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
+  prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
+  # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
+  # metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"
+  metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags2/longitudinal/profiles/metadata_with_bam_small.tsv"
+  gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
+  mag_mapping_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/sam_reference_genomes/megamag_mapping.tsv"      # Path to MAG-to-contig mapping file with columns: mag_id, contig_id
 
-# Inputs
-bamDir: "/workdir1/sidd/for_sam/new_instrain/alignments"
-fasta: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"
-prodigal: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"
-metadata_file: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
-gtdb_file: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"
-# mag_ids_file: /workdir1/sidd/for_sam/new_instrain/profiles_paired5/mag_list
+# Output Directory
+# --------------------
+output:
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_profile_new"  # Root directory for all output files
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
+  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags3"
+  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"
 
-# Outputs
-root_out: "/workdir1/sidd/for_sam/new_instrain/profiles_paired5"
+# Analysis Configuration
+# -----------------------
+# Core settings that control the type and scope of analysis
+analysis:
+  # Data type - determines the analysis approach
+  data_type: "longitudinal"  # Options: "single" or "longitudinal"
+  
+  # Enable/disable specific analysis modules
+  use_lmm: True             # Linear Mixed Models analysis
+  use_significance_tests: True  # Two-sample and single-sample tests
+  use_cmh: True             # CMH test for categorical data
 
-# Parameters
-timepoints_combinations:
-  - ["pre", "end"]
-  - ["end", "post"]
+  # Timepoints and groups to analyze
+  timepoints_combinations:
+    # - pair: ["pre", "post"]
+    #   focus: "pre"        # Required if CMH test is enabled
+    - pair: ["pre", "end"]
+      focus: "end"
+    - pair: ["end", "post"]
+      focus: "post"
+    # - ["end"]             # Single timepoint analysis
+    # - ["pre"]             
+    # - ["post"]            
+  
 
-groups_combinations:
-  - ["fat", "control"]
 
-min_sample_num: 4
-breath_threshold: 0.1
+  groups_combinations:
+    - ["fat", "control"]    # Currently active group comparison
 
-# group_by_column: "MAG_ID"
-p_value_threshold: 0.05
+# Quality Control Parameters
+# --------------------------
+quality_control:
+  min_sample_num: 4         # Minimum number of samples required for analysis
+  breadth_threshold: 0.1    # Minimum coverage breadth across genome
+  disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
 
-# Resources
-# logDir: "/workdir1/sidd/src/snakemake/logs"
-cpus:
-  profile: 8
-  significance_test: 16
+# Statistical Parameters
+# ----------------------
+statistics:
+  alpha: 0.05               # Significance threshold for statistical tests
+  filter_type: "t-test"       # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
+  preprocess_two_sample: True  # Whether to preprocess data for two-sample tests
+  max_zero_count: 4         # Maximum number of zero values allowed in single-sample test
+  p_value_threshold: 0.05   # P-value threshold for significance
 
-memory:
-  profile: 10000 # 10 GB
-  significance_test: 100000 # 100 GB
-
-time: # days-HH:MM:SS
-  profile: "08:00:00"
-  significance_test: "08:00:00"
-  general: "01:02:00"
-
+# Compute Resources
+# -----------------
+# Resources allocated to each step of the workflow
+resources:
+  cpus:
+    profile: 16              # CPUs for profiling step
+    quality_control: 8      # CPUs for quality control
+    analyze_alleles: 16     # CPUs for allele analysis
+    significance_test: 16   # CPUs for significance testing
+  
+  memory:
+    profile: 10000          # Memory in MB (10 GB) for profiling
+    analyze_alleles: 100000 # Memory in MB (100 GB) for allele analysis
+    # significance_test: 100000 # Memory in MB for significance testing (currently disabled)
+  
+  time:                     # Runtime limits in format "days-HH:MM:SS"
+    profile: "08:00:00"     # 8 hours for profiling
+    significance_test: "08:00:00"  # 8 hours for significance tests
+    general: "01:02:00"     # 1 hour 2 minutes for general tasks
 
