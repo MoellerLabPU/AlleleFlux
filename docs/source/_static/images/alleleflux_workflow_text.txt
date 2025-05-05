@@ -1,0 +1,21 @@
+# AlleleFlux Workflow
+
+   Input Data        →        Preprocessing        →        Allele Analysis
+  ▔▔▔▔▔▔▔▔▔▔▔               ▔▔▔▔▔▔▔▔▔▔▔▔▔                ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  MAG sequences              Quality control               Compute frequencies
+  Sample metadata            Eligibility tables            Analyze changes
+  BAM files                  Metadata preparation          Filter (optional)
+                                                                  ↓
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁           ▁▁▁▁▁▁▁▁▁▁▁▁▁▁          ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+  Results Analysis  ←        Outlier Detection    ←      Statistical Testing
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔           ▔▔▔▔▔▔▔▔▔▔▔▔▔▔          ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔  
+  Summary statistics         High score genes             Two-sample tests
+  Visualizations             Statistical                  Single-sample
+  Functional analysis        assessment                   LMM / CMH tests
+                                  ↑↓
+                           ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                           Score Generation
+                           ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+                           Parallelism scores
+                           Divergence scores
+                           Taxonomic aggregation

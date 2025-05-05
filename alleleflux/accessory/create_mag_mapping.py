@@ -186,7 +186,7 @@ def main():
         "--output-genomes-dir",
         help="Directory to store individual genome files with modified headers",
         type=Path,
-        default=Path.cwd(),
+        default=Path.cwd() / "modified_genomes",
     )
 
     args = parser.parse_args()

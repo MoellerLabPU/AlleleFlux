@@ -1,0 +1,21 @@
+digraph AlleleFlux {
+  /* Nodes */
+  input [label="Input Data\nMAG sequences\nSample metadata\nBAM files", shape=box, style=filled, fillcolor=lightblue];
+  preproc [label="Preprocessing\nQuality control\nEligibility tables\nMetadata preparation", shape=box, style=filled, fillcolor=lightblue];
+  allele [label="Allele Analysis\nCompute frequencies\nAnalyze changes\nFilter (optional)", shape=box, style=filled, fillcolor=lightblue];
+  
+  scores [label="Score Generation\nParallelism scores\nDivergence scores\nTaxonomic aggregation", shape=box, style=filled, fillcolor=lightyellow];
+  
+  stats [label="Statistical Testing\nTwo-sample tests\nSingle-sample\nLMM / CMH tests", shape=box, style=filled, fillcolor=lightgreen];
+  outliers [label="Outlier Detection\nHigh score genes\nStatistical assessment", shape=box, style=filled, fillcolor=lightgreen];
+  results [label="Results Interpretation\nSummary statistics\nVisualizations\nFunctional analysis", shape=box, style=filled, fillcolor=lightgreen];
+  
+  /* Edges */
+  input -> preproc;
+  preproc -> allele;
+  allele -> stats;
+  stats -> scores;
+  scores -> outliers [dir=both];
+  outliers -> results;
+  stats -> results;
+}

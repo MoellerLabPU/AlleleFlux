@@ -21,6 +21,7 @@ These scores enable direct comparisons of evolutionary dynamics across different
    :maxdepth: 1
    :caption: Getting Started
    
+   getting_started/overview
    getting_started/installation
    getting_started/quickstart
 

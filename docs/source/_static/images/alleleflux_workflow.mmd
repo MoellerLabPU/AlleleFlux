@@ -1,0 +1,15 @@
+graph TD
+    A[Input Data<br>MAG sequences<br>Sample metadata<br>BAM files] --> B[Preprocessing<br>Quality control<br>Eligibility tables<br>Metadata preparation]
+    B --> C[Allele Analysis<br>Compute frequencies<br>Analyze changes<br>Filter optional]
+    C --> D[Statistical Testing<br>Two-sample tests<br>Single-sample<br>LMM / CMH tests]
+    D --> E[Score Generation<br>Parallelism scores<br>Divergence scores<br>Taxonomic aggregation]
+    E --> F[Outlier Detection<br>High score genes<br>Statistical assessment]
+    F --> G[Results Interpretation<br>Summary statistics<br>Visualizations<br>Functional analysis]
+    
+    classDef blue fill:#e6f3ff,stroke:#0066cc,stroke-width:2px;
+    classDef orange fill:#ffead6,stroke:#ff6600,stroke-width:2px;
+    classDef green fill:#d6ffea,stroke:#009933,stroke-width:2px;
+    
+    class A,B,C blue;
+    class E orange;
+    class D,F,G green;

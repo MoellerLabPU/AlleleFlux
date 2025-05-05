@@ -1,0 +1,28 @@
+```
++---------------------+       +---------------------+       +---------------------+
+|     Input Data      |       |    Preprocessing    |       |   Allele Analysis   |
+|                     |       |                     |       |                     |
+| - MAG sequences     | ----> | - Quality control   | ----> | - Compute freqs     |
+| - Sample metadata   |       | - Eligibility tables|       | - Analyze changes   |
+| - BAM files         |       | - Metadata prep     |       | - Filter (optional) |
++---------------------+       +---------------------+       +---------------------+
+                                                                      |
+                                                                      v
++---------------------+       +---------------------+       +---------------------+
+| Results & Reports   |       |  Outlier Detection  |       | Statistical Testing |
+|                     |       |                     |       |                     |
+| - Summary stats     | <---- | - High score genes  | <---- | - Two-sample tests  |
+| - Visualizations    |       | - Statistical       |       | - Single-sample     |
+| - Functional annot. |       |   assessment        |       | - LMM / CMH tests   |
++---------------------+       +---------------------+       +---------------------+
+        ^                             ^
+        |                             |
+        |                             v
+        |                   +---------------------+
+        |                   |  Score Generation   |
+        |                   |                     |
+        +-------------------|  - Parallelism      |
+                            |  - Divergence       |
+                            |  - Taxonomic agg.   |
+                            +---------------------+
+```
