@@ -228,6 +228,15 @@ rule cmh_test:
             "allele_analysis_{timepoints}-{groups}",
             "{mag}_allele_frequency_longitudinal.tsv.gz"
         ),
+        preprocessed_df=os.path.join(
+                OUTDIR,
+                "significance_tests",
+                "preprocessed_two_sample_{timepoints}-{groups}",
+                "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
+            )
+            if config["statistics"].get("preprocess_two_sample", True)
+            else "",
+    
     output:
         os.path.join(
             OUTDIR,
@@ -241,15 +250,17 @@ rule cmh_test:
             OUTDIR, "significance_tests", "cmh_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-        # Conditionally include the preprocessed file argument
+        # Conditionally include the preprocessed file argument. This is redundant to preprocessed_df 
+        # in the input section, but it is necessary because of the --preprocessed_df flag
+        # TODO: Remove the redundancy by in the shell command itself
         preprocessed_flag=(
-            "--preprocessed_df " + os.path.join(
+            ("--preprocessed_df " + os.path.join(
                 OUTDIR,
                 "significance_tests",
                 "preprocessed_two_sample_{timepoints}-{groups}",
                 "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
-            )
-            if config["statistics"].get("preprocess_two_sample", False)
+            ))
+            if config["statistics"].get("preprocess_two_sample", True)
             else ""
         ),
     threads: config["resources"]["cpus"]["significance_test"]
