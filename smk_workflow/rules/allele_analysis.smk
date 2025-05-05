@@ -29,6 +29,12 @@ rule analyze_alleles:
                 )
             ),
         ),
+        longitudinal_output=os.path.join(
+            OUTDIR,
+            "allele_analysis",
+            "allele_analysis_{timepoints}-{groups}",
+            "{mag}_allele_frequency_longitudinal.tsv.gz"
+        ) if DATA_TYPE == "longitudinal" else [],
     params:
         outDir=os.path.join(
             OUTDIR,
