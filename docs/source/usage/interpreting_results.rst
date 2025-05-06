@@ -32,12 +32,16 @@ After running the workflow, the output directory will have the following structu
         │   │   └── {mag}_two_sample_paired.tsv.gz
         │   ├── single_sample_{timepoints}-{groups}/
         │   │   └── {mag}_single_sample_{group}.tsv.gz
-        │   └── lmm_{timepoints}-{groups}/
-        │       └── {mag}_lmm.tsv.gz
+        │   ├── lmm_{timepoints}-{groups}/
+        │   │   └── {mag}_lmm.tsv.gz
+        │   └── cmh_{timepoints}-{groups}/
+        │       └── {mag}_cmh.tsv.gz
         ├── scores/
         │   ├── intermediate/
-        │   │   └── MAG_scores_{timepoints}-{groups}/
-        │   │       └── {mag}_score_{test_type}.tsv
+        │   │   ├── MAG_scores_{timepoints}-{groups}/
+        │   │   │   └── {mag}_score_{test_type}.tsv
+        │   │   └── MAG_scores_cmh_{timepoints}-{groups}/
+        │   │       └── {mag}_score_cmh.tsv
         │   └── processed/
         │       ├── combined/
         │       │   ├── scores_{test_type}-{timepoints}-{groups}-MAGs.tsv
@@ -103,6 +107,48 @@ AlleleFlux calculates two key scores:
    - Higher scores indicate stronger divergence between groups
    - Significance is determined by p-values from statistical tests
 
+Understanding CMH Test Results
+-----------------------------
+
+The Cochran-Mantel-Haenszel (CMH) test provides a powerful approach to identifying significant allele frequency changes across multiple timepoints while controlling for confounding factors.
+
+1. **CMH Test Output Files**
+
+   The main output files for CMH tests are found in:
+   
+   .. code-block:: text
+   
+       significance_tests/cmh_{timepoints}-{groups}/{mag}_cmh.tsv.gz
+   
+   These files contain:
+   
+   - **contig_id**: Contig identifier
+   - **position**: Position on the contig
+   - **pvalue**: P-value for the CMH test
+   - **time**: Time point identifier (if applicable)
+
+2. **CMH Scores**
+
+   CMH scores are calculated based on the significance of allele frequency changes between timepoints. These scores are found in:
+   
+   .. code-block:: text
+   
+       scores/intermediate/MAG_scores_cmh_{timepoints}-{groups}/{mag}_score_cmh.tsv
+   
+   Key columns include:
+   
+   - **mag_id**: MAG identifier
+   - **significant_sites**: Number of sites with significant changes
+   - **total_sites**: Total number of tested sites
+   - **cmh_score**: Ratio of significant sites to total sites
+   - **focus_timepoint**: The focus timepoint used for analysis
+
+3. **Interpreting CMH Results**
+
+   - **High CMH scores** indicate consistent allele frequency changes across replicates between timepoints
+   - **Focus timepoint significance** helps identify timepoint-specific selection events
+   - **Comparison across MAGs/genes** reveals differences in selective pressure
+
 Identifying Significant Results
 --------------------------------
 
@@ -112,16 +158,19 @@ To identify significant results:
    
    - Look for MAGs with high scores in ``scores_{test_type}-{timepoints}-{groups}-MAGs.tsv``
    - Focus on MAGs with high percentages of significant sites
+   - Compare scores across different test types (paired, unpaired, LMM, CMH)
 
 2. **Taxonomic Analysis**
    
    - Compare scores across taxonomic ranks in ``scores_{test_type}-{timepoints}-{groups}-{taxon}.tsv``
    - Look for taxonomic groups with consistently high scores
+   - Consider scores from multiple statistical approaches for robust interpretation
 
 3. **Gene-level Analysis**
    
    - Identify genes with exceptionally high scores in ``{mag}_{test_type}_gene_scores_individual.tsv``
    - Focus on outlier genes identified in ``{mag}_{test_type}_outlier_genes.tsv``
+   - Pay special attention to genes that appear as outliers in multiple tests
 
 Example Interpretation
 ----------------------
@@ -131,8 +180,9 @@ Here's an example of how to interpret the results:
 1. Start by examining the eligibility table to see which MAGs have sufficient coverage for analysis
 2. Look at the MAG scores to identify MAGs with high parallelism or divergence scores
 3. Examine taxonomic scores to determine which taxonomic groups show strong signals
-4. Focus on outlier genes to identify specific genes under strong selection
-5. For each outlier gene, investigate its function and potential relevance to the experimental conditions
+4. Compare results from different statistical tests (Two-sample, LMM, CMH) for consistency
+5. Focus on outlier genes to identify specific genes under strong selection
+6. For each outlier gene, investigate its function and potential relevance to the experimental conditions
 
 Further Analysis
 -----------------

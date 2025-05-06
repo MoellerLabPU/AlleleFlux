@@ -21,7 +21,18 @@ First, copy the configuration file template and modify it for your data:
     cd /path/to/AlleleFlux
     cp smk_workflow/config.yml my_config.yml
 
-Edit ``my_config.yml`` to specify your input files, output directories, and analysis parameters.
+Edit ``my_config.yml`` to specify your input files, output directories, and analysis parameters. Key configuration options include:
+
+.. code-block:: yaml
+
+    # Data type: "single" for a single timepoint or "longitudinal" for multiple timepoints
+    data_type: "longitudinal"
+    
+    # Analysis settings
+    analysis:
+      use_significance_tests: true  # Enable two-sample and single-sample tests
+      use_lmm: true                # Enable Linear Mixed Models
+      use_cmh: true                # Enable Cochran-Mantel-Haenszel tests
 
 Run Step 1 (profiling samples):
 
@@ -47,6 +58,15 @@ Profiling MAGs:
 
     alleleflux-profile --bam_path /path/to/bam --fasta_path /path/to/fasta \
     --prodigal_fasta /path/to/genes.fna --output_dir /path/to/output
+
+Running CMH Test:
+
+.. code-block:: bash
+
+    alleleflux-cmh --input_df /path/to/longitudinal.tsv.gz \
+    --preprocessed_df /path/to/preprocessed.tsv.gz \
+    --min_sample_num 4 --mag_id MAG_ID --data_type longitudinal \
+    --cpus 16 --output_dir /path/to/output
 
 Analyzing allele frequencies:
 

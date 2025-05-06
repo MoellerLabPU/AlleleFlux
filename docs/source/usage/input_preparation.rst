@@ -94,11 +94,19 @@ Update the ``config.yml`` file with the paths to your input files:
     analysis_options:
       use_lmm: True
       use_significance_tests: True
+      use_cmh: True                # Enable Cochran-Mantel-Haenszel tests
       data_type: "longitudinal"  # or "single"
+    
+    # Focus timepoints for CMH test
+    focus_timepoints:
+      pre_post: "post"  # Specify which timepoint to focus on for CMH analysis
     
     min_sample_num: 4
     breadth_threshold: 0.1
     disable_zero_diff_filtering: False
+    alpha: 0.05
+    test_type: "both"
+    preprocess_two_sample: True
     alpha: 0.05
     test_type: "both"
     preprocess_two_sample: True
@@ -131,3 +139,11 @@ Options:
   * ``--bam-dir``: Directory containing BAM files (default: current directory)
   * ``--bam-extension``: Extension of BAM files (default: .bam)
   * ``--drop-missing``: Drop samples without matching BAM files (optional)
+
+Focus Timepoints for CMH Test
+----------------------------
+
+The Cochran-Mantel-Haenszel (CMH) test requires a focus timepoint to be specified for each timepoint combination. The focus timepoint is used to identify significant allele frequency changes between groups at a specific timepoint.
+
+In the configuration file, specify the focus timepoint for each timepoint combination:
+The CMH test will calculate significance scores based on the specified focus timepoint. This is particularly useful for identifying evolutionary changes at specific points in time.

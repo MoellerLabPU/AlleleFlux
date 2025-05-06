@@ -205,8 +205,8 @@ def main():
 
     func_unpaired = partial(
         run_unpaired_tests,
-        group_1=group_1,
-        group_2=group_2,
+        group_1_name=group_1,
+        group_2_name=group_2,
         min_sample_num=args.min_sample_num,
         data_type=args.data_type,
     )

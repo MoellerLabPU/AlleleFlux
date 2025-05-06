@@ -41,6 +41,14 @@ Gene Scores
    :undoc-members:
    :show-inheritance:
 
+CMH Scores
+-----------
+
+.. automodule:: alleleflux.analysis.cmh_scores
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Outlier Gene Detection
 -----------------------
 
