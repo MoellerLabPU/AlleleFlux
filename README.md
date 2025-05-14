@@ -1,3 +1,6 @@
+
+[![Documentation Status](https://readthedocs.org/projects/alleleflux/badge/?version=latest)](https://alleleflux.readthedocs.io/en/latest/?badge=latest) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoellerLabPU/AlleleFlux)
+
 # AlleleFlux
 
 AlleleFlux is a toolkit for analyzing allele frequencies in metagenomic data.
