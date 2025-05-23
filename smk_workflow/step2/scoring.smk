@@ -20,7 +20,6 @@ rule significance_score_per_MAG_standard:
     params:
         group_by_column="MAG_ID",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
-        lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
     resources:
         time=config["resources"]["time"]["general"],
     shell:
@@ -31,8 +30,7 @@ rule significance_score_per_MAG_standard:
             --group_by_column {params.group_by_column} \
             --pValue_threshold {params.pValue_threshold} \
             --out_fPath {output} \
-            --mag_mapping_file {input.mag_mapping} \
-            {params.lmm_format}
+            --mag_mapping_file {input.mag_mapping}
         """
 
 
@@ -45,6 +43,7 @@ rule significance_score_per_MAG_cmh:
             "{mag}_cmh.tsv.gz",
         ),
         gtdb_taxonomy=config["input"]["gtdb_path"],
+        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         os.path.join(
             OUTDIR,
@@ -55,24 +54,38 @@ rule significance_score_per_MAG_cmh:
         ),
     params:
         # CMH-specific parameters
-        tp1_name=lambda wildcards: wildcards.timepoints.split("_")[0],
-        tp2_name=lambda wildcards: wildcards.timepoints.split("_")[1],
-        # focus=lambda wildcards: focus_timepoints[wildcards.timepoints],
+        tp1_name=lambda wildcards: wildcards.timepoints.split("_")[0] if DATA_TYPE == "longitudinal" else "",
+        tp2_name=lambda wildcards: wildcards.timepoints.split("_")[1] if DATA_TYPE == "longitudinal" else "",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
+        group_by_column="MAG_ID",
+        data_type=DATA_TYPE,
     resources:
         time=config["resources"]["time"]["general"],
-    shell:
-        """
-        alleleflux-cmh-scores \
-            --combined-file {input.pvalue_table} \
-            --tp1-name {params.tp1_name} \
-            --tp2-name {params.tp2_name} \
-            --focus {wildcards.focus_tp} \
-            --gtdb_taxonomy {input.gtdb_taxonomy} \
-            --mag_id {wildcards.mag} \
-            --threshold {params.pValue_threshold} \
-            --out_fPath {output}
-        """
+    run:
+        if params.data_type == "single":
+            shell(
+            """
+            alleleflux-scores \
+                --gtdb_taxonomy {input.gtdb_taxonomy} \
+                --pValue_table {input.pvalue_table} \
+                --group_by_column {params.group_by_column} \
+                --pValue_threshold {params.pValue_threshold} \
+                --out_fPath {output} \
+                --mag_mapping_file {input.mag_mapping}
+            """)
+        elif params.data_type == "longitudinal":
+            shell(
+            """
+            alleleflux-cmh-scores \
+                --combined-file {input.pvalue_table} \
+                --tp1-name {params.tp1_name} \
+                --tp2-name {params.tp2_name} \
+                --focus {wildcards.focus_tp} \
+                --gtdb_taxonomy {input.gtdb_taxonomy} \
+                --mag_id {wildcards.mag} \
+                --threshold {params.pValue_threshold} \
+                --out_fPath {output}
+            """)
 
 
 
@@ -94,7 +107,7 @@ rule combine_MAG_scores:
                     get_mags_by_eligibility(
                         wc.timepoints, wc.groups, eligibility_type=wc.test_type
                     )
-                if wc.test_type != "single_sample"
+                if wc.test_type not in {"single_sample", "lmm_across_time", "cmh_across_time"}
                 else [
                     mag
                     for mag, grp in get_single_sample_entries(wc.timepoints, wc.groups)
@@ -108,6 +121,7 @@ rule combine_MAG_scores:
             "scores",
             "processed",
             "combined",
+            "MAG",
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     resources:
@@ -160,6 +174,7 @@ rule combine_MAG_scores_cmh:
             "scores",
             "processed",
             "combined",
+            "MAG",
             "scores_cmh-{timepoints}-{groups}-MAGs-{focus_tp}.tsv",
         ),
     resources:
@@ -204,6 +219,7 @@ rule taxa_scores:
             "scores",
             "processed",
             "combined",
+            "MAG",
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     output:
@@ -212,6 +228,7 @@ rule taxa_scores:
             "scores",
             "processed",
             "combined",
+            "{taxon}",
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
     resources:
@@ -232,6 +249,7 @@ rule taxa_scores_cmh:
             "scores",
             "processed",
             "combined",
+            "MAG",
             "scores_cmh-{timepoints}-{groups}-MAGs-{focus_tp}.tsv",
         ),
     output:
@@ -240,6 +258,7 @@ rule taxa_scores_cmh:
             "scores",
             "processed",
             "combined",
+            "{taxon}",
             "scores_cmh-{timepoints}-{groups}-{taxon}-{focus_tp}.tsv",
         ),
     resources:

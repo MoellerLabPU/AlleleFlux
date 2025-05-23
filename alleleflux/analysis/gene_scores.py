@@ -8,11 +8,9 @@ import pandas as pd
 from alleleflux.utilities.utilities import calculate_score, extract_relevant_columns
 
 
-def get_scores(df, p_value_threshold=0.05, is_lmm=False):
+def get_scores(df, p_value_threshold=0.05):
 
-    test_columns_dict = extract_relevant_columns(
-        df, capture_str="p_value_", lmm_format=is_lmm
-    )
+    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
     # First Output: Overlapping genes are kept as combined entities
     logging.info("Calculating scores for combined genes.")
     group_scores_combined = calculate_score(
@@ -93,12 +91,6 @@ def main():
         type=str,
         default="sample",
     )
-    parser.add_argument(
-        "--lmm_format",
-        help="Set to true if processing output from LMM.py script.",
-        action="store_true",
-        default=False,
-    )
 
     args = parser.parse_args()
 
@@ -114,7 +106,7 @@ def main():
     logging.info("Calculating significant scores...")
 
     group_scores_combined, group_scores_individual, group_scores_overlapping = (
-        get_scores(df, args.pValue_threshold, args.lmm_format)
+        get_scores(df, args.pValue_threshold)
     )
 
     # Ensure output directory exists

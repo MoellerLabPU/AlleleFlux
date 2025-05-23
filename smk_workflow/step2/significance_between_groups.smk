@@ -1,18 +1,28 @@
-def get_two_sample_inputs():
+def get_between_group_inputs(test_type=None):
+    if test_type == "cmh" and DATA_TYPE == "longitudinal":
+        # For CMH test, use the preprocessed file
+        between_groups_input = os.path.join(
+            OUTDIR,
+            "allele_analysis",
+            "allele_analysis_{timepoints}-{groups}",
+            "{mag}_allele_frequency_longitudinal.tsv.gz"
+        )
+        return between_groups_input
+
     preprocess_enabled = config["statistics"].get("preprocess_two_sample", False)
     if preprocess_enabled:
         if DATA_TYPE == "single":
-            two_sample_input = os.path.join(
+            between_groups_input = os.path.join(
                 OUTDIR,
                 "significance_tests",
-                "preprocessed_two_sample_{timepoints}-{groups}",
+                "preprocessed_between_groups_{timepoints}-{groups}",
                 "{mag}_allele_frequency_preprocessed.tsv.gz",
             )
-        else:  # longitudinal
-            two_sample_input = os.path.join(
+        elif DATA_TYPE == "longitudinal":
+            between_groups_input = os.path.join(
                 OUTDIR,
                 "significance_tests",
-                "preprocessed_two_sample_{timepoints}-{groups}",
+                "preprocessed_between_groups_{timepoints}-{groups}",
                 "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz",
             )
     else:
@@ -20,7 +30,7 @@ def get_two_sample_inputs():
         if DATA_TYPE == "single":
             if not config["quality_control"].get("disable_zero_diff_filtering", False):
                 # When single data type and filtering is not disabled
-                two_sample_input = os.path.join(
+                between_groups_input = os.path.join(
                     OUTDIR,
                     "allele_analysis",
                     "allele_analysis_{timepoints}-{groups}",
@@ -28,22 +38,22 @@ def get_two_sample_inputs():
                 )
             else:
                 # When single data type and filtering is disabled
-                two_sample_input = os.path.join(
+                between_groups_input = os.path.join(
                     OUTDIR,
                     "allele_analysis",
                     "allele_analysis_{timepoints}-{groups}",
                     "{mag}_allele_frequency_single.tsv.gz",
                 )
-        else:  # longitudinal
-            two_sample_input = os.path.join(
+        elif DATA_TYPE == "longitudinal":
+            between_groups_input = os.path.join(
                 OUTDIR,
                 "allele_analysis",
                 "allele_analysis_{timepoints}-{groups}",
                 "{mag}_allele_frequency_changes_mean.tsv.gz",
             )
-    return two_sample_input
+    return between_groups_input
 
-rule preprocess_two_sample:
+rule preprocess_between_groups:
     input:
         os.path.join(
             OUTDIR,
@@ -66,7 +76,7 @@ rule preprocess_two_sample:
         outPath=os.path.join(
             OUTDIR,
             "significance_tests",
-            "preprocessed_two_sample_{timepoints}-{groups}",
+            "preprocessed_between_groups_{timepoints}-{groups}",
             (
                 "{mag}_allele_frequency_preprocessed.tsv.gz"
                 if DATA_TYPE == "single"
@@ -82,7 +92,7 @@ rule preprocess_two_sample:
         time=config["resources"]["time"]["general"],
     shell:
         """
-        alleleflux-preprocess-two-sample \
+        alleleflux-preprocess-between-groups \
             --mean_changes_fPath {input} \
             --cpus {threads} --alpha {params.alpha} \
             --output_fPath {output.outPath} \
@@ -92,7 +102,7 @@ rule preprocess_two_sample:
             
 rule two_sample_unpaired:
     input:
-        input_df=get_two_sample_inputs(),
+        input_df=get_between_group_inputs(),
     output:
         os.path.join(
             OUTDIR,
@@ -122,7 +132,7 @@ rule two_sample_unpaired:
 
 rule two_sample_paired:
     input:
-        input_df=get_two_sample_inputs(),
+        input_df=get_between_group_inputs(),
     output:
         os.path.join(
             OUTDIR,
@@ -150,49 +160,9 @@ rule two_sample_paired:
             --data_type {params.data_type}
             """
 
-rule single_sample:
-    input:
-        mean_allele_changes=os.path.join(
-            OUTDIR,
-            "allele_analysis",
-            "allele_analysis_{timepoints}-{groups}",
-            "{mag}_allele_frequency_changes_mean.tsv.gz",
-        ),
-    output:
-        os.path.join(
-            OUTDIR,
-            "significance_tests",
-            "single_sample_{timepoints}-{groups}",
-            "{mag}_single_sample_{group}.tsv.gz",
-        ),
-    params:
-        min_sample_num=config["quality_control"]["min_sample_num"],
-        outDir=os.path.join(
-            OUTDIR, "significance_tests", "single_sample_{timepoints}-{groups}"
-        ),
-        max_zero_flag=(
-            "--max_zero_count " + str(config["statistics"]["max_zero_count"])
-            if config["statistics"].get("max_zero_count", None) is not None
-            else ""
-        ),
-    threads: config["resources"]["cpus"]["significance_test"]
-    resources:
-        time=config["resources"]["time"]["significance_test"],
-    shell:
-        """
-        alleleflux-single-sample \
-            --mean_changes_fPath {input.mean_allele_changes} \
-            --min_sample_num {params.min_sample_num} \
-            --mag_id {wildcards.mag} \
-            --group {wildcards.group} \
-            --cpus {threads} \
-            --output_dir {params.outDir} \
-            {params.max_zero_flag}
-            """
-
 rule lmm_analysis:
     input:
-        input_df=get_two_sample_inputs(),
+        input_df=get_between_group_inputs(),
     output:
         os.path.join(
             OUTDIR,
@@ -222,20 +192,15 @@ rule lmm_analysis:
 
 rule cmh_test:
     input:
-        input_df=os.path.join(
-            OUTDIR,
-            "allele_analysis",
-            "allele_analysis_{timepoints}-{groups}",
-            "{mag}_allele_frequency_longitudinal.tsv.gz"
-        ),
+        input_df=get_between_group_inputs(test_type="cmh"),
         preprocessed_df=os.path.join(
                 OUTDIR,
                 "significance_tests",
-                "preprocessed_two_sample_{timepoints}-{groups}",
+                "preprocessed_between_groups_{timepoints}-{groups}",
                 "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
             )
-            if config["statistics"].get("preprocess_two_sample", True)
-            else "",
+            if config["statistics"].get("preprocess_two_sample", True) and DATA_TYPE == "longitudinal"
+            else [],
     
     output:
         os.path.join(
@@ -250,22 +215,16 @@ rule cmh_test:
             OUTDIR, "significance_tests", "cmh_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-        # Conditionally include the preprocessed file argument. This is redundant to preprocessed_df 
-        # in the input section, but it is necessary because of the --preprocessed_df flag
-        # TODO: Remove the redundancy by in the shell command itself
+        # Conditionally include the preprocessed file argument.
         preprocessed_flag=(
-            ("--preprocessed_df " + os.path.join(
-                OUTDIR,
-                "significance_tests",
-                "preprocessed_two_sample_{timepoints}-{groups}",
-                "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
-            ))
-            if config["statistics"].get("preprocess_two_sample", True)
+            ("--preprocessed_df")
+            if config["statistics"].get("preprocess_two_sample", True) and DATA_TYPE == "longitudinal"
             else ""
         ),
     threads: config["resources"]["cpus"]["significance_test"]
     resources:
         time=config["resources"]["time"]["significance_test"],
+        mem_mb=config["resources"]["memory"]["significance_test"],
     shell:
         """
         alleleflux-cmh \
@@ -275,6 +234,7 @@ rule cmh_test:
             --data_type {params.data_type} \
             --cpus {threads} \
             --output_dir {params.outDir} \
-            {params.preprocessed_flag}
+            {params.preprocessed_flag} {input.preprocessed_df}
+            
         """
 

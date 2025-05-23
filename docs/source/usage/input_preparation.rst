@@ -71,45 +71,45 @@ Update the ``config.yml`` file with the paths to your input files:
 
 .. code-block:: yaml
 
-    # Inputs
+    # Data type: "single" for a single timepoint or "longitudinal" for multiple timepoints
+    data_type: "longitudinal"
+
+    # Input files
     input:
       bam_dir: "/path/to/bamfiles"  # Used for backward compatibility
       fasta_path: "/path/to/reference.fa"
       prodigal_path: "/path/to/prodigal_genes.fna"
-      metadata_path: "/path/to/metadata.txt"  # Must include bam_path column
-      gtdb_path: "/path/to/gtdb_taxonomy.tsv"
+      metadata_path: "/path/to/metadata.tsv"  # Must include bam_path column
+      gtdb_path: "/path/to/gtdb_taxonomy.tsv"  # Optional
     
-    # Outputs
+    # Output directory
     output:
       root_dir: "/path/to/output_directory"
     
-    # Parameters
+    # Experimental design
     timepoints_combinations:
-      - ["pre", "post"]
+      - timepoint: ["pre", "post"]
+        focus: "post"  # Required for CMH test with longitudinal data
     
     groups_combinations:
       - ["control", "treatment"]
     
+    # Quality control parameters
+    quality_control:
+      min_sample_num: 4
+      breadth_threshold: 0.1  # Note: 'breadth' not 'breath'
+      disable_zero_diff_filtering: false
+    
     # Analysis options
-    analysis_options:
-      use_lmm: True
-      use_significance_tests: True
-      use_cmh: True                # Enable Cochran-Mantel-Haenszel tests
-      data_type: "longitudinal"  # or "single"
+    analysis:
+      use_lmm: true
+      use_significance_tests: true
+      use_cmh: true                # Enable Cochran-Mantel-Haenszel tests
+      significance_threshold: 0.05  # Alpha value for statistical tests
     
-    # Focus timepoints for CMH test
+    # Focus timepoints for CMH test (specify which timepoint to focus on)
     focus_timepoints:
-      pre_post: "post"  # Specify which timepoint to focus on for CMH analysis
-    
-    min_sample_num: 4
-    breadth_threshold: 0.1
-    disable_zero_diff_filtering: False
-    alpha: 0.05
-    test_type: "both"
-    preprocess_two_sample: True
-    alpha: 0.05
-    test_type: "both"
-    preprocess_two_sample: True
+      pre_post: "post"  # For CMH analysis focusing on the 'post' timepoint
 
 Adding BAM Paths to Metadata
 ---------------------------
@@ -118,7 +118,7 @@ AlleleFlux includes a utility script to help you add BAM file paths to your exis
 
 .. code-block:: bash
 
-    python alleleflux/accessory/add_bam_path_to_metadata.py \
+    alleleflux-add-bam-path \
         --metadata /path/to/metadata.tsv \
         --output /path/to/updated_metadata.tsv \
         --bam-dir /path/to/bamfiles \
@@ -140,10 +140,30 @@ Options:
   * ``--bam-extension``: Extension of BAM files (default: .bam)
   * ``--drop-missing``: Drop samples without matching BAM files (optional)
 
+Creating MAG Mapping Files
+--------------------------
+
+Before running AlleleFlux, you may need to create a combined FASTA file and MAG mapping from individual MAG FASTA files:
+
+.. code-block:: bash
+
+    alleleflux-create-mag-mapping \
+        --dir /path/to/mag_fastas \
+        --extension fa \
+        --output-fasta combined_mags.fasta \
+        --output-mapping mag_mapping.tsv \
+        --output-genomes-dir modified_genomes/
+
+This preprocessing utility:
+
+1. Combines individual MAG FASTA files into a single file
+2. Creates a mapping file linking contigs to MAG IDs  
+3. Optionally creates individual genome files with modified headers
+4. Should be run BEFORE starting the main AlleleFlux workflow
+
 Focus Timepoints for CMH Test
 ----------------------------
 
 The Cochran-Mantel-Haenszel (CMH) test requires a focus timepoint to be specified for each timepoint combination. The focus timepoint is used to identify significant allele frequency changes between groups at a specific timepoint.
 
-In the configuration file, specify the focus timepoint for each timepoint combination:
-The CMH test will calculate significance scores based on the specified focus timepoint. This is particularly useful for identifying evolutionary changes at specific points in time.
+In the configuration file, specify the focus timepoint for each timepoint combination using the ``focus_timepoints`` section. The CMH test will calculate significance scores based on the specified focus timepoint, which is particularly useful for identifying evolutionary changes at specific points in time.

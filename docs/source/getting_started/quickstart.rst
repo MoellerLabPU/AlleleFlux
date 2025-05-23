@@ -28,6 +28,17 @@ Edit ``my_config.yml`` to specify your input files, output directories, and anal
     # Data type: "single" for a single timepoint or "longitudinal" for multiple timepoints
     data_type: "longitudinal"
     
+    # Input files
+    input:
+      bam_dir: "/path/to/bam_files"  # For backward compatibility
+      fasta_path: "/path/to/reference.fa"
+      prodigal_path: "/path/to/genes.fna"
+      metadata_path: "/path/to/metadata.tsv"  # Must include bam_path column
+    
+    # Output directory
+    output:
+      root_dir: "/path/to/output"
+    
     # Analysis settings
     analysis:
       use_significance_tests: true  # Enable two-sample and single-sample tests
@@ -52,14 +63,33 @@ Command-line Tools
 
 AlleleFlux also provides command-line tools that you can use directly:
 
-Profiling MAGs:
+**Preprocessing utilities:**
+
+Create MAG mapping files (run before main workflow):
+
+.. code-block:: bash
+
+    alleleflux-create-mag-mapping --dir /path/to/mag_fastas \
+    --extension fa --output-fasta combined.fasta \
+    --output-mapping mapping.tsv
+
+Add BAM paths to metadata:
+
+.. code-block:: bash
+
+    alleleflux-add-bam-path --metadata metadata.tsv \
+    --bam-dir /path/to/bams --output updated_metadata.tsv
+
+**Profiling MAGs:**
 
 .. code-block:: bash
 
     alleleflux-profile --bam_path /path/to/bam --fasta_path /path/to/fasta \
     --prodigal_fasta /path/to/genes.fna --output_dir /path/to/output
 
-Running CMH Test:
+**Running statistical tests:**
+
+CMH Test:
 
 .. code-block:: bash
 
@@ -68,12 +98,42 @@ Running CMH Test:
     --min_sample_num 4 --mag_id MAG_ID --data_type longitudinal \
     --cpus 16 --output_dir /path/to/output
 
-Analyzing allele frequencies:
+Linear Mixed Models:
+
+.. code-block:: bash
+
+    alleleflux-lmm --input_df /path/to/data.tsv.gz \
+    --preprocessed_df /path/to/preprocessed.tsv.gz \
+    --group group_name --mag_id MAG_ID --cpus 16 \
+    --output_dir /path/to/output
+
+**Analyzing allele frequencies:**
 
 .. code-block:: bash
 
     alleleflux-allele-freq --magID MAG_ID --mag_metadata_file metadata.tsv \
-    --fasta reference.fa --breath_threshold 0.1 --data_type single \
+    --fasta reference.fa --breadth_threshold 0.1 --data_type single \
     --output_dir /path/to/output
+
+**Quality control:**
+
+.. code-block:: bash
+
+    alleleflux-qc --rootDir /path/to/profiles --fasta reference.fa \
+    --breadth_threshold 0.1 --output_dir /path/to/qc
+
+**Eligibility table generation:**
+
+.. code-block:: bash
+
+    alleleflux-eligibility --qc_dir /path/to/qc --min_sample_num 4 \
+    --output_file eligibility.tsv --data_type longitudinal
+
+For help with any command, use the ``-h`` or ``--help`` flag:
+
+.. code-block:: bash
+
+    alleleflux-profile --help
+    alleleflux-cmh --help
 
 For more detailed information on using AlleleFlux, please refer to the :doc:`../usage/running_workflow` guide.

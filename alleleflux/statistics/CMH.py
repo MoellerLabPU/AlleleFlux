@@ -5,8 +5,16 @@ CMH Test Runner for AlleleFlux
 Performs Cochran-Mantel-Haenszel (CMH) tests on allele count data for metagenome-assembled genomes (MAGs),
 leveraging R's mantelhaen.test via rpy2. Supports multiprocessing and progress tracking.
 
+Supports three analysis modes:
+1. Single timepoint: Compare two groups within a single timepoint
+2. Longitudinal: Compare two groups, once for each timepoint
+3. Across time: Compare the same group across different timepoints
+
 Usage:
-    python cmh_test.py --input_df <input.tsv> --preprocessed_df <preprocessed.tsv> --mag_id <MAG> --output_dir <dir>
+    python cmh_test.py --input_df <input.tsv> --preprocessed_df <preprocessed.tsv> --mag_id <MAG> --output_dir <dir> --data_type <type>
+
+    For across_time mode:
+    python cmh_test.py --input_df <input.tsv> --preprocessed_df <preprocessed.tsv> --mag_id <MAG> --output_dir <dir> --data_type across_time --group <group_name>
 """
 import argparse
 import logging
@@ -23,87 +31,12 @@ from rpy2.robjects import pandas2ri, r
 from rpy2.robjects.packages import importr
 from tqdm import tqdm
 
+from alleleflux.utilities.utilities import load_and_filter_data
+
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
 
 # Rpy2 Setup. Enable pandas <-> R DataFrame conversion
 pandas2ri.activate()
-
-
-def load_and_filter_data(
-    input_df_path: str, preprocessed_df_path: str, mag_id: str, dtype_map: dict
-) -> pd.DataFrame:
-    """
-    Load raw allele count data and filter it to include only positions present in a preprocessed dataset.
-
-    Parameters:
-        input_df_path (str): Path to the raw allele count data file (tab-separated values).
-        preprocessed_df_path (str): Path to the preprocessed positions file (tab-separated values).
-        mag_id (str): Identifier for the metagenome-assembled genome (MAG), used for logging and error messages.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame containing only rows from the raw count data whose (contig, position)
-                      pairs are present in the preprocessed positions.
-
-    Raises:
-        ValueError: If no positions remain after filtering by the preprocessed data.
-    """
-    # Read the raw allele count data
-    logging.info(f"Loading raw count data from {input_df_path}")
-    raw_counts_df = pd.read_csv(
-        input_df_path,
-        sep="\t",
-        usecols=dtype_map.keys(),
-        dtype=dtype_map,
-        index_col=["contig", "position"],
-        memory_map=True,
-        # low_memory=False,
-        # nrows=20000000,
-    )
-    # Log basic row count quickly
-    logging.info(f"Loaded {raw_counts_df.shape[0]:,} rows of raw count data.")
-    # Detailed stats are debug level for performance
-    logging.debug(
-        f"Distinct contigs: {raw_counts_df.index.get_level_values('contig').nunique():,}",
-    )
-    logging.debug(
-        f"Distinct positions: {raw_counts_df.index.nunique():,}",
-    )
-
-    # Read the preprocessed positions for filtering
-    logging.info(f"Loading preprocessed positions from {preprocessed_df_path}")
-    preprocessed_df = pd.read_csv(
-        preprocessed_df_path,
-        sep="\t",
-        usecols=["contig", "position"],
-    )
-    logging.info(f"Loaded {preprocessed_df.shape[0]:,} preprocessed positions.")
-
-    # Get unique (contig, position) pairs to keep
-    valid_positions = preprocessed_df.drop_duplicates(subset=["contig", "position"])
-    valid_positions_index = pd.MultiIndex.from_frame(valid_positions)
-
-    # Filter Raw Counts by Preprocessed Positions
-    logging.info("Filtering raw counts to include only preprocessed positions.")
-
-    # Keep only rows whose (contig, position) index is in the valid_positions_index
-    filtered_counts_df = raw_counts_df[
-        raw_counts_df.index.isin(valid_positions_index)
-    ].reset_index()
-
-    logging.info(
-        f"Filtered to {filtered_counts_df.shape[0]:,} rows after applying preprocessed positions."
-    )
-
-    if filtered_counts_df.empty:
-        raise ValueError(
-            f"No positions remaining after filtering by preprocessed data for MAG {mag_id}. Exiting."
-        )
-
-    logging.debug(
-        f"{len(filtered_counts_df['contig'].unique()):,} contigs and "
-        f"{len(filtered_counts_df.groupby(['contig', 'position'])):,} unique positions remaining after filtering."
-    )
-    return filtered_counts_df
 
 
 def process_group(
@@ -426,6 +359,81 @@ def run_cmh_tests(
     return df_out
 
 
+def run_cmh_tests_across_time(
+    df: pd.DataFrame,
+    mag_id: str,
+    cpus: int,
+    min_sample_num: int,
+    group_to_analyze: str,
+) -> Optional[pd.DataFrame]:
+    """
+    Run CMH test workflow comparing the same group across different timepoints.
+
+    Args:
+        df: DataFrame containing the data for both timepoints
+        mag_id: MAG identifier
+        cpus: Number of CPUs to use
+        min_sample_num: Minimum number of samples required
+        group_to_analyze: The group name to analyze across timepoints
+
+    Returns:
+        Optional[pd.DataFrame]: DataFrame with results if successful, None otherwise
+    """
+    # Filter data for the specified group only
+    group_df = df[df["group"] == group_to_analyze].copy()
+
+    # Check we have exactly two timepoints
+    timepoints = group_df["time"].unique()
+    if len(timepoints) != 2:
+        raise ValueError(
+            f"Expected exactly 2 timepoints for group '{group_to_analyze}', but found {len(timepoints)}: {timepoints}"
+        )
+
+    # Add a pseudo-group column using the timepoint as the group
+    # This allows us to reuse the existing CMH test framework which compares groups
+    group_df["original_group"] = group_df["group"]  # Store original group
+    group_df["group"] = group_df["time"]  # Use timepoint as the group for comparison
+
+    logging.info(f"Grouping data by contig, gene_id and position")
+    grouped = group_df.groupby(["contig", "gene_id", "position"], dropna=False)
+    count = len(grouped)
+    logging.info(
+        f"Analyzing {count:,} positions for CMH tests for group '{group_to_analyze}' across timepoints {timepoints[0]} and {timepoints[1]} using {cpus} cores"
+    )
+
+    with Pool(processes=cpus) as pool:
+        worker = partial(
+            process_group,
+            min_sample_num=min_sample_num,
+            group_1_name=timepoints[0],  # First timepoint as first "group"
+            group_2_name=timepoints[1],  # Second timepoint as second "group"
+            mag_id=mag_id,
+            timepoint=None,  # No single timepoint as we're comparing across time
+        )
+        results = [
+            res
+            for res in tqdm(
+                pool.imap_unordered(worker, grouped),
+                total=count,
+                desc=f"Running CMH test for group '{group_to_analyze}' across timepoints",
+            )
+            if res is not None
+        ]
+
+    if not results:
+        logging.warning(
+            f"No results for {mag_id} group '{group_to_analyze}' across timepoints."
+        )
+        return None
+
+    df_out = pd.DataFrame(results)
+
+    # Add a column to indicate which group was analyzed across time
+    df_out["analyzed_group"] = group_to_analyze
+
+    return df_out
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -444,7 +452,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--preprocessed_df",
-        help="Path to the filtered dataframe from preprocess_two_sample.py, used to filter positions. Only required for longitudinal data. For single timepoint data, preprocessed_df can be used for --input_df.",
+        help="Path to the filtered dataframe from preprocess_two_sample.py, used to filter positions. Only required for longitudinal or across_time data. For single timepoint data, preprocessed_df can be used for --input_df.",
         type=str,
     )
     parser.add_argument(
@@ -461,10 +469,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--data_type",
-        help="Type of data to analyze: longitudinal or single",
+        help="Type of data to analyze: 'longitudinal' (compare groups within each timepoint), 'single' (compare two groups in a single timepoint), or 'across_time' (compare the same group across timepoints)",
         type=str,
-        choices=["longitudinal", "single"],
+        choices=["longitudinal", "single", "across_time"],
         default="longitudinal",
+    )
+    parser.add_argument(
+        "--group",
+        help="For 'across_time' data_type only: name of the group to analyze across timepoints",
+        type=str,
     )
     parser.add_argument(
         "--cpus",
@@ -485,9 +498,9 @@ def main() -> None:
         "contig": str,
         "gene_id": str,
         "position": int,
-        "group": str,
-        "replicate": str,
-        **{nuc: int for nuc in NUCLEOTIDES},
+        "group": str,  # Use category for group to save memory
+        "replicate": str,  # Use category for replicate to save memory
+        **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
 
     # Load and possibly filter data
@@ -502,12 +515,55 @@ def main() -> None:
             dtype=dtype_map,
         )
 
-        run_cmh_tests(
+        tp_results = run_cmh_tests(
             df=df,
             mag_id=args.mag_id,
             cpus=args.cpus,
             min_sample_num=args.min_sample_num,
         )
+        all_results = [tp_results] if tp_results is not None else []
+    elif args.data_type == "across_time":
+        # Comparing same group across timepoints
+        if not args.group:
+            raise ValueError(
+                "--group parameter is required when data_type is 'across_time'"
+            )
+
+        # Add time field to dtype map
+        dtype_map["time"] = str
+
+        if args.preprocessed_df:
+            logging.info(
+                "Datatype set to across_time. Loading input dataframe with filtering."
+            )
+            df = load_and_filter_data(
+                args.input_df,
+                args.preprocessed_df,
+                args.mag_id,
+                dtype_map,
+                group_to_analyze=args.group,
+            )
+        else:
+            logging.info(
+                "Datatype set to across_time. No preprocessed dataframe provided. Using input_df directly."
+            )
+            df = pd.read_csv(
+                args.input_df,
+                sep="\t",
+                usecols=dtype_map.keys(),
+                dtype=dtype_map,
+            )
+
+        # Process the group across timepoints
+        group_results = run_cmh_tests_across_time(
+            df=df,
+            mag_id=args.mag_id,
+            cpus=args.cpus,
+            min_sample_num=args.min_sample_num,
+            group_to_analyze=args.group,
+        )
+
+        all_results = [group_results] if group_results is not None else []
     else:
         # Longitudinal
         dtype_map["time"] = str
@@ -553,20 +609,26 @@ def main() -> None:
             if tp_results is not None:
                 all_results.append(tp_results)
 
-        # Combine results from all timepoints into a single dataframe
-        if all_results:
-            os.makedirs(args.output_dir, exist_ok=True)
-            combined_results = pd.concat(all_results, ignore_index=True)
+    # Combine results from all timepoints into a single dataframe
+    if all_results:
+        os.makedirs(args.output_dir, exist_ok=True)
+        combined_results = pd.concat(all_results, ignore_index=True)
+        if args.data_type == "across_time":
+            combined_out_file = os.path.join(
+                args.output_dir, f"{args.mag_id}_cmh_across_time_{args.group}.tsv.gz"
+            )
+        else:
             combined_out_file = os.path.join(
                 args.output_dir, f"{args.mag_id}_cmh.tsv.gz"
             )
-            logging.info(f"Saving combined CMH results to {combined_out_file}")
-            combined_results.to_csv(
-                combined_out_file, sep="\t", index=False, compression="gzip"
-            )
-            logging.info(f"Saved combined CMH test results to {combined_out_file}")
-        else:
-            logging.warning(f"No results from any timepoint for {args.mag_id}.")
+
+        logging.info(f"Saving combined CMH results to {combined_out_file}")
+        combined_results.to_csv(
+            combined_out_file, sep="\t", index=False, compression="gzip"
+        )
+        logging.info(f"Saved combined CMH test results to {combined_out_file}")
+    else:
+        logging.warning(f"No results from any timepoint for {args.mag_id}.")
 
 
 if __name__ == "__main__":

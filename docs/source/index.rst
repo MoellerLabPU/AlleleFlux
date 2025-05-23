@@ -35,14 +35,6 @@ These scores enable direct comparisons of evolutionary dynamics across different
 
 .. toctree::
    :maxdepth: 1
-   :caption: API Reference
-   
-   api/preprocessing
-   api/analysis
-   api/statistics
-
-.. toctree::
-   :maxdepth: 1
    :caption: Examples
    
    examples/tutorial

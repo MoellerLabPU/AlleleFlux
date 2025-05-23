@@ -64,11 +64,11 @@ def get_taxa_scores_targets():
                                     "scores",
                                     "processed",
                                     "combined",
+                                    taxon,
                                     f"scores_{test_type}-{tp}-{gr}{group_str}-{taxon}.tsv",
                                 )
                             )
                     # print(f"Targets for unpaired are: {mags}")
-
         
         # For single-sample tests, group_str is "_" plus the sample group.
         # Only include if data_type is longitudinal
@@ -87,6 +87,7 @@ def get_taxa_scores_targets():
                                         "scores",
                                         "processed",
                                         "combined",
+                                        taxon,
                                         f"scores_single_sample-{tp}-{gr}{group_str}-{taxon}.tsv",
                                     )
                                 )
@@ -107,6 +108,7 @@ def get_taxa_scores_targets():
                                 "scores",
                                 "processed",
                                 "combined",
+                                taxon,
                                 f"scores_lmm-{tp}-{gr}{group_str}-{taxon}.tsv",
                             )
                         )
@@ -128,9 +130,53 @@ def get_taxa_scores_targets():
                                 "scores",
                                 "processed",
                                 "combined",
+                                taxon,
                                 f"scores_cmh-{tp}-{gr}-{taxon}-{focus_tp}.tsv",
                             )
-                        )   
+                        )
+                        
+    # Add CMH across time taxa targets
+    if config["analysis"].get("use_cmh", True) and DATA_TYPE == "longitudinal":
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                sample_entries = get_single_sample_entries(tp, gr)
+                if sample_entries:  # Only proceed if there are eligible entries
+                    unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                    for grp in unique_groups:
+                        group_str = f"_{grp}"
+                        for taxon in tax_levels:
+                            targets.append(
+                                os.path.join(
+                                    OUTDIR,
+                                    "scores",
+                                    "processed",
+                                    "combined",
+                                    taxon,
+                                    f"scores_cmh_across_time-{tp}-{gr}{group_str}-{taxon}.tsv",
+                                )
+                            )
+    
+    # Add LMM across time taxa targets
+    if config["analysis"].get("use_lmm", True) and DATA_TYPE == "longitudinal":
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                sample_entries = get_single_sample_entries(tp, gr)
+                if sample_entries:  # Only proceed if there are eligible entries
+                    unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                    for grp in unique_groups:
+                        group_str = f"_{grp}"
+                        for taxon in tax_levels:
+                            targets.append(
+                                os.path.join(
+                                    OUTDIR,
+                                    "scores",
+                                    "processed",
+                                    "combined",
+                                    taxon,
+                                    f"scores_lmm_across_time-{tp}-{gr}{group_str}-{taxon}.tsv",
+                                )
+                            )
+                                
     return targets
 
 
@@ -203,6 +249,43 @@ def get_outlier_gene_targets():
                         raise ValueError(f"No focus timepoint defined for {tp}.")
                     for mag in mags:
                         prefix = f"{mag}_cmh_{focus_tp}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
+
+    # Add LMM across time outlier targets if enabled
+    if config["analysis"].get("use_lmm", True) and DATA_TYPE == "longitudinal":
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                # Get individual groups for across_time analysis
+                sample_entries = get_single_sample_entries(tp, gr)
+                if sample_entries:  # Only proceed if there are eligible MAGs
+                    for mag, grp in sample_entries:
+                        group_str = f"_{grp}"
+                        prefix = f"{mag}_lmm_across_time{group_str}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
+    # Add CMH across time outlier targets if enabled
+    if config["analysis"].get("use_cmh", True) and DATA_TYPE == "longitudinal":
+        for tp in timepoints_labels:
+            for gr in groups_labels:
+                # Get individual groups for across_time analysis
+                sample_entries = get_single_sample_entries(tp, gr)
+                if sample_entries:  # Only proceed if there are eligible MAGs
+                    for mag, grp in sample_entries:
+                        group_str = f"_{grp}"
+                        prefix = f"{mag}_cmh_across_time{group_str}"
                         base_dir = os.path.join(
                             OUTDIR,
                             "outlier_genes",

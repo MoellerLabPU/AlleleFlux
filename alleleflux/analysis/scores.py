@@ -14,7 +14,7 @@ from alleleflux.utilities.utilities import (
 )
 
 
-def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05, is_lmm=False):
+def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
 
     allowed_columns = [
         "MAG_ID",
@@ -29,11 +29,8 @@ def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05, is_lmm=Fals
     if group_by_column not in allowed_columns:
         raise ValueError(f"Invalid group_by_column. Must be one of {allowed_columns}")
 
-    # Extract relevant columns, handling LMM.py output if specified
-
-    test_columns_dict = extract_relevant_columns(
-        df, capture_str="p_value_", lmm_format=is_lmm
-    )
+    # Extract relevant columns
+    test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
 
     # Compute significance scores for all tests and merge them
     merged_results = calculate_score(
@@ -158,13 +155,6 @@ def main():
         metavar="filepath",
     )
 
-    parser.add_argument(
-        "--lmm_format",
-        help="Set to true if processing output from LMM.py script.",
-        action="store_true",
-        default=False,
-    )
-
     args = parser.parse_args()
     logging.info("Parsing GTDB taxa table.")
     gtdb_df = read_gtdb(args.gtdb_taxonomy)
@@ -185,9 +175,7 @@ def main():
     merged_df = pd.merge(pValue_table, gtdb_df, on="MAG_ID", how="left")
 
     logging.info("Calculating significance score.")
-    final_table = get_scores(
-        merged_df, args.group_by_column, args.pValue_threshold, args.lmm_format
-    )
+    final_table = get_scores(merged_df, args.group_by_column, args.pValue_threshold)
 
     if not args.out_fPath:
         baseDir = os.path.dirname(args.pValue_table)
