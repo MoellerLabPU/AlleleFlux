@@ -27,10 +27,18 @@ Eligibility Table
    :undoc-members:
    :show-inheritance:
 
-Two-Sample Preprocessing
----------------------
+Between Groups Preprocessing
+---------------------------
 
-.. automodule:: alleleflux.preprocessing.preprocess_two_sample
+.. automodule:: alleleflux.preprocessing.preprocess_between_groups
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Within Group Preprocessing
+-------------------------
+
+.. automodule:: alleleflux.preprocessing.preprocess_within_group
    :members:
    :undoc-members:
    :show-inheritance: 

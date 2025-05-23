@@ -59,7 +59,6 @@ rule gene_scores:
         outDir=os.path.join(
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
-        lmm_format=lambda wildcards: "--lmm_format" if wildcards.test_type == "lmm" else "",
     resources:
         time=config["resources"]["time"]["general"],
     run:
@@ -78,8 +77,7 @@ rule gene_scores:
                     --pValue_table {input.pvalue_table} \
                     --pValue_threshold {params.pValue_threshold} \
                     --output_dir {params.outDir} \
-                    --prefix {params.prefix} \
-                    {params.lmm_format}
+                    --prefix {params.prefix}
                 """
             )
         else:
@@ -91,8 +89,10 @@ rule gene_scores:
                 tests = ["tTest", "Wilcoxon"]
             elif test_type == "two_sample_unpaired":
                 tests = ["tTest", "MannWhitney"]
-            elif test_type == "lmm":
+            elif test_type == "lmm" or test_type == "lmm_across_time":
                 tests = ["lmm"]
+            elif test_type == "cmh_across_time":
+                tests = ["cmh"]
             elif test_type == "single_sample":
                 tests = ["tTest", "Wilcoxon"]
             else:
@@ -103,11 +103,18 @@ rule gene_scores:
             
             # Handle the column creation differently based on test_type
             if test_type == "lmm":
-                # LMM has only one test
+                # Regular LMM has only one test
                 columns.extend([
                     f'total_sites_per_group_{tests[0]}',
                     f'significant_sites_per_group_{tests[0]}',
                     f'score_{tests[0]} (%)'
+                ])
+            elif (test_type == "lmm_across_time" or test_type == "cmh_across_time") and group:
+                # LMM across time with specific group
+                columns.extend([
+                    f'total_sites_per_group_{tests[0]}_{group}',
+                    f'significant_sites_per_group_{tests[0]}_{group}',
+                    f'score_{tests[0]}_{group} (%)'
                 ])
             elif test_type == "single_sample" and group:
                 # Add group name to column headers for single_sample
@@ -181,8 +188,10 @@ rule detect_outlier_genes:
                 tests = ["tTest", "Wilcoxon"]
             elif test_type == "two_sample_unpaired":
                 tests = ["tTest", "MannWhitney"]
-            elif test_type == "lmm":
+            elif test_type == "lmm" or test_type == "lmm_across_time":
                 tests = ["lmm"]
+            elif test_type == "cmh_across_time":
+                tests = ["cmh"]
             elif test_type == "single_sample":
                 tests = ["tTest", "Wilcoxon"]
             else:
@@ -192,12 +201,20 @@ rule detect_outlier_genes:
             columns = ['gene_id']
             
             if test_type == "lmm":
-                # LMM has only one test
+                # Regular LMM has only one test
                 test = tests[0]
                 columns.extend([
                     f'mag_score_{test} (%)', f'gene_score_{test} (%)',
                     f'total_sites_gene_{test}', f'significant_sites_gene_{test}',
                     f'p_value_binomial_{test}', f'p_value_poisson_{test}'
+                ])
+            elif (test_type == "lmm_across_time" or test_type == "cmh_across_time") and group:
+                # LMM across time with specific group
+                test = tests[0]
+                columns.extend([
+                    f'mag_score_{test}_{group} (%)', f'gene_score_{test}_{group} (%)',
+                    f'total_sites_gene_{test}_{group}', f'significant_sites_gene_{test}_{group}',
+                    f'p_value_binomial_{test}_{group}', f'p_value_poisson_{test}_{group}'
                 ])
             elif test_type == "single_sample" and group:
                 # Add group name to column headers for single_sample
@@ -247,24 +264,24 @@ rule cmh_gene_scores:
             "scores",
             "processed",
             "gene_scores_{timepoints}-{groups}",
-            "{mag}_cmh_{focus}_gene_scores_combined.tsv",
+            "{mag}_cmh_{focus_tp}_gene_scores_combined.tsv",
         ),
         individual=os.path.join(
             OUTDIR,
             "scores",
             "processed",
             "gene_scores_{timepoints}-{groups}",
-            "{mag}_cmh_{focus}_gene_scores_individual.tsv",
+            "{mag}_cmh_{focus_tp}_gene_scores_individual.tsv",
         ),
         overlapping=os.path.join(
             OUTDIR,
             "scores",
             "processed",
             "gene_scores_{timepoints}-{groups}",
-            "{mag}_cmh_{focus}_gene_scores_overlapping.tsv",
+            "{mag}_cmh_{focus_tp}_gene_scores_overlapping.tsv",
         ),
     params:
-        prefix="{mag}_cmh_{focus}",
+        prefix="{mag}_cmh_{focus_tp}",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
         outDir=os.path.join(
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
@@ -311,21 +328,21 @@ rule detect_cmh_outlier_genes:
             "scores",
             "intermediate",
             "MAG_scores_{timepoints}-{groups}",
-            "{mag}_score_cmh_{focus}.tsv",
+            "{mag}_score_cmh_{focus_tp}.tsv",
         ),
         gene_scores=os.path.join(
             OUTDIR,
             "scores",
             "processed",
             "gene_scores_{timepoints}-{groups}",
-            "{mag}_cmh_{focus}_gene_scores_individual.tsv",
+            "{mag}_cmh_{focus_tp}_gene_scores_individual.tsv",
         ),
     output:
         os.path.join(
             OUTDIR,
             "outlier_genes",
             "{timepoints}-{groups}",
-            "{mag}_cmh_{focus}_outlier_genes.tsv",
+            "{mag}_cmh_{focus_tp}_outlier_genes.tsv",
         ),
     resources:
         time=config["resources"]["time"]["general"],

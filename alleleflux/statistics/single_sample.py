@@ -1,11 +1,8 @@
 import argparse
-import gc
 import logging
 import os
-import sys
 import time
 import warnings
-from collections import defaultdict
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
@@ -17,43 +14,6 @@ from tqdm import tqdm
 import alleleflux.utilities.supress_warning as supress_warning
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
-
-
-def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
-    logging.info(
-        f"Preprocessing: Removing positions where more than {max_zero_count} replicates have _diff_mean value zero for all nucleotides."
-    )
-
-    # List the columns we want to check.
-    diff_mean_cols = [f"{nuc}_diff_mean" for nuc in NUCLEOTIDES]
-
-    # For each replicate, check if all nucleotide diff_mean columns are zero.
-    df["all_zeros"] = (df[diff_mean_cols] == 0).all(axis=1)
-
-    # Group by position (using contig and position) and count replicates with all zeros.
-    # No need to include gene_id here as we are not using that again for the final dataframe as with the significance tests
-    zeros_count = df.groupby(["contig", "position"], dropna=False)["all_zeros"].sum()
-
-    # Identify positions where the number of replicates with all zeros exceeds the threshold.
-    positions_to_remove = zeros_count[zeros_count > max_zero_count].index
-    logging.info(
-        f"Removing {len(positions_to_remove)} positions based on zero count threshold."
-    )
-
-    # Remove these positions from the dataframe.
-    df = df.set_index(["contig", "position"])
-    df = df.drop(positions_to_remove).reset_index()
-
-    # Cleanup temporary column
-    df = df.drop(columns=["all_zeros"])
-
-    df.to_csv(
-        os.path.join(output_dir, f"{mag_id}_{group}_zeros_processed.tsv.gz"),
-        index=False,
-        sep="\t",
-        compression="gzip",
-    )
-    return df
 
 
 def perform_one_sample_tests(
@@ -158,7 +118,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--mean_changes_fPath",
+        "--df_fPath",
         required=True,
         help="Path to mean changes dataframe",
         type=str,
@@ -168,12 +128,6 @@ def main():
         type=int,
         default=4,
         help="Minimum number of replicates per group required",
-    )
-    parser.add_argument(
-        "--max_zero_count",
-        type=int,
-        default=None,
-        help="Maximum allowed replicates per position where all nucleotide_diff_mean values are zero. Positions where the count of such replicates exceeds this threshold are removed.",
     )
 
     parser.add_argument(
@@ -205,40 +159,23 @@ def main():
 
     args = parser.parse_args()
 
-    mean_changes_df = pd.read_csv(
-        args.mean_changes_fPath, sep="\t", dtype={"gene_id": str}
-    )
+    input_df = pd.read_csv(args.df_fPath, sep="\t", dtype={"gene_id": str})
 
     # Filter the dataframe to only include positions from the specified group.
-    mean_changes_df = mean_changes_df[mean_changes_df["group"] == args.group]
+    input_df = input_df[input_df["group"] == args.group]
     logging.info(
-        f"Data filtered for group '{args.group}', resulting in {mean_changes_df.shape[0]:,} rows."
+        f"Data filtered for group '{args.group}', resulting in {input_df.shape[0]:,} rows."
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Optional preprocessing: Remove sites with excessive zeros.
-    if args.max_zero_count is not None:
-        mean_changes_df = preprocess_data(
-            df=mean_changes_df,
-            max_zero_count=args.max_zero_count,
-            output_dir=args.output_dir,
-            mag_id=args.mag_id,
-            group=args.group,
-        )
-    else:
-        logging.info("User has disabled preprocessing and filtering of data.")
-
     # Check if dataframe is empty after preprocessing.
-    if mean_changes_df.empty:
-        logging.warning("No data remaining after preprocessing. Exiting.")
-        raise ValueError("No data remaining after preprocessing.")
+    if input_df.empty:
+        raise ValueError(f"{input_df} is empty.")
 
     # Group the data
     logging.info("Grouping data by contig, gene_id and position")
-    grouped_df = mean_changes_df.groupby(
-        ["contig", "gene_id", "position"], dropna=False
-    )
+    grouped_df = input_df.groupby(["contig", "gene_id", "position"], dropna=False)
 
     num_tests = len(grouped_df)
 

@@ -20,38 +20,42 @@ if DATA_TYPE == "single":
 elif DATA_TYPE == "longitudinal":
     OUTDIR = os.path.join(OUTDIR, "longitudinal")
 
-timepoints_labels = [
-    time_combo["pair"][0] if len(time_combo["pair"]) == 1 else f"{time_combo['pair'][0]}_{time_combo['pair'][1]}"
-    for time_combo in config["analysis"]["timepoints_combinations"]
-]  # ["T1", "T1_T2", "T2_T3"]
-
-# Create mapping from timepoint labels to focus timepoints
-# Focus timepoints only exist for combinations with exactly 2 timepoints
+timepoints_labels = []
 focus_timepoints = {}
-for combo in config["analysis"]["timepoints_combinations"]:
-    pair = combo["pair"]
-    # Only process combinations with exactly 2 timepoints
-    if len(pair) == 2:
-        label = f"{pair[0]}_{pair[1]}"
-        if "focus" in combo:
+
+for time_combo in config["analysis"]["timepoints_combinations"]:
+    # Standardized format: all entries are dictionaries with "timepoint" key
+    timepoint = time_combo["timepoint"]
+    
+    if len(timepoint) == 1 and DATA_TYPE == "single":
+        # Single timepoint
+        tp = timepoint[0]
+        timepoints_labels.append(tp)
+        # For single data type, the timepoint itself is the focus
+        focus_timepoints[tp] = tp
+    elif len(timepoint) == 2 and DATA_TYPE == "longitudinal":
+        # Multiple timepoints (for longitudinal analysis)
+        label = f"{timepoint[0]}_{timepoint[1]}"
+        timepoints_labels.append(label)
+        if "focus" in time_combo:
             # Ensure focus is one of the two timepoints
-            if combo["focus"] in pair:
-                focus_timepoints[label] = combo["focus"]
+            if time_combo["focus"] in timepoint:
+                focus_timepoints[label] = time_combo["focus"]
             else:
-                raise ValueError(f"Invalid focus timepoint '{combo['focus']}' for combination '{label}'. Must be one of {pair}")
+                raise ValueError(f"Invalid focus timepoint '{time_combo['focus']}' for combination '{label}'. Must be one of {timepoint}")
         else:
-            # Default to first timepoint if focus not specified
-            logging.warning(f"No focus specified for timepoint combination {label}. Using '{pair[1]}' as default.")
-            focus_timepoints[label] = pair[1]
+            # Default to second timepoint if focus not specified
+            logging.warning(f"No focus specified for timepoint combination {label}. Using '{timepoint[1]}' as default.")
+            focus_timepoints[label] = timepoint[1]
 
 # Define valid focus timepoint values for each timepoint label
 valid_focus_timepoints = {}
 for tp in timepoints_labels:
-    if "_" in tp:  # It's a two-timepoint combination with focus
+    if "_" in tp and DATA_TYPE == "longitudinal":  # It's a two-timepoint combination with focus
         valid_focus_timepoints[tp] = tp.split("_")
-    else:
-        # Single timepoint combinations don't have a focus concept
-        valid_focus_timepoints[tp] = []
+    elif DATA_TYPE == "single":
+        # For single timepoint, the timepoint itself is the focus
+        valid_focus_timepoints[tp] = [tp]
 
 groups_labels = [
     f"{gr[0]}_{gr[1]}" for gr in config["analysis"]["groups_combinations"]
@@ -66,7 +70,7 @@ wildcard_constraints:
     groups=f"({'|'.join(groups_labels)})",
     timepoints=f"({'|'.join(timepoints_labels)})",
     taxon="(domain|phylum|class|order|family|genus|species)",
-    test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm|cmh)",
+    test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm|lmm_across_time|cmh|cmh_across_time|)",
     group_str=group_str_regex,
     # timepoint_str=timepoint_str_regex,
     # Constraint for focus timepoints - all possible values from the timepoint pairs
@@ -128,16 +132,10 @@ def get_mags_by_eligibility(timepoints, groups, eligibility_type):
     )
     df = pd.read_csv(eligibility_file, sep="\t")
 
-    if eligibility_type == "two_sample_unpaired":
+    if eligibility_type == "two_sample_unpaired" or eligibility_type == "lmm":
         return df.loc[df["unpaired_test_eligible"] == True, "MAG_ID"].tolist()
-    elif eligibility_type == "two_sample_paired":
+    elif eligibility_type == "two_sample_paired" or eligibility_type == "cmh":
         return df.loc[df["paired_test_eligible"] == True, "MAG_ID"].tolist()
-    elif eligibility_type == "cmh":
-        # CMH test uses paired data, so we check paired eligibility.
-        return df.loc[df["paired_test_eligible"] == True, "MAG_ID"].tolist()
-    elif eligibility_type == "lmm":
-        # LMM uses unpaired data, so we check unpaired eligibility.
-        return df.loc[df["unpaired_test_eligible"] == True, "MAG_ID"].tolist()
     # Return MAGs from all eligible columns
     elif eligibility_type == "all":
         # Combine unpaired, paired, and any single-sample eligibility columns.
@@ -190,27 +188,3 @@ def get_single_sample_entries(timepoints, groups):
                 group = col.replace("single_sample_eligible_", "")
                 sample_entries.append((mag, group))
     return sample_entries
-
-def get_focus_from_timepoints_combo(timepoint_label):
-    """
-    Get the focus timepoint for a given timepoint combination label.
-    
-    Parameters:
-        timepoint_label (str): The timepoint label as generated in timepoints_labels
-        
-    Returns:
-        str: The focus timepoint defined in the config
-        
-    Raises:
-        ValueError: If the timepoint_label doesn't have a focus timepoint (single timepoint)
-                   or if the focus timepoint isn't defined in the config
-    """
-    # Check if this is a two-timepoint combination (contains underscore)
-    if "_" not in timepoint_label:
-        raise ValueError(f"Focus timepoints only exist for two-timepoint combinations, not for '{timepoint_label}'")
-    
-    # Use the global mapping we created
-    if timepoint_label in focus_timepoints:
-        return focus_timepoints[timepoint_label]
-    
-    raise ValueError(f"No focus timepoint defined for timepoint combination {timepoint_label}")

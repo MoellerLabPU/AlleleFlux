@@ -4,12 +4,13 @@ This workflow is designed to analyze alleles and score them based on various cri
 """
 
 # Include modular workflow components
-include: "rules/common.smk"
-include: "rules/targets.smk"
-include: "rules/allele_analysis.smk"
-include: "rules/significance_tests.smk"
-include: "rules/scoring.smk"
-include: "rules/gene_analysis.smk"
+include: "shared/common.smk"
+include: "step2/targets.smk"
+include: "step2/allele_analysis.smk"
+include: "step2/significance_within_group.smk"
+include: "step2/significance_between_groups.smk"
+include: "step2/scoring.smk"
+include: "step2/gene_analysis.smk"
 
 # Define the main rule for this workflow
 localrules:

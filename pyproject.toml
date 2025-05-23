@@ -28,7 +28,8 @@ alleleflux-cmh-scores = "alleleflux.analysis.cmh_scores:main"
 alleleflux-metadata = "alleleflux.preprocessing.mag_metadata:main"
 alleleflux-qc = "alleleflux.preprocessing.quality_control:main"
 alleleflux-eligibility = "alleleflux.preprocessing.eligibility_table:main"
-alleleflux-preprocess-two-sample = "alleleflux.preprocessing.preprocess_two_sample:main"
+alleleflux-preprocess-between-groups = "alleleflux.preprocessing.preprocess_between_groups:main"
+alleleflux-preprocess-within-group = "alleleflux.preprocessing.preprocess_within_group:main"
 
 # Statistics scripts
 alleleflux-lmm = "alleleflux.statistics.LMM:main"

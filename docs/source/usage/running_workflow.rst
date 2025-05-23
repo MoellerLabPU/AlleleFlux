@@ -119,10 +119,23 @@ You can customize the workflow by editing the ``config.yml`` file (see :doc:`inp
     # Data type: "single" for a single timepoint or "longitudinal" for multiple timepoints
     data_type: "longitudinal"
     
+    # Input files
+    input:
+      bam_dir: "/path/to/bam_files"  # For backward compatibility
+      fasta_path: "/path/to/reference.fa"
+      prodigal_path: "/path/to/genes.fna"
+      metadata_path: "/path/to/metadata.tsv"  # Must include bam_path column
+    
+    # Output directory
+    output:
+      root_dir: "/path/to/output"
+    
     # Quality control settings
     quality_control:
       min_coverage_breadth: 0.5
       disable_zero_diff_filtering: false
+      min_sample_num: 4
+      breadth_threshold: 0.1
     
     # Analysis settings
     analysis:

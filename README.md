@@ -9,16 +9,21 @@ AlleleFlux is a toolkit for analyzing allele frequencies in metagenomic data.
 
 ```
 AlleleFlux/
-├── scripts/                 # All Python scripts
-│   ├── utilities/           # Utility functions
-│   ├── preprocessing/       # Data preparation scripts
+├── alleleflux/              # Main Python package
 │   ├── analysis/            # Analysis scripts
-│   └── statistics/          # Statistical scripts
+│   ├── preprocessing/       # Data preparation scripts
+│   ├── statistics/          # Statistical scripts
+│   ├── utilities/           # Utility functions
+│   └── accessory/           # Accessory scripts
 ├── smk_workflow/            # Snakemake workflow
 │   ├── config.yml           # Configuration file
 │   ├── step1.smk            # Workflow step 1
 │   ├── step2.smk            # Workflow step 2
-│   └── rules/               # Snakemake rules
+│   ├── shared/              # Shared Snakemake modules
+│   ├── step1/               # Step 1 specific rules
+│   └── step2/               # Step 2 specific rules
+├── docs/                    # Documentation
+└── alleleFlux.py            # Main pipeline runner
 ```
 
 ## Installation
@@ -59,18 +64,25 @@ After installation, you can use these commands directly from the command line:
 - `alleleflux-taxa-scores` - Calculate taxonomic group scores
 - `alleleflux-gene-scores` - Calculate gene-level scores
 - `alleleflux-outliers` - Detect outlier genes
+- `alleleflux-cmh-scores` - Calculate CMH test scores
 
 **Preprocessing scripts:**
 - `alleleflux-metadata` - Generate MAG metadata
 - `alleleflux-qc` - Perform quality control
 - `alleleflux-eligibility` - Generate eligibility tables
-- `alleleflux-preprocess-two-sample` - Preprocess data for two-sample analysis
+- `alleleflux-preprocess-between-groups` - Preprocess data between groups
+- `alleleflux-preprocess-within-group` - Preprocess data within groups
 
 **Statistics scripts:**
 - `alleleflux-lmm` - Run linear mixed models
 - `alleleflux-single-sample` - Perform single sample statistical tests
 - `alleleflux-two-sample-paired` - Perform paired two-sample tests
 - `alleleflux-two-sample-unpaired` - Perform unpaired two-sample tests
+- `alleleflux-cmh` - Run Cochran-Mantel-Haenszel tests
+
+**Accessory scripts:**
+- `alleleflux-create-mag-mapping` - Create MAG mapping files
+- `alleleflux-add-bam-path` - Add BAM file paths to metadata
 
 For help with any command, use the `-h` or `--help` flag, e.g.:
 ```bash
@@ -112,9 +124,9 @@ Now you are ready to run the workflow !
 
 ## 📂 Relevant Files 📂 
 
-- `/AlleleFlux/smk_workflow/snakefile`: This is the main file that defines the Snakemake workflow. It contains the rules and dependencies for the analysis.
+- `/AlleleFlux/smk_workflow/step1.smk` and `/AlleleFlux/smk_workflow/step2.smk`: The main Snakemake workflow files that define the two-step analysis pipeline.
 - `/AlleleFlux/smk_workflow/config.yml`: This file contains configuration parameters for the workflow, such as input file paths and analysis settings.
-- `/AlleleFlux/smk_workflow/cornell_profile/config.yaml`: Specific run parameters to be submitted to SLURM. No need to edit it it unless you know what you're doing.
+- `/AlleleFlux/smk_workflow/cornell_profile/config.yaml`: Specific run parameters to be submitted to SLURM. No need to edit it unless you know what you're doing.
 
 ## 🏃 Running the worklow 🏃
 

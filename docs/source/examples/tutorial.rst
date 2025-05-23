@@ -20,21 +20,23 @@ First, prepare your input files:
 1. **BAM Files**: Aligned reads for each sample
 2. **Reference Genome**: FASTA file with reference sequences
 3. **Prodigal Genes**: Predicted genes in the reference genome
-4. **Metadata File**: Sample metadata
+4. **Metadata File**: Sample metadata with BAM paths
 
-Example metadata file (``metadata.txt``):
+Example metadata file (``metadata.tsv``):
 
 .. code-block:: text
 
-    sample_id    file_path                               subjectID    group      replicate    time
-    S1           /path/to/bamfiles/S1.sorted.bam         mouse1       control    A           pre
-    S2           /path/to/bamfiles/S2.sorted.bam         mouse2       control    B           pre
-    S3           /path/to/bamfiles/S3.sorted.bam         mouse3       treatment  A           pre
-    S4           /path/to/bamfiles/S4.sorted.bam         mouse4       treatment  B           pre
-    S5           /path/to/bamfiles/S5.sorted.bam         mouse1       control    A           post
-    S6           /path/to/bamfiles/S6.sorted.bam         mouse2       control    B           post
-    S7           /path/to/bamfiles/S7.sorted.bam         mouse3       treatment  A           post
-    S8           /path/to/bamfiles/S8.sorted.bam         mouse4       treatment  B           post
+    sample_id    bam_path                               subjectID    group      replicate    time
+    S1           /path/to/bamfiles/S1.sorted.bam        mouse1       control    A           pre
+    S2           /path/to/bamfiles/S2.sorted.bam        mouse2       control    B           pre
+    S3           /path/to/bamfiles/S3.sorted.bam        mouse3       treatment  A           pre
+    S4           /path/to/bamfiles/S4.sorted.bam        mouse4       treatment  B           pre
+    S5           /path/to/bamfiles/S5.sorted.bam        mouse1       control    A           post
+    S6           /path/to/bamfiles/S6.sorted.bam        mouse2       control    B           post
+    S7           /path/to/bamfiles/S7.sorted.bam        mouse3       treatment  A           post
+    S8           /path/to/bamfiles/S8.sorted.bam        mouse4       treatment  B           post
+
+**Note**: The metadata file must include a ``bam_path`` column with full paths to BAM files. You can use the ``alleleflux-add-bam-path`` utility to add this column automatically.
 
 Step 2: Configure the Pipeline
 -------------------------------
@@ -43,40 +45,58 @@ Create a configuration file (``config.yml``) based on the template:
 
 .. code-block:: yaml
 
-    # Inputs
-    bamDir: "/path/to/bamfiles"
-    fasta: "/path/to/reference.fa"
-    prodigal: "/path/to/prodigal_genes.fna"
-    metadata_file: "/path/to/metadata.txt"
-    gtdb_file: "/path/to/gtdb_taxonomy.tsv"
+    # Data type
+    data_type: "longitudinal"  # or "single" for single timepoint
+
+    # Input files
+    input:
+      bam_dir: "/path/to/bamfiles"  # For backward compatibility
+      fasta_path: "/path/to/reference.fa"
+      prodigal_path: "/path/to/prodigal_genes.fna"
+      metadata_path: "/path/to/metadata.tsv"  # Must include bam_path column
+      gtdb_path: "/path/to/gtdb_taxonomy.tsv"  # Optional
     
-    # Outputs
-    root_out: "/path/to/output_directory"
+    # Output directory
+    output:
+      root_dir: "/path/to/output_directory"
     
-    # Parameters
+    # Experimental design
     timepoints_combinations:
-      - ["pre", "post"]
+      - timepoint: ["pre", "post"]
+        focus: "post"  # Required for CMH test with longitudinal data
     
     groups_combinations:
       - ["control", "treatment"]
     
-    # Analysis options
-    analysis_options:
-      use_lmm: True
-      use_significance_tests: True
-      data_type: "longitudinal"
+    # Quality control parameters
+    quality_control:
+      min_sample_num: 4
+      breadth_threshold: 0.1
+      disable_zero_diff_filtering: false
     
-    min_sample_num: 4
-    breadth_threshold: 0.1
-    disable_zero_diff_filtering: False
-    alpha: 0.05
-    test_type: "both"
-    preprocess_two_sample: True
+    # Analysis options
+    analysis:
+      use_lmm: true
+      use_significance_tests: true
+      use_cmh: true  # Enable Cochran-Mantel-Haenszel tests
+      significance_threshold: 0.05
 
 Step 3: Run the Pipeline
 ------------------------
 
-Run the Snakemake workflow:
+Method 1: Using the Main Pipeline Runner (Recommended)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+    # Run the complete workflow
+    python alleleFlux.py --config config.yml
+
+    # Or run with specific options
+    python alleleFlux.py --config config.yml --threads 16 --profile cornell_profile/
+
+Method 2: Using Snakemake Directly
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -96,26 +116,76 @@ Step 4: Examine the Results
    
    .. code-block:: bash
    
-       cat /path/to/output_directory/longitudinal/eligibility_table_pre_post-control_treatment.tsv
+       cat /path/to/output_directory/eligibility_table_pre_post-control_treatment.tsv
 
-2. **Scores**:
+2. **Allele Frequency Analysis**:
+   
+   Check the allele frequency analysis results:
+   
+   .. code-block:: bash
+   
+       ls /path/to/output_directory/allele_analysis/allele_analysis_pre_post-control_treatment/
+
+3. **Statistical Test Results**:
+   
+   Look at the statistical test results:
+   
+   .. code-block:: bash
+   
+       ls /path/to/output_directory/significance_tests/
+
+4. **Scores**:
    
    Look at the MAG scores:
    
    .. code-block:: bash
    
-       cat /path/to/output_directory/longitudinal/scores/processed/combined/scores_two_sample_unpaired-pre_post-control_treatment-MAGs.tsv
+       cat /path/to/output_directory/scores/processed/combined/scores_two_sample_unpaired-pre_post-control_treatment-MAGs.tsv
 
-3. **Outlier Genes**:
+5. **Outlier Genes**:
    
    Identify genes with strong selection:
    
    .. code-block:: bash
    
-       cat /path/to/output_directory/longitudinal/outlier_genes/pre_post-control_treatment/MAG_ID_two_sample_unpaired_outlier_genes.tsv
+       ls /path/to/output_directory/outlier_genes/pre_post-control_treatment/
 
-Step 5: Visualize the Results
+Step 5: Understanding the Output
 -------------------------------
+
+The AlleleFlux workflow generates several types of output:
+
+**Parallelism Scores**: Measure how consistently allele frequencies change across replicates within each group.
+
+**Divergence Scores**: Quantify the degree of allele-frequency divergence between experimental groups.
+
+**Statistical Tests**: Results from various statistical approaches (two-sample, single-sample, LMM, CMH).
+
+**Outlier Genes**: Genes with exceptionally high scores that may be under strong selection.
+
+Step 6: Advanced Analysis
+------------------------
+
+For more detailed analysis, you can use individual command-line tools:
+
+.. code-block:: bash
+
+    # Run CMH test separately
+    alleleflux-cmh --input_df /path/to/longitudinal.tsv.gz \
+        --preprocessed_df /path/to/preprocessed.tsv.gz \
+        --min_sample_num 4 --mag_id MAG_ID --data_type longitudinal \
+        --cpus 16 --output_dir /path/to/output
+
+    # Calculate gene scores
+    alleleflux-gene-scores --scores_file /path/to/scores.tsv \
+        --output_dir /path/to/gene_scores
+
+    # Detect outlier genes
+    alleleflux-outliers --scores_file /path/to/gene_scores.tsv \
+        --output_dir /path/to/outliers
+
+Step 7: Visualize the Results
+-----------------------------
 
 You can visualize the results using your favorite plotting tools (e.g., R, Python). For example, to create a simple plot of scores across MAGs:
 
@@ -135,6 +205,16 @@ You can visualize the results using your favorite plotting tools (e.g., R, Pytho
     plt.title("Parallelism Scores Across MAGs")
     plt.xticks(rotation=90)
     plt.tight_layout()
+    plt.show()
+
+Next Steps
+----------
+
+For more advanced usage and detailed explanations, see:
+
+* :doc:`../usage/running_workflow` - Detailed workflow documentation
+* :doc:`../usage/interpreting_results` - How to interpret AlleleFlux outputs
+* :doc:`use_cases` - Real-world application examples
     plt.savefig("parallelism_scores.png")
 
 Conclusion
