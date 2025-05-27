@@ -4,15 +4,16 @@ This workflow is designed to profile samples based on BAM files and generate eli
 to be used by step 2.
 """
 
-# Include modular workflow components
 include: "shared/common.smk"
+# Get sample information from metadata file
+samples, sample_to_bam_map = get_sample_info()
+
+# Include modular workflow components
 include: "step1/profiling.smk"
 include: "step1/metadata.smk"
 include: "step1/quality_control.smk"
 include: "step1/eligibility.smk"
 
-# Get sample information from metadata file
-samples, sample_to_bam_map = get_sample_info()
 
 localrules:
     all,
