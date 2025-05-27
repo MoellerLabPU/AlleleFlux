@@ -17,18 +17,26 @@ rule analyze_alleles:
             "allele_analysis",
             "allele_analysis_{timepoints}-{groups}",
             (
-                "{mag}_allele_frequency_no_constant.tsv.gz"
-                if (
-                    DATA_TYPE == "single"
-                    and not config["quality_control"].get("disable_zero_diff_filtering", False)
-                )
-                else (
-                    "{mag}_allele_frequency_single.tsv.gz"
-                    if DATA_TYPE == "single"
-                    else "{mag}_allele_frequency_changes_mean.tsv.gz"
-                )
-            ),
+                "{mag}_allele_frequency_single.tsv.gz"
+                if DATA_TYPE == "single"
+                else "{mag}_allele_frequency_changes_mean.tsv.gz"
+            )
         ),
+
+        allele_freq_no_zero_diff=os.path.join(
+            OUTDIR,
+            "allele_analysis",
+            "allele_analysis_{timepoints}-{groups}",
+            (
+                "{mag}_allele_frequency_no_constant.tsv.gz"
+                if DATA_TYPE == "single"
+                else "{mag}_allele_frequency_changes_no_zero-diff.tsv.gz"
+            )
+        ) if (
+            (DATA_TYPE == "longitudinal" and not config["quality_control"].get("disable_zero_diff_filtering", False))
+            or (DATA_TYPE == "single" and not config["quality_control"].get("disable_zero_diff_filtering", False))
+        ) else [],
+
         longitudinal_output=os.path.join(
             OUTDIR,
             "allele_analysis",

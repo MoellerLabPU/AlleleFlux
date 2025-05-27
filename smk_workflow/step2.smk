@@ -19,15 +19,16 @@ localrules:
 rule all:
     input:
         get_allele_analysis_targets(),
+        # Conditional targets based on allele_analysis_only setting
+        lambda wildcards: [] if config["analysis"].get("allele_analysis_only", False) else get_taxa_scores_targets(),
+        lambda wildcards: [] if config["analysis"].get("allele_analysis_only", False) else get_outlier_gene_targets(),
         # lambda wildcards: get_two_sample_targets("two_sample_unpaired") if config["analysis"].get("use_significance_tests", True) else [],
         # lambda wildcards: get_two_sample_targets("two_sample_paired") if config["analysis"].get("use_significance_tests", True) else [],
         # lambda wildcards: get_single_sample_targets() if config["analysis"].get("use_significance_tests", True) else [],
         # lambda wildcards: get_lmm_targets() if config["analysis"].get("use_lmm", True) else [],
         # get_significance_scores_targets(),
         # get_combined_scores_targets(),
-        get_taxa_scores_targets(),
-        get_outlier_gene_targets(),
-        # Include CMH significance test outputs
-        # get_cmh_test_targets(),
-        # get_significance_scores_targets(),
-        # get_combined_scores_targets(),
+        # Uncomment when the targets are defined
+        # get_taxa_scores_targets(),
+        # get_outlier_gene_targets(),
+

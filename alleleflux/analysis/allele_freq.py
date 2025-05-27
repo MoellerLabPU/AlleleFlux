@@ -96,11 +96,11 @@ def process_mag_files(args):
     else:
         df["breadth"] = breadth
         df["genome_size"] = mag_size
-        df = calculate_frequencies(df, mag_id)
+        df = calculate_frequencies(df)
         return df
 
 
-def calculate_frequencies(df, mag_id):
+def calculate_frequencies(df):
     """
     Calculate nucleotide frequencies for a given DataFrame.
 
@@ -117,7 +117,7 @@ def calculate_frequencies(df, mag_id):
                           "A_frequency", "C_frequency", "T_frequency", and "G_frequency".
     """
     total_coverage = df["total_coverage"]
-    # logging.info(f"Calculating nucleotide frequencies for MAG {mag_id}.")
+
     # Calculate frequencies directly
     df["A_frequency"] = df["A"] / total_coverage
     df["T_frequency"] = df["T"] / total_coverage
@@ -235,7 +235,7 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
         raise ValueError(
             f"No common subjectIDs found between the {timepoint_1} and {timepoint_2}."
         )
-        sys.exit(42)
+    logging.info(f"Common subjectIDs: {common_subjectIDs}")
 
     for subjectID in common_subjectIDs:
         # Get DataFrames for each timepoint
@@ -273,9 +273,20 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
                 merged_df[f"{nuc}_{timepoint_2}"] - merged_df[f"{nuc}_{timepoint_1}"]
             )
 
+        # Calculate combined total coverage
+        merged_df["total_coverage_combined"] = (
+            merged_df[f"total_coverage_{timepoint_1}"]
+            + merged_df[f"total_coverage_{timepoint_2}"]
+        )
+
         # Select relevant columns
         columns_to_keep = (
             ["subjectID", "gene_id", "contig", "position", "replicate", "group"]
+            + [
+                f"total_coverage_{timepoint_1}",
+                f"total_coverage_{timepoint_2}",
+                "total_coverage_combined",
+            ]
             + [f"{nuc}_{timepoint_1}" for nuc in NUCLEOTIDES]
             + [f"{nuc}_{timepoint_2}" for nuc in NUCLEOTIDES]
             + [f"{nuc}_diff" for nuc in NUCLEOTIDES]

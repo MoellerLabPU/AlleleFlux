@@ -19,7 +19,7 @@ input:
 output:
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_profile_new"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
-  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags3"
+  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags4"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/for_DAG"
 
@@ -29,11 +29,13 @@ output:
 analysis:
   # Data type - determines the analysis approach
   data_type: "single"  # Options: "single" or "longitudinal"
-  
+  allele_analysis_only: False  # When True, only runs allele analysis and skips scoring/outlier detection
+
   # Enable/disable specific analysis modules
   use_lmm: True             # Linear Mixed Models analysis
   use_significance_tests: True  # Two-sample and single-sample tests
   use_cmh: True             # CMH test for categorical data
+
 
   # Timepoints and groups to analyze
   timepoints_combinations:
