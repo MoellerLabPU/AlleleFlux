@@ -13,8 +13,8 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.7"
 
-
 [project.scripts]
+
 # Analysis scripts
 alleleflux-profile = "alleleflux.analysis.profile_mags:main"
 alleleflux-allele-freq = "alleleflux.analysis.allele_freq:main"

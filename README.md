@@ -46,11 +46,11 @@ To run the workflow:
 ```bash
 # Step 1: Profile samples and generate eligibility table
 cd smk_workflow
-snakemake -s step1.smk --profile cornell_profile/
+xsnakemake -s step1.smk --profile profile/
 
 # Step 2: Analyze alleles and calculate scores
 cd smk_workflow
-snakemake -s step2.smk --profile cornell_profile/
+snakemake -s step2.smk --profile profile/
 ```
 
 ### Command-line Scripts
