@@ -11,7 +11,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from tqdm import tqdm
 
-from alleleflux.utilities.utilities import load_and_filter_data
+from alleleflux.scripts.utilities.utilities import load_and_filter_data
 
 # Accept any suffix that does *not* begin with "diff"
 _FREQ_PATTERN = re.compile(r"^[ATGC]_frequency_(?!diff\b).*")

@@ -12,8 +12,19 @@ set -euo pipefail
 # Filename of the script (for usage messages)
 SCRIPT_NAME=$(basename "$0")
 
+# --- Path Configuration: Make the script location-aware ---
+# Get the absolute directory where this script is located. This is the crucial
+# step that makes the script portable and runnable from any location.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+
+# Define absolute paths to the bundled workflow files.
+WORKFLOW_DIR="$SCRIPT_DIR/smk_workflow"
+SNAKEFILE_STEP1="$WORKFLOW_DIR/step1.smk"
+SNAKEFILE_STEP2="$WORKFLOW_DIR/step2.smk"
+DEFAULT_CONFIG_FILE="$WORKFLOW_DIR/config.yml"
+
 # Default configuration values - can be overridden by command line arguments
-CONFIG_FILE="smk_workflow/config.yml"  # Path to Snakemake config file
+CONFIG_FILE="$DEFAULT_CONFIG_FILE"      # Path to Snakemake config file
 CORES=1                                 # Number of CPU cores to use
 PROFILE=""                              # Snakemake profile directory (empty = local execution)
 DRY_RUN=false                          # Whether to perform a dry run (no actual execution)
@@ -154,8 +165,9 @@ validate_prerequisites() {
     fi
     
     # Check if we're running from the correct directory (AlleleFlux root)
-    if [[ ! -d "smk_workflow" ]]; then
-        log_error "smk_workflow directory not found. Please run from AlleleFlux root directory."
+    if [[ ! -d "$WORKFLOW_DIR" ]]; then
+        log_error "Packaged smk_workflow directory not found at: $WORKFLOW_DIR"
+        log_error "This may indicate a broken installation."
         exit 1
     fi
     
@@ -326,11 +338,10 @@ safe_snakemake_unlock() {
 }
 
 # Function to run a single Snakemake workflow step
-# Parameters: step_name, snakefile_path, step_number
+# Parameters: step_name, snakefile_path
 run_snakemake_steps() {
     local step_name="$1"    # Human-readable name for logging
     local snakefile="$2"    # Path to the Snakemake file
-    local step_num="$3"     # Step number (for reference)
     
     # Log the start of this step with key parameters
     log_info "Starting $step_name..."
@@ -416,6 +427,8 @@ main() {
     
     # Log startup information
     log_info "AlleleFlux Sequential Workflow Runner Starting"
+    log_info "Version: ${ALLELEFLUX_VERSION:-unknown}" # Use version from env var
+    log_info "Packaged content is at: $SCRIPT_DIR"
     log_info "Timestamp: $(date)"
     log_info "Working directory: $(pwd)"
     log_info "User: $USER"
@@ -427,12 +440,12 @@ main() {
     if [[ "$STEP2_ONLY" == true ]]; then
         # User requested Step 2 only - assumes Step 1 outputs already exist
         log_info "Running Step 2 only (assuming Step 1 is completed)"
-        run_snakemake_steps "Step 2: Allele Analysis and Scoring" "smk_workflow/step2.smk" "2"
+        run_snakemake_steps "Step 2: Allele Analysis and Scoring" "$SNAKEFILE_STEP2"
         
     elif [[ "$STEP1_ONLY" == true ]]; then
         # User requested Step 1 only - useful for testing or partial runs
         log_info "Running Step 1 only"
-        run_snakemake_steps "Step 1: Sample Profiling and Eligibility" "smk_workflow/step1.smk" "1"
+        run_snakemake_steps "Step 1: Sample Profiling and Eligibility" "$SNAKEFILE_STEP1"
         
     else
         # Default: run complete workflow sequentially
@@ -440,7 +453,7 @@ main() {
         
         # Run Step 1: Sample profiling and eligibility table generation
         log_info "========== STEP 1 =========="
-        run_snakemake_steps "Step 1: Sample Profiling and Eligibility" "smk_workflow/step1.smk" "1"
+        run_snakemake_steps "Step 1: Sample Profiling and Eligibility" "$SNAKEFILE_STEP1"
         
         # Only proceed to Step 2 if Step 1 succeeded (run_snakemake_steps would exit on failure)
         log_info "Step 1 completed successfully. Proceeding to Step 2..."
@@ -448,7 +461,7 @@ main() {
         
         # Run Step 2: Allele analysis and scoring (depends on Step 1 outputs)
         log_info "========== STEP 2 =========="
-        run_snakemake_steps "Step 2: Allele Analysis and Scoring" "smk_workflow/step2.smk" "2"
+        run_snakemake_steps "Step 2: Allele Analysis and Scoring" "$SNAKEFILE_STEP2"
     fi
     
     # Calculate and display total execution time

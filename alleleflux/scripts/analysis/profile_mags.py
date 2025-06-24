@@ -14,7 +14,7 @@ from Bio import SeqIO
 from intervaltree import IntervalTree
 from tqdm import tqdm
 
-from alleleflux.utilities.utilities import extract_mag_id, load_mag_mapping
+from alleleflux.scripts.utilities.utilities import extract_mag_id, load_mag_mapping
 
 # Global variables for BAM and FASTA files in worker processes
 bamfile = None

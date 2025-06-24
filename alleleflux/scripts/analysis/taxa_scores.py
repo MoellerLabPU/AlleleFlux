@@ -5,7 +5,7 @@ import os
 
 import pandas as pd
 
-from alleleflux.utilities.utilities import extract_relevant_columns
+from alleleflux.scripts.utilities.utilities import extract_relevant_columns
 
 
 def taxa_scores(df, group_col):

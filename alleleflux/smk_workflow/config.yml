@@ -27,15 +27,13 @@ output:
 # -----------------------
 # Core settings that control the type and scope of analysis
 analysis:
-  # Data type - determines the analysis approach
-  data_type: "single"  # Options: "single" or "longitudinal"
-  allele_analysis_only: False  # When True, only runs allele analysis and skips scoring/outlier detection
+  data_type: "single"           # Options: "single" or "longitudinal"
+  allele_analysis_only: False   # When True, only runs allele analysis and skips scoring/outlier detection
 
   # Enable/disable specific analysis modules
-  use_lmm: True             # Linear Mixed Models analysis
+  use_lmm: True                 # Linear Mixed Models analysis
   use_significance_tests: True  # Two-sample and single-sample tests
-  use_cmh: True             # CMH test for categorical data
-
+  use_cmh: True                 # CMH test for categorical data
 
   # Timepoints and groups to analyze
   timepoints_combinations:
@@ -49,8 +47,6 @@ analysis:
     #   focus: "end"
     # - timepoint: ["end", "post"]
     #   focus: "post"
-  
-
 
   groups_combinations:
     - ["fat", "control"]    # Currently active group comparison
@@ -65,19 +61,18 @@ quality_control:
 # Statistical Parameters
 # ----------------------
 statistics:
-  alpha: 0.05               # Significance threshold for statistical tests
-  filter_type: "t-test"       # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
-  preprocess_two_sample: True  # Whether to preprocess data for two-sample tests
-  max_zero_count: 4         # Maximum number of zero values allowed in single-sample test
-  p_value_threshold: 0.05   # P-value threshold for significance
+  filter_type: "t-test"         # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
+  preprocess_two_sample: True   # Whether to preprocess data for two-sample tests
+  max_zero_count: 4             # Maximum number of zero values allowed in single-sample test
+  p_value_threshold: 0.05       # P-value threshold for significance
 
 # Compute Resources
 # -----------------
 # Resources allocated to each step of the workflow
 resources:
   cpus:
-    profile: 16              # CPUs for profiling step
-    quality_control: 8      # CPUs for quality control
+    profile: 16             # CPUs for profiling step
+    quality_control: 16      # CPUs for quality control
     analyze_alleles: 16     # CPUs for allele analysis
     significance_test: 16   # CPUs for significance testing
   
@@ -85,7 +80,7 @@ resources:
     profile: 10000   
     quality_control: 100000 # Memory in MB (100 GB) for quality control
     analyze_alleles: 100000 # Memory in MB (100 GB) for allele analysis
-    significance_test: 100000 # Memory in MB for significance testing
+    significance_test: 10000 # Memory in MB for significance testing
   
   time:                     # Runtime limits in format "days-HH:MM:SS"
     profile: "08:00:00"     # 8 hours for profiling

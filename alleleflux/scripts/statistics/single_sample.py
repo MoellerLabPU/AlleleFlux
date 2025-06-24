@@ -11,7 +11,7 @@ import pandas as pd
 from scipy import stats
 from tqdm import tqdm
 
-import alleleflux.utilities.supress_warning as supress_warning
+import alleleflux.scripts.utilities.supress_warning as supress_warning
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 

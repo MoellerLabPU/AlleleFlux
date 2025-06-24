@@ -9,7 +9,7 @@ import pandas as pd
 from scipy import stats
 from tqdm import tqdm
 
-import alleleflux.utilities.supress_warning as supress_warning
+import alleleflux.scripts.utilities.supress_warning as supress_warning
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
@@ -262,7 +262,9 @@ def main():
     )
 
     parser.add_argument("--output_fPath", required=True, help="Path to output file")
-    parser.add_argument("--alpha", type=float, default=0.05, help="Significance level")
+    parser.add_argument(
+        "--p_value_threshold", type=float, default=0.05, help="Significance level"
+    )
 
     parser.add_argument(
         "--data_type",
@@ -303,7 +305,7 @@ def main():
         f"Determining sites to remove based on paired tests using {args.cpus} cpus. Filter type is set to {args.filter_type}. Data type is {args.data_type}"
     )
     sites_to_remove = filter_sites_parallel(
-        grouped, args.alpha, args.filter_type, args.cpus, args.data_type
+        grouped, args.p_value_threshold, args.filter_type, args.cpus, args.data_type
     )
     logging.info(f"Removing {len(sites_to_remove):,} sites")
 

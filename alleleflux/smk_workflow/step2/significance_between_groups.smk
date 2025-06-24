@@ -84,7 +84,7 @@ rule preprocess_between_groups:
             ),
         ),
     params:
-        alpha=config["statistics"].get("alpha", 0.05),
+        p_value_threshold=config["statistics"].get("p_value_threshold", 0.05),
         filter_type=config["statistics"].get("filter_type", "t-test"),
         data_type=DATA_TYPE,
     threads: config["resources"]["cpus"]["quality_control"]
@@ -94,7 +94,7 @@ rule preprocess_between_groups:
         """
         alleleflux-preprocess-between-groups \
             --mean_changes_fPath {input} \
-            --cpus {threads} --alpha {params.alpha} \
+            --cpus {threads} --p_value_threshold {params.p_value_threshold} \
             --output_fPath {output.outPath} \
             --filter_type {params.filter_type} \
             --data_type {params.data_type}

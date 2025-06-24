@@ -31,7 +31,7 @@ import logging
 
 import pandas as pd
 
-from alleleflux.utilities.utilities import read_gtdb
+from alleleflux.scripts.utilities.utilities import read_gtdb
 
 
 def load_cmh_results(file_path, timepoint=None):

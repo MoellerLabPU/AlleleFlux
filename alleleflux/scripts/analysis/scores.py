@@ -5,7 +5,7 @@ import os
 
 import pandas as pd
 
-from alleleflux.utilities.utilities import (
+from alleleflux.scripts.utilities.utilities import (
     calculate_score,
     extract_mag_id,
     extract_relevant_columns,

@@ -14,33 +14,38 @@ readme = "README.md"
 requires-python = ">=3.7"
 
 [project.scripts]
+alleleflux = "alleleflux.main:main"
 
 # Analysis scripts
-alleleflux-profile = "alleleflux.analysis.profile_mags:main"
-alleleflux-allele-freq = "alleleflux.analysis.allele_freq:main"
-alleleflux-scores = "alleleflux.analysis.scores:main"
-alleleflux-taxa-scores = "alleleflux.analysis.taxa_scores:main"
-alleleflux-gene-scores = "alleleflux.analysis.gene_scores:main"
-alleleflux-outliers = "alleleflux.analysis.outliers_genes:main"
-alleleflux-cmh-scores = "alleleflux.analysis.cmh_scores:main"
+alleleflux-profile = "alleleflux.scripts.analysis.profile_mags:main"
+alleleflux-allele-freq = "alleleflux.scripts.analysis.allele_freq:main"
+alleleflux-scores = "alleleflux.scripts.analysis.scores:main"
+alleleflux-taxa-scores = "alleleflux.scripts.analysis.taxa_scores:main"
+alleleflux-gene-scores = "alleleflux.scripts.analysis.gene_scores:main"
+alleleflux-outliers = "alleleflux.scripts.analysis.outliers_genes:main"
+alleleflux-cmh-scores = "alleleflux.scripts.analysis.cmh_scores:main"
 
 # Preprocessing scripts
-alleleflux-metadata = "alleleflux.preprocessing.mag_metadata:main"
-alleleflux-qc = "alleleflux.preprocessing.quality_control:main"
-alleleflux-eligibility = "alleleflux.preprocessing.eligibility_table:main"
-alleleflux-preprocess-between-groups = "alleleflux.preprocessing.preprocess_between_groups:main"
-alleleflux-preprocess-within-group = "alleleflux.preprocessing.preprocess_within_group:main"
+alleleflux-metadata = "alleleflux.scripts.preprocessing.mag_metadata:main"
+alleleflux-qc = "alleleflux.scripts.preprocessing.quality_control:main"
+alleleflux-eligibility = "alleleflux.scripts.preprocessing.eligibility_table:main"
+alleleflux-preprocess-between-groups = "alleleflux.scripts.preprocessing.preprocess_between_groups:main"
+alleleflux-preprocess-within-group = "alleleflux.scripts.preprocessing.preprocess_within_group:main"
 
 # Statistics scripts
-alleleflux-lmm = "alleleflux.statistics.LMM:main"
-alleleflux-single-sample = "alleleflux.statistics.single_sample:main"
-alleleflux-two-sample-paired = "alleleflux.statistics.two_sample_paired:main"
-alleleflux-two-sample-unpaired = "alleleflux.statistics.two_sample_unpaired:main"
-alleleflux-cmh = "alleleflux.statistics.CMH:main"
+alleleflux-lmm = "alleleflux.scripts.statistics.LMM:main"
+alleleflux-single-sample = "alleleflux.scripts.statistics.single_sample:main"
+alleleflux-two-sample-paired = "alleleflux.scripts.statistics.two_sample_paired:main"
+alleleflux-two-sample-unpaired = "alleleflux.scripts.statistics.two_sample_unpaired:main"
+alleleflux-cmh = "alleleflux.scripts.statistics.CMH:main"
 
 # Accessory scripts
-alleleflux-create-mag-mapping = "alleleflux.accessory.create_mag_mapping:main"
-alleleflux-add-bam-path = "alleleflux.accessory.add_bam_path_to_metadata:main"
+alleleflux-create-mag-mapping = "alleleflux.scripts.accessory.create_mag_mapping:main"
+alleleflux-add-bam-path = "alleleflux.scripts.accessory.add_bam_path_to_metadata:main"
+
+[tool.setuptools.package-data]
+# Include the runner script AND everything inside the smk_workflow directory
+alleleflux = ["runner.sh", "smk_workflow/**"] 
 
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"

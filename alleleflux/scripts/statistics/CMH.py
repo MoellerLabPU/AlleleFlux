@@ -31,7 +31,7 @@ from rpy2.robjects import pandas2ri, r
 from rpy2.robjects.packages import importr
 from tqdm import tqdm
 
-from alleleflux.utilities.utilities import load_and_filter_data
+from alleleflux.scripts.utilities.utilities import load_and_filter_data
 
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
 
