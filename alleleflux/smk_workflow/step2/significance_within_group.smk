@@ -63,7 +63,7 @@ rule single_sample:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "single_sample_{timepoints}-{groups}"
         ),
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
     shell:
@@ -127,7 +127,7 @@ rule lmm_analysis_across_time:
             if config["statistics"].get("preprocess_two_sample", False)
             else ""
         )
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
         mem_mb=config["resources"]["memory"]["significance_test"] # LMM can be memory intensive
@@ -181,7 +181,7 @@ rule cmh_test_across_time:
             if config["statistics"].get("preprocess_two_sample", False)
             else ""
         )
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
         mem_mb=config["resources"]["memory"]["significance_test"],

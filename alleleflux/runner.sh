@@ -369,12 +369,18 @@ run_snakemake_steps() {
     local cmd=(snakemake)
     cmd+=("--snakefile" "$snakefile")           # Specify which Snakefile to use
     cmd+=("--configfile" "$CONFIG_FILE")        # Specify config file
-    cmd+=("--cores" "$CORES")                   # Number of cores to use
+    # cmd+=("--cores" "$CORES")                   # Number of cores to use
     cmd+=("--rerun-incomplete")                 # Rerun any incomplete jobs from previous runs
     
     # Add profile if specified (for cluster execution)
     if [[ -n "$PROFILE" ]]; then
         cmd+=("--profile" "$PROFILE")
+    fi
+    
+    # Conditionally add --cores.
+    # Add it if No profile is used (local execution needs it).
+    if [[ -z "$PROFILE" ]]; then
+        cmd+=("--cores" "$CORES")
     fi
     
     # Add dry run flag if requested (test mode - no actual execution)

@@ -7,13 +7,13 @@ import logging
 
 
 # Load the configuration file
-configfile: os.path.join(workflow.basedir, "config.yml")
+# configfile: os.path.join(workflow.basedir, "config.yml")
 
 
 # Define the global data_type variable to be used across all Snakemake files
 DATA_TYPE = config["analysis"]["data_type"]
-
 OUTDIR = config["output"]["root_dir"]
+DN_DS_TEST_TYPE = config["dnds"]["dn_ds_test_type"]
 
 if DATA_TYPE == "single":
     OUTDIR = os.path.join(OUTDIR, "single_timepoint")
@@ -71,6 +71,7 @@ wildcard_constraints:
     timepoints=f"({'|'.join(timepoints_labels)})",
     taxon="(domain|phylum|class|order|family|genus|species)",
     test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm|lmm_across_time|cmh|cmh_across_time|)",
+    sub_test="(MannWhitney|Wilcoxon|tTest|LMM|CMH|)",
     group_str=group_str_regex,
     # timepoint_str=timepoint_str_regex,
     # Constraint for focus timepoints - all possible values from the timepoint pairs
@@ -188,3 +189,82 @@ def get_single_sample_entries(timepoints, groups):
                 group = col.replace("single_sample_eligible_", "")
                 sample_entries.append((mag, group))
     return sample_entries
+
+
+def parse_metadata_for_timepoint_pairs(timepoints_label, groups_label):
+    """
+    Parse metadata to identify ancestral-derived sample pairs for dN/dS analysis.
+    
+    For longitudinal data, this function:
+    1. Identifies the derived timepoint from the 'focus' field in config
+    2. Treats the other timepoint as ancestral
+    3. Matches samples by subject ID across timepoints
+    4. Validates exactly 2 samples per subject-timepoint combination
+    
+    Parameters:
+        timepoints_label (str): Timepoint combination label (e.g., "pre_post")
+        groups_label (str): Group combination label (e.g., "fat_control")
+    
+    Returns:
+        list: Tuples of (subject_id, ancestral_sample_id, derived_sample_id)
+    """
+    metadata_path = config["input"]["metadata_path"]
+    metadata_df = pd.read_csv(metadata_path, sep="\t")
+    
+    # Parse timepoint and group information
+    if "_" in timepoints_label and DATA_TYPE == "longitudinal":
+        timepoint1, timepoint2 = timepoints_label.split("_")
+        
+        # Determine ancestral and derived timepoints based on focus
+        focus_tp = focus_timepoints.get(timepoints_label)
+        if not focus_tp:
+            raise ValueError(f"No focus timepoint defined for {timepoints_label}")
+        
+        # The focus is the derived timepoint
+        if focus_tp == timepoint1:
+            derived_tp, ancestral_tp = timepoint1, timepoint2
+        else:
+            derived_tp, ancestral_tp = timepoint2, timepoint1
+    else:
+        raise ValueError(f"dN/dS analysis requires longitudinal data with two timepoints, got: {timepoints_label}")
+    
+    # Parse groups
+    group1, group2 = groups_label.split("_")
+    
+    # Filter metadata for relevant samples
+    filtered_df = metadata_df[
+        metadata_df["group"].isin([group1, group2]) &
+        metadata_df["time"].isin([ancestral_tp, derived_tp])
+    ]
+    
+    # Group by subject and timepoint to validate sample counts
+    subject_timepoint_counts = filtered_df.groupby(["subjectID", "time"]).size()
+    
+    # Validate exactly 2 samples per subject-timepoint
+    for (subject, tp), count in subject_timepoint_counts.items():
+        if count != 1:
+            raise ValueError(
+                f"Expected exactly 1 sample for subject {subject} at timepoint {tp}, "
+                f"but found {count} samples"
+            )
+    
+    # Build sample pairs
+    sample_pairs = []
+    subjects = filtered_df["subjectID"].unique()
+    
+    for subject in subjects:
+        subject_df = filtered_df[filtered_df["subjectID"] == subject]
+        
+        # Get ancestral and derived samples
+        ancestral_samples = subject_df[subject_df["time"] == ancestral_tp]["sample_id"].tolist()
+        derived_samples = subject_df[subject_df["time"] == derived_tp]["sample_id"].tolist()
+        
+        if len(ancestral_samples) == 1 and len(derived_samples) == 1:
+            sample_pairs.append((subject, ancestral_samples[0], derived_samples[0]))
+        else:
+            logging.warning(
+                f"Skipping subject {subject}: found {len(ancestral_samples)} ancestral "
+                f"and {len(derived_samples)} derived samples"
+            )
+    
+    return sample_pairs

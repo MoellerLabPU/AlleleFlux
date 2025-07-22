@@ -6,20 +6,20 @@
 # Path specifications for all required input data
 input:
   bam_dir: "/local1/workdir1/Shared_Folder/instrain_for_sidd/new_instrain/bt2_redo"           # Directory containing BAM files (used for backward compatibility)
-  fasta_path: "/workdir1/sidd/for_sam/new_instrain/redo_representative_megamag.fa"  # Reference fasta file
-  prodigal_path: "/workdir1/sidd/for_sam/new_instrain/prodigal_redo/redo_representative_megamag.fna"  # Prodigal output
+  fasta_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/redo_representative_megamag.fa"  # Reference fasta file
+  prodigal_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/redo_representative_megamag.fna"  # Prodigal output
   # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
   # metadata_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/no_replicate/mouse_md_edit_no_replicate.txt"
-  metadata_path: "/workdir1/sidd/for_sam/new_instrain/test_new_version/metadata_with_bam.tsv"
-  gtdb_path: "/workdir1/sidd/for_sam/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
-  mag_mapping_path: "/local1/workdir1/sidd/for_sam/new_instrain/test_new_version/sam_reference_genomes/megamag_mapping.tsv"      # Path to MAG-to-contig mapping file with columns: mag_id, contig_id
+  metadata_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/metadata_with_bam.tsv"
+  gtdb_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/gtdbtk.bac120.summary.tsv"       # GTDB taxonomy information
+  mag_mapping_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/megamag_mapping.tsv"      # Path to MAG-to-contig mapping file with columns: mag_id, contig_id
 
 # Output Directory
 # --------------------
 output:
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_profile_new"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
-  root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/normal_mags4"
+  root_dir: "/workdir/sidd/sam_diet_manip/alleleflux_test/normal_mags3"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/for_DAG"
 
@@ -27,7 +27,7 @@ output:
 # -----------------------
 # Core settings that control the type and scope of analysis
 analysis:
-  data_type: "single"           # Options: "single" or "longitudinal"
+  data_type: "longitudinal"           # Options: "single" or "longitudinal"
   allele_analysis_only: False   # When True, only runs allele analysis and skips scoring/outlier detection
 
   # Enable/disable specific analysis modules
@@ -39,12 +39,12 @@ analysis:
   timepoints_combinations:
     # For single data type: use a single timepoint in a list
     # For longitudinal data type: use a dictionary with pair and focus keys
-    - timepoint: ["end"] 
-    - timepoint: ["post"]
+    # - timepoint: ["end"] 
+    # - timepoint: ["post"]
     # - timepoint: ["pre", "post"]
     #   focus: "pre"        # Required if CMH test is enabled
-    # - timepoint: ["pre", "end"]
-    #   focus: "end"
+    - timepoint: ["pre", "end"]
+      focus: "end"
     # - timepoint: ["end", "post"]
     #   focus: "post"
 
@@ -65,16 +65,23 @@ statistics:
   preprocess_two_sample: True   # Whether to preprocess data for two-sample tests
   max_zero_count: 4             # Maximum number of zero values allowed in single-sample test
   p_value_threshold: 0.05       # P-value threshold for significance
+  fdr_group_by_mag_id: False    # Whether to apply FDR correction separately for each MAG ID
+
+
+# dN/dS Analysis Parameters
+# -------------------------
+# Configuration for evolutionary analysis using dnds_from_timepoints.py
+dnds:
+  p_value_column: "q_value"     # Column for p-value filtering: "min_p_value" or "q_value"
+  dn_ds_test_type: "two_sample_paired_tTest"              # Statistical test type for filtering results
+  # group_analyzed: "fat"       # Need if `dn_ds_test_type` is ["single_sample", "lmm_across_time", "cmh_across_time"]
 
 # Compute Resources
 # -----------------
 # Resources allocated to each step of the workflow
 resources:
   cpus:
-    profile: 16             # CPUs for profiling step
-    quality_control: 16      # CPUs for quality control
-    analyze_alleles: 16     # CPUs for allele analysis
-    significance_test: 16   # CPUs for significance testing
+    threads_per_job: 16      # CPUs for profiling step
   
   memory:
     profile: 10000   

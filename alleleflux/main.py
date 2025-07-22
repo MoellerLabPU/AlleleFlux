@@ -72,6 +72,33 @@ def create_config(args):
         set_nested(["quality_control", "breadth_threshold"], args.breadth_threshold)
     if args.p_value_threshold:
         set_nested(["statistics", "p_value_threshold"], args.p_value_threshold)
+    if args.filter_type:
+        set_nested(["statistics", "filter_type"], args.filter_type)
+    if args.max_zero_count is not None:
+        set_nested(["statistics", "max_zero_count"], args.max_zero_count)
+
+    # --- Automatic Resource Allocation ---
+    # Only perform this logic if the specific resource section is not already defined in a base config.
+    if not config_data.get("resources", {}).get("cpus"):
+        threads_for_parallel_jobs = min(args.cores, args.threads_per_job)
+        logging.info(
+            f"Setting default threads per parallelizable job to {threads_for_parallel_jobs}"
+        )
+        set_nested(["resources", "cpus", "threads_per_job"], threads_for_parallel_jobs)
+
+    if not config_data.get("resources", {}).get("memory"):
+        logging.info(
+            f"Setting default memory tiers: low_mem={args.low_mem}MB, high_mem={args.high_mem}MB"
+        )
+        set_nested(["resources", "memory", "low_mem"], args.low_mem)
+        set_nested(["resources", "memory", "high_mem"], args.high_mem)
+
+    if not config_data.get("resources", {}).get("time"):
+        logging.info(
+            f"Setting default time tiers: low_time='{args.low_time}', high_time='{args.high_time}'"
+        )
+        set_nested(["resources", "time", "low_time"], args.low_time)
+        set_nested(["resources", "time", "high_time"], args.high_time)
 
     # Layer defaults for booleans, then override with flags
     # The setdefault method only sets a value if the key does not already exist. So it will not overwrite if the key is already set in the config.
@@ -79,6 +106,10 @@ def create_config(args):
     config_data.setdefault("analysis", {}).setdefault("use_significance_tests", True)
     config_data.setdefault("analysis", {}).setdefault("use_cmh", True)
     config_data.setdefault("analysis", {}).setdefault("allele_analysis_only", False)
+    config_data.setdefault("statistics", {}).setdefault("preprocess_two_sample", True)
+    config_data.setdefault("quality_control", {}).setdefault(
+        "disable_zero_diff_filtering", False
+    )
 
     if args.disable_lmm:
         config_data["analysis"]["use_lmm"] = False
@@ -88,6 +119,10 @@ def create_config(args):
         config_data["analysis"]["use_cmh"] = False
     if args.allele_analysis_only:
         config_data["analysis"]["allele_analysis_only"] = True
+    if args.disable_zero_diff_filtering:
+        config_data["quality_control"]["disable_zero_diff_filtering"] = True
+    if args.disable_preprocess_two_sample:
+        config_data["statistics"]["preprocess_two_sample"] = False
 
     # Simplified logic for a single timepoint/group combination
     if args.timepoints:
@@ -117,6 +152,7 @@ def main():
     output_group = parser.add_argument_group("Output Directory")
     analysis_group = parser.add_argument_group("Analysis Settings")
     qc_group = parser.add_argument_group("Quality Control & Statistics")
+    resource_group = parser.add_argument_group("Resource Allocation")
 
     # Workflow Control
     version_str = f"AlleleFlux {metadata.version('AlleleFlux')}"
@@ -248,6 +284,62 @@ def main():
         type=float,
         default=0.05,
         help="P-value threshold for significance.",
+    )
+    qc_group.add_argument(
+        "--filter-type",
+        type=str,
+        default="t-test",
+        choices=["t-test", "wilcoxon", "both", "either"],
+        help="Filter type for two-sample preprocessing.",
+    )
+    qc_group.add_argument(
+        "--max-zero-count",
+        type=int,
+        default=4,
+        help="Maximum number of zero values allowed in single-sample test.",
+    )
+    qc_group.add_argument(
+        "--disable-zero-diff-filtering",
+        action="store_true",
+        default=False,
+        help="Keep sites with zero difference (default: filter them).",
+    )
+    qc_group.add_argument(
+        "--disable-preprocess-two-sample",
+        action="store_true",
+        default=False,
+        help="Disable preprocessing for two-sample tests.",
+    )
+    # Tiered Resource Allocation Defaults
+    resource_group.add_argument(
+        "--threads-per-job",
+        type=int,
+        default=16,
+        help="Default threads for a single parallelizable job.",
+    )
+    resource_group.add_argument(
+        "--low-mem",
+        type=int,
+        default=10000,
+        help="Memory (MB) for low-memory jobs (e.g., profile, significance_test).",
+    )
+    resource_group.add_argument(
+        "--high-mem",
+        type=int,
+        default=100000,
+        help="Memory (MB) for high-memory jobs (e.g., quality_control, analyze_alleles).",
+    )
+    resource_group.add_argument(
+        "--low-time",
+        type=str,
+        default="08:00:00",
+        help="Runtime for low-runtime jobs (e.g., profile, significance_test).",
+    )
+    resource_group.add_argument(
+        "--high-time",
+        type=str,
+        default="24:00:00",
+        help="Runtime for high-runtime jobs (e.g., general tasks).",
     )
 
     args = parser.parse_args()

@@ -31,6 +31,7 @@ alleleflux-qc = "alleleflux.scripts.preprocessing.quality_control:main"
 alleleflux-eligibility = "alleleflux.scripts.preprocessing.eligibility_table:main"
 alleleflux-preprocess-between-groups = "alleleflux.scripts.preprocessing.preprocess_between_groups:main"
 alleleflux-preprocess-within-group = "alleleflux.scripts.preprocessing.preprocess_within_group:main"
+alleleflux-p-value-summary = "alleleflux.scripts.preprocessing.p_value_summary:main"
 
 # Statistics scripts
 alleleflux-lmm = "alleleflux.scripts.statistics.LMM:main"
@@ -38,6 +39,9 @@ alleleflux-single-sample = "alleleflux.scripts.statistics.single_sample:main"
 alleleflux-two-sample-paired = "alleleflux.scripts.statistics.two_sample_paired:main"
 alleleflux-two-sample-unpaired = "alleleflux.scripts.statistics.two_sample_unpaired:main"
 alleleflux-cmh = "alleleflux.scripts.statistics.CMH:main"
+
+# Evolution
+alleleflux-dnds-from-timepoints = "alleleflux.scripts.evolution.dnds_from_timepoints:main"
 
 # Accessory scripts
 alleleflux-create-mag-mapping = "alleleflux.scripts.accessory.create_mag_mapping:main"

@@ -15,7 +15,7 @@ rule qc:
     params:
         breadth_threshold=config["quality_control"]["breadth_threshold"],
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["quality_control"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["general"],
         mem_mb=config["resources"]["memory"]["quality_control"],

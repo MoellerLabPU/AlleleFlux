@@ -12,6 +12,9 @@ logging.basicConfig(
     level=logging.DEBUG,
 )
 
+# Set up logger for this module
+logger = logging.getLogger(__name__)
+
 
 def calculate_mag_sizes(fasta_file, mag_mapping_file):
     """
@@ -28,7 +31,7 @@ def calculate_mag_sizes(fasta_file, mag_mapping_file):
     Returns:
         dict: A dictionary where keys are MAG IDs and values are the total sizes of the MAGs.
     """
-    logging.info("Parsing FASTA file to calculate MAG size.")
+    logger.info("Parsing FASTA file to calculate MAG size.")
 
     # Load MAG mapping if provided
     mag_mapping = load_mag_mapping(mag_mapping_file)
@@ -41,7 +44,7 @@ def calculate_mag_sizes(fasta_file, mag_mapping_file):
         # Accumulate the length of the contig to the MAG's total size
         mag_sizes[mag_id] += len(record.seq)
 
-    logging.info(f"Calculated sizes for {len(mag_sizes)} MAGs")
+    logger.info(f"Calculated sizes for {len(mag_sizes)} MAGs")
     return mag_sizes
 
 
@@ -63,7 +66,7 @@ def load_mag_mapping(mapping_file):
             "MAG mapping file is required. Please provide a valid path to a MAG-to-contig mapping file."
         )
 
-    logging.info(f"Loading MAG-to-contig mapping from: {mapping_file}")
+    logger.info(f"Loading MAG-to-contig mapping from: {mapping_file}")
     df = pd.read_csv(mapping_file, sep="\t")
 
     required_columns = {"mag_id", "contig_id"}
@@ -76,7 +79,7 @@ def load_mag_mapping(mapping_file):
 
     # Create a dictionary mapping contig names to MAG IDs
     mapping = dict(zip(df["contig_id"], df["mag_id"]))
-    logging.info(f"Loaded mapping for {len(mapping):,} contigs")
+    logger.info(f"Loaded mapping for {len(mapping):,} contigs")
     return mapping
 
 
@@ -128,7 +131,7 @@ def load_mag_metadata_file(
         ValueError: If the MAG metadata file is missing required columns.
     """
 
-    logging.info(f"Loading MAG metadata from file: {mag_metadata_file}")
+    logger.info(f"Loading MAG metadata from file: {mag_metadata_file}")
     df = pd.read_csv(mag_metadata_file, sep="\t")
 
     if data_type == "longitudinal":
@@ -202,7 +205,7 @@ def extract_relevant_columns(df, capture_str):
         test_name = col.split(capture_str)[-1]
 
         test_columns_dict.setdefault(test_name, []).append(col)
-    logging.info(f"Detected tests: {list(test_columns_dict.keys())}")
+    logger.info(f"Detected tests: {list(test_columns_dict.keys())}")
     return test_columns_dict
 
 
@@ -219,7 +222,7 @@ def calculate_score(df, test_columns_dict, group_by_column, p_value_threshold=0.
         # Check for NaNs in p-value columns and log them instead of raising an error
         nan_counts = subdf[test_cols].isnull().sum().sum()
         if nan_counts > 0:
-            logging.warning(
+            logger.warning(
                 f"Found {nan_counts} NaN values in {test_name} p-value columns. NAs will be skipped in calculations."
             )
 
@@ -338,13 +341,13 @@ def load_and_filter_data(
         ValueError: If no positions remain after filtering by the preprocessed data.
     """
     # Read the preprocessed positions for filtering
-    logging.info(f"Loading preprocessed positions from {preprocessed_df_path}")
+    logger.info(f"Loading preprocessed positions from {preprocessed_df_path}")
     preprocessed_df = pd.read_csv(
         preprocessed_df_path,
         sep="\t",
         usecols=["contig", "position", "group"],
     )
-    logging.info(f"Loaded {preprocessed_df.shape[0]:,} preprocessed positions.")
+    logger.info(f"Loaded {preprocessed_df.shape[0]:,} preprocessed positions.")
 
     # Verify the requested group exists in the data. Required for LMM parallelism score.
     if group_to_analyze and group_to_analyze not in preprocessed_df["group"].unique():
@@ -353,7 +356,7 @@ def load_and_filter_data(
     preprocessed_df.drop(columns=["group"], inplace=True)
 
     # Read the raw allele count data
-    logging.info(f"Loading raw count data from {input_df_path}")
+    logger.info(f"Loading raw count data from {input_df_path}")
     raw_counts_df = pd.read_csv(
         input_df_path,
         sep="\t",
@@ -365,12 +368,12 @@ def load_and_filter_data(
         # nrows=20000000,
     )
     # Log basic row count quickly
-    logging.info(f"Loaded {raw_counts_df.shape[0]:,} rows of raw count data.")
+    logger.info(f"Loaded {raw_counts_df.shape[0]:,} rows of raw count data.")
     # Detailed stats are debug level for performance
-    logging.debug(
+    logger.debug(
         f"Distinct contigs: {raw_counts_df.index.get_level_values('contig').nunique():,}",
     )
-    logging.debug(
+    logger.debug(
         f"Distinct positions: {raw_counts_df.index.nunique():,}",
     )
     # Get unique (contig, position) pairs to keep
@@ -378,14 +381,14 @@ def load_and_filter_data(
     valid_positions_index = pd.MultiIndex.from_frame(valid_positions)
 
     # Filter Raw Counts by Preprocessed Positions
-    logging.info("Filtering raw counts to include only preprocessed positions.")
+    logger.info("Filtering raw counts to include only preprocessed positions.")
 
     # Keep only rows whose (contig, position) index is in the valid_positions_index
     filtered_counts_df = raw_counts_df[
         raw_counts_df.index.isin(valid_positions_index)
     ].reset_index()
 
-    logging.info(
+    logger.info(
         f"Filtered to {filtered_counts_df.shape[0]:,} rows after applying preprocessed positions."
     )
 
@@ -394,7 +397,7 @@ def load_and_filter_data(
             f"No positions remaining after filtering by preprocessed data for MAG {mag_id}. Exiting."
         )
 
-    logging.debug(
+    logger.debug(
         f"{len(filtered_counts_df['contig'].unique()):,} contigs and "
         f"{len(filtered_counts_df.groupby(['contig', 'position'], dropna=False)):,} unique positions remaining after filtering."
     )

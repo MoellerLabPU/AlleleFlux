@@ -1,3 +1,45 @@
+def get_enabled_test_types():
+    enabled = []
+    if config["analysis"].get("use_significance_tests", True):
+        enabled.extend(["two_sample_unpaired", "two_sample_paired", "single_sample"])
+    if config["analysis"].get("use_lmm", True):
+        enabled.extend(["lmm", "lmm_across_time"])
+    if config["analysis"].get("use_cmh", True):
+        enabled.extend(["cmh", "cmh_across_time"])
+    return enabled
+
+def get_expected_summary_files(tp, gr):
+    """
+    Get the expected summary files for a given timepoint combination and group combination.
+    This function now reflects the simplified output of the p_value_summary rule.
+    """
+    test_types = get_enabled_test_types()
+    expected = []
+    output_dir = os.path.join(OUTDIR, "p_value_summary", f"{tp}-{gr}")
+
+    for test_type in test_types:
+        # Based on eligibility, determine if a file should be created for this test_type
+        if test_type in ['two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh']:
+            mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
+            if mags:
+                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                expected.append(os.path.join(output_dir, filename))
+        
+        elif test_type in ["single_sample",'lmm_across_time', 'cmh_across_time'] and DATA_TYPE == "longitudinal":
+            sample_entries = get_single_sample_entries(tp, gr)
+            if sample_entries:
+                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                expected.append(os.path.join(output_dir, filename))
+                
+    return expected
+
+def get_p_value_summary_targets():
+    targets = []
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            targets.extend(get_expected_summary_files(tp, gr))
+    return targets
+
 def get_allele_analysis_targets():
     """
     Dynamically generate targets for allele analysis based on eligible MAGs.
@@ -190,32 +232,30 @@ def get_outlier_gene_targets():
                 for test_type in ["two_sample_unpaired", "two_sample_paired"]:
                     group_str = ""  # no group marker for two-sample tests
                     mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
-                    if mags:
-                        for mag in mags:
-                            prefix = f"{mag}_{test_type}{group_str}"
-                            base_dir = os.path.join(
-                                OUTDIR,
-                                "outlier_genes",
-                                f"{tp}-{gr}",
-                            )
-                            targets.append(
-                                os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                            )
+                    for mag in mags:
+                        prefix = f"{mag}_{test_type}{group_str}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
                 # Only include single sample targets if data_type is longitudinal
                 if DATA_TYPE == "longitudinal":
                     sample_entries = get_single_sample_entries(tp, gr)
-                    if sample_entries:  
-                        for mag, grp in sample_entries:
-                            group_str = f"_{grp}"
-                            prefix = f"{mag}_single_sample{group_str}"
-                            base_dir = os.path.join(
-                                OUTDIR,
-                                "outlier_genes",
-                                f"{tp}-{gr}",
-                            )
-                            targets.append(
-                                os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                            )
+                    for mag, grp in sample_entries:
+                        group_str = f"_{grp}"
+                        prefix = f"{mag}_single_sample{group_str}"
+                        base_dir = os.path.join(
+                            OUTDIR,
+                            "outlier_genes",
+                            f"{tp}-{gr}",
+                        )
+                        targets.append(
+                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                        )
                         
     # Add LMM outlier targets if enabled
     if config["analysis"].get("use_lmm", True):
@@ -224,17 +264,16 @@ def get_outlier_gene_targets():
                 group_str = ""  # no group marker for LMM
                 # Use the unpaired eligibility type for LMM
                 mags = get_mags_by_eligibility(tp, gr, eligibility_type="lmm")
-                if mags:
-                    for mag in mags:
-                        prefix = f"{mag}_lmm{group_str}"
-                        base_dir = os.path.join(
-                            OUTDIR,
-                            "outlier_genes",
-                            f"{tp}-{gr}",
-                        )
-                        targets.append(
-                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                        )
+                for mag in mags:
+                    prefix = f"{mag}_lmm{group_str}"
+                    base_dir = os.path.join(
+                        OUTDIR,
+                        "outlier_genes",
+                        f"{tp}-{gr}",
+                    )
+                    targets.append(
+                        os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                    )
     
     # Add CMH outlier targets if enabled
     if config["analysis"].get("use_cmh", True):
@@ -242,21 +281,20 @@ def get_outlier_gene_targets():
             for gr in groups_labels:
                 # Use CMH eligibility
                 mags = get_mags_by_eligibility(tp, gr, eligibility_type="cmh")
-                if mags:
-                    # Get the focus timepoint from our global mapping
-                    focus_tp = focus_timepoints.get(tp)
-                    if not focus_tp:
-                        raise ValueError(f"No focus timepoint defined for {tp}.")
-                    for mag in mags:
-                        prefix = f"{mag}_cmh_{focus_tp}"
-                        base_dir = os.path.join(
-                            OUTDIR,
-                            "outlier_genes",
-                            f"{tp}-{gr}",
-                        )
-                        targets.append(
-                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                        )
+                # Get the focus timepoint from our global mapping
+                focus_tp = focus_timepoints.get(tp)
+                if not focus_tp:
+                    raise ValueError(f"No focus timepoint defined for {tp}.")
+                for mag in mags:
+                    prefix = f"{mag}_cmh_{focus_tp}"
+                    base_dir = os.path.join(
+                        OUTDIR,
+                        "outlier_genes",
+                        f"{tp}-{gr}",
+                    )
+                    targets.append(
+                        os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                    )
 
     # Add LMM across time outlier targets if enabled
     if config["analysis"].get("use_lmm", True) and DATA_TYPE == "longitudinal":
@@ -264,39 +302,65 @@ def get_outlier_gene_targets():
             for gr in groups_labels:
                 # Get individual groups for across_time analysis
                 sample_entries = get_single_sample_entries(tp, gr)
-                if sample_entries:  # Only proceed if there are eligible MAGs
-                    for mag, grp in sample_entries:
-                        group_str = f"_{grp}"
-                        prefix = f"{mag}_lmm_across_time{group_str}"
-                        base_dir = os.path.join(
-                            OUTDIR,
-                            "outlier_genes",
-                            f"{tp}-{gr}",
-                        )
-                        targets.append(
-                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                        )
+                for mag, grp in sample_entries:
+                    group_str = f"_{grp}"
+                    prefix = f"{mag}_lmm_across_time{group_str}"
+                    base_dir = os.path.join(
+                        OUTDIR,
+                        "outlier_genes",
+                        f"{tp}-{gr}",
+                    )
+                    targets.append(
+                        os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                    )
     # Add CMH across time outlier targets if enabled
     if config["analysis"].get("use_cmh", True) and DATA_TYPE == "longitudinal":
         for tp in timepoints_labels:
             for gr in groups_labels:
                 # Get individual groups for across_time analysis
                 sample_entries = get_single_sample_entries(tp, gr)
-                if sample_entries:  # Only proceed if there are eligible MAGs
-                    for mag, grp in sample_entries:
-                        group_str = f"_{grp}"
-                        prefix = f"{mag}_cmh_across_time{group_str}"
-                        base_dir = os.path.join(
-                            OUTDIR,
-                            "outlier_genes",
-                            f"{tp}-{gr}",
-                        )
-                        targets.append(
-                            os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
-                        )
+                for mag, grp in sample_entries:
+                    group_str = f"_{grp}"
+                    prefix = f"{mag}_cmh_across_time{group_str}"
+                    base_dir = os.path.join(
+                        OUTDIR,
+                        "outlier_genes",
+                        f"{tp}-{gr}",
+                    )
+                    targets.append(
+                        os.path.join(base_dir, f"{prefix}_outlier_genes.tsv")
+                    )
                     
     return targets
 
+
+def get_dnds_analysis_targets():
+    """
+    Generate dN/dS analysis targets, which are now directories, one for each subject.
+    """
+    targets = []
+
+    # dN/dS is only applicable to longitudinal data.
+    if DATA_TYPE != "longitudinal":
+        return targets
+
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            # Get subject pairs to determine how many directories to expect.
+            subject_pairs = parse_metadata_for_timepoint_pairs(tp, gr)
+            subjects = [str(subject_id) for subject_id, _, _ in subject_pairs]
+
+            # A directory is created for each subject.
+            for subject in subjects:
+                targets.append(
+                    os.path.join(
+                        OUTDIR,
+                        "dnds_analysis",
+                        f"{tp}-{gr}",
+                        subject
+                    )
+                )
+    return targets
 
     
 # Test the following functions before uncommenting. They are not all 100% up to date and might need modification. Be careful.
@@ -614,4 +678,5 @@ def get_combined_scores_targets():
                     )
     return targets
 """
+
 

@@ -87,7 +87,7 @@ rule preprocess_between_groups:
         p_value_threshold=config["statistics"].get("p_value_threshold", 0.05),
         filter_type=config["statistics"].get("filter_type", "t-test"),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["quality_control"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["general"],
     shell:
@@ -116,7 +116,7 @@ rule two_sample_unpaired:
             OUTDIR, "significance_tests", "two_sample_unpaired_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
     shell:
@@ -146,7 +146,7 @@ rule two_sample_paired:
             OUTDIR, "significance_tests", "two_sample_paired_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
     shell:
@@ -176,7 +176,7 @@ rule lmm_analysis:
             OUTDIR, "significance_tests", "lmm_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
     shell:
@@ -221,7 +221,7 @@ rule cmh_test:
             if config["statistics"].get("preprocess_two_sample", True) and DATA_TYPE == "longitudinal"
             else ""
         ),
-    threads: config["resources"]["cpus"]["significance_test"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["significance_test"],
         mem_mb=config["resources"]["memory"]["significance_test"],

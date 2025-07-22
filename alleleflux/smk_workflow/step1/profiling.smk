@@ -11,7 +11,7 @@ rule profile:
         mag_mapping=config["input"]["mag_mapping_path"],
     output:
         sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
-    threads: config["resources"]["cpus"]["profile"]
+    threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         mem_mb=config["resources"]["memory"]["profile"],
         time=config["resources"]["time"]["profile"],
