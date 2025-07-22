@@ -1062,7 +1062,7 @@ def process_mag(mag_id, args, prodigal_records):
     # Create a copy of the args object to avoid modifying the original
     mag_args = argparse.Namespace(**vars(args))
     # Update the prefix and outdir for this specific MAG
-    mag_args.prefix = f"{args.prefix}_{mag_id}"
+    mag_args.prefix = f"{args.prefix}_{mag_id}_{args.test_type}_{args.p_value_column}"
     mag_args.outdir = args.outdir / mag_id
 
     # 1. Load and filter significant sites for this MAG

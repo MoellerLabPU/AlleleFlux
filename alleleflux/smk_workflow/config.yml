@@ -73,7 +73,7 @@ statistics:
 # Configuration for evolutionary analysis using dnds_from_timepoints.py
 dnds:
   p_value_column: "q_value"     # Column for p-value filtering: "min_p_value" or "q_value"
-  dn_ds_test_type: "two_sample_paired_tTest"              # Statistical test type for filtering results
+  dn_ds_test_type: "two_sample_unpaired_tTest"              # Statistical test type for filtering results
   # group_analyzed: "fat"       # Need if `dn_ds_test_type` is ["single_sample", "lmm_across_time", "cmh_across_time"]
 
 # Compute Resources
