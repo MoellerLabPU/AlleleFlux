@@ -138,6 +138,6 @@ Now you are ready to run the workflow !
 
 - **bamDir**: Directory with sorted and indexed `bam` files. The files should have the name in the format `<sampleID>.sorted.bam` and `<sampleID>.sorted.bam.bai`.
 - **fasta**: A big combined FASTA file of all the contigs making up the representative MAGs that are assumed to be present in the samples. The FASTA header should have the format `<MAG_ID>.fa_<contig_ID>`.
-- **prodigal**: nucleic acid ORFs predictions by Prodigal of the above **fasta** file. NOTE that it's important that prodigal is run on the above **fasta** file for the IDs to match properly.
+- **prodigal**:  nucleic acid ORFs predictions by Prodigal derived from each of the individual assemblies that are included in the above fasta file. NOTE that it's important that the IDs of prodigal outputs match the IDs in the above **fasta** file..
 - **metadata_file**: Metadata file with the following columns: `sample_id` (should match the sampleID used in **bamDir**), `replicate`, `subjectID`, `time`, `group`.
 - **gtdb_file**: Path to the `gtdbtk.bac120.summary.tsv` output file produced by GTDB-Tk.

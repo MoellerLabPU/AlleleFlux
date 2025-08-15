@@ -108,7 +108,7 @@ def process_and_concatenate_fastas(
                 seqs_in_file = 0
                 for record in SeqIO.parse(handle, "fasta"):
                     new_id = f"{mag_basename}_{record.id}"
-
+                    # new_id = record.id
                     new_record = SeqRecord(
                         record.seq,
                         id=new_id,
