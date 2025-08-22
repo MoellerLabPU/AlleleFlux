@@ -51,6 +51,8 @@ from Bio.Seq import MutableSeq, Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm import tqdm
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
 # Set up logger for this script
 logger = logging.getLogger(__name__)
 
@@ -394,9 +396,7 @@ def reconstruct_ancestral_sequences(unique_genes, prodigal_records, profile_by_g
     ancestral_orfs = {}
     ancestral_major_alleles = {}
     # Iterate through each unique gene that needs reconstruction.
-    for gene_id in tqdm(
-        unique_genes, desc="Reconstructing Ancestral Sequences", total=len(unique_genes)
-    ):
+    for gene_id in unique_genes:
         # Skip if the gene ID from the sites file isn't in the annotation file.
         if gene_id not in prodigal_records:
             logger.warning(
@@ -471,8 +471,6 @@ def reconstruct_ancestral_sequences(unique_genes, prodigal_records, profile_by_g
 
 
 # --- Helper and Core dN/dS Analysis Functions ---
-
-
 def get_codon_from_site(position, gene_info, sequence):
     """
     Helper to calculate a site's position within a gene and extract its codon.
@@ -606,7 +604,7 @@ def analyze_mutation_effect(gene_info, ancestral_seq, position, allele_after):
     return {
         "codon_before": ancestral_codon_str,
         "codon_after": str(derived_codon_seq),
-        "" "aa_before": str(aa_before),
+        "aa_before": str(aa_before),
         "aa_after": str(aa_after),
         "mutation_type": mutation_type,
     }
@@ -638,9 +636,7 @@ def find_substitutions(
         ["contig", "position", "gene_id"]
     )
 
-    for _, site_row in tqdm(
-        sites_df.iterrows(), total=sites_df.shape[0], desc="Analyzing Substitutions"
-    ):
+    for _, site_row in sites_df.iterrows():
         contig, position, gene_id = (
             site_row["contig"],
             site_row["position"],
@@ -883,8 +879,6 @@ def calculate_global_dnds_for_sites(
 
 
 # --- Summarization and Output Functions ---
-
-
 def summarize_results(results_df):
     """Generates gene-level and MAG-level summary tables with dN/dS ratios."""
     if results_df.empty:
@@ -1101,6 +1095,9 @@ def process_mag(mag_id, args, prodigal_records):
     derived_profile_df = pd.read_csv(derived_profile_path, sep="\t")
 
     # 3. Reconstruct Ancestral Sequences
+    logger.info(
+        f"Reconstructing Ancestral Sequences for {mag_id} (genes: {sites_to_process['gene_id'].nunique()})"
+    )
     ancestral_profile_df.dropna(subset=["gene_id"], inplace=True)
     ancestral_profile_df["gene_id"] = (
         ancestral_profile_df["gene_id"].astype(str).str.strip()
@@ -1126,6 +1123,7 @@ def process_mag(mag_id, args, prodigal_records):
     derived_profile_df["gene_id"] = (
         derived_profile_df["gene_id"].astype(str).str.strip()
     )
+    logger.info(f"Analyzing substitutions for {mag_id}...")
     substitution_results = find_substitutions(
         sites_to_process,
         ancestral_sequences,
@@ -1159,11 +1157,7 @@ def process_mag(mag_id, args, prodigal_records):
 
 def main():
     """Main execution function to orchestrate the entire analysis."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Analyze dN/dS from a reconstructed ancestral state to a derived state.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

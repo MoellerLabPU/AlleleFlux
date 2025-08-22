@@ -12,8 +12,12 @@ from scipy import stats
 from tqdm import tqdm
 
 import alleleflux.scripts.utilities.supress_warning as supress_warning
+from alleleflux.scripts.utilities.logging_config import setup_logging
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
+
+
+logger = logging.getLogger(__name__)
 
 
 def perform_one_sample_tests(
@@ -40,14 +44,14 @@ def perform_one_sample_tests(
             records.append(record)
 
     end_time = time.time()
-    logging.info(f"Tests performed in {end_time - start_time:.2f} seconds")
+    logger.info(f"Tests performed in {end_time - start_time:.2f} seconds")
     test_results = pd.DataFrame(records)
     # Identify p-value columns
     p_value_columns = [col for col in test_results.columns if "_p_value" in col]
 
     # Remove rows where all p-value columns are NaN
     test_results.dropna(subset=p_value_columns, how="all", inplace=True)
-    logging.info(
+    logger.info(
         f"Saving single-sample significance results for MAG {mag_id} to {output_dir}"
     )
     test_results.to_csv(
@@ -108,11 +112,7 @@ def run_one_sample_tests(args, group, min_sample_num):
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Run two sample unpaired test for a MAG across different samples.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -163,7 +163,7 @@ def main():
 
     # Filter the dataframe to only include positions from the specified group.
     input_df = input_df[input_df["group"] == args.group]
-    logging.info(
+    logger.info(
         f"Data filtered for group '{args.group}', resulting in {input_df.shape[0]:,} rows."
     )
 
@@ -174,12 +174,12 @@ def main():
         raise ValueError(f"{input_df} is empty.")
 
     # Group the data
-    logging.info("Grouping data by contig, gene_id and position")
+    logger.info("Grouping data by contig, gene_id and position")
     grouped_df = input_df.groupby(["contig", "gene_id", "position"], dropna=False)
 
     num_tests = len(grouped_df)
 
-    logging.info(
+    logger.info(
         f"Performing tests for {num_tests:,} positions using {args.cpus} cores."
     )
     func_one_sample = partial(

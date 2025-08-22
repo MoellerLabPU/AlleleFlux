@@ -10,8 +10,11 @@ from scipy import stats
 from tqdm import tqdm
 
 import alleleflux.scripts.utilities.supress_warning as supress_warning
+from alleleflux.scripts.utilities.logging_config import setup_logging
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
+
+logger = logging.getLogger(__name__)
 
 
 def run_tTest(group1, group2):
@@ -243,11 +246,7 @@ def filter_sites_parallel(grouped, alpha, filter_type, cpus, data_type="longitud
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Filter sites using paired tests on sorted values from mean_changes_df.",
@@ -295,19 +294,19 @@ def main():
     args = parser.parse_args()
     start_time = time.time()
 
-    logging.info("Reading input file")
+    logger.info("Reading input file")
     df = pd.read_csv(args.mean_changes_fPath, sep="\t", dtype={"gene_id": str})
 
     # Group data by "contig" and "position" (including groups with NA keys).
     grouped = df.groupby(["contig", "position"], dropna=False)
 
-    logging.info(
+    logger.info(
         f"Determining sites to remove based on paired tests using {args.cpus} cpus. Filter type is set to {args.filter_type}. Data type is {args.data_type}"
     )
     sites_to_remove = filter_sites_parallel(
         grouped, args.p_value_threshold, args.filter_type, args.cpus, args.data_type
     )
-    logging.info(f"Removing {len(sites_to_remove):,} sites")
+    logger.info(f"Removing {len(sites_to_remove):,} sites")
 
     # Remove these sites from the DataFrame.
     removal_index = pd.MultiIndex.from_tuples(
@@ -320,11 +319,11 @@ def main():
     )
 
     df_filtered.to_csv(args.output_fPath, sep="\t", index=False)
-    logging.info(
+    logger.info(
         f"Retained {len(df_filtered):,} rows. Filtered data written to {args.output_fPath}"
     )
     end_time = time.time()
-    logging.info(f"Total time taken: {end_time-start_time:.2f} seconds")
+    logger.info(f"Total time taken: {end_time-start_time:.2f} seconds")
 
 
 if __name__ == "__main__":

@@ -3,8 +3,12 @@ Workflow for Step 2: Allele Analysis and Scoring
 This workflow is designed to analyze alleles and score them based on various criteria.
 """
 
+# from alleleflux.scripts.utilities.logging_config import setup_logging
+# setup_logging()
+
 # Include modular workflow components
 include: "shared/common.smk"
+
 include: "step2/targets.smk"
 include: "step2/allele_analysis.smk"
 include: "step2/significance_within_group.smk"

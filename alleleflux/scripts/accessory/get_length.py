@@ -4,10 +4,14 @@ import logging
 import pandas as pd
 from Bio import SeqIO
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
+
 
 def parse_fasta_to_table(fasta_file, output_csv):
 
-    logging.info(f"Processing FASTA file: {fasta_file}")
+    logger.info(f"Processing FASTA file: {fasta_file}")
     data = []
 
     for record in SeqIO.parse(fasta_file, "fasta"):
@@ -22,15 +26,11 @@ def parse_fasta_to_table(fasta_file, output_csv):
 
     # Save the DataFrame to a CSV file
     df.to_csv(output_csv, index=False, sep="\t")
-    logging.info(f"Table successfully saved to {output_csv}")
+    logger.info(f"Table successfully saved to {output_csv}")
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Parse a FASTA file and create a table with contig, length, and MAG."

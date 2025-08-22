@@ -7,6 +7,9 @@ import time
 import pandas as pd
 from scipy.stats import binom, poisson
 from tqdm import tqdm
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def compute_p_value_binomial(s_obs, n_gene, p):
@@ -71,7 +74,7 @@ def load_mag_df(mag_fPath, mag_id):
     df = pd.read_csv(mag_fPath, sep="\t")
     mag_df = df[df["MAG_ID"] == mag_id]
     if mag_df.empty:
-        logging.error(f"No rows found for MAG ID '{mag_id}' in {mag_fPath}. Exiting...")
+        logger.error(f"No rows found for MAG ID '{mag_id}' in {mag_fPath}. Exiting...")
         exit(1)
     return mag_df
 
@@ -113,9 +116,9 @@ def compute_p_values(mag_fPath, mag_id, gene_fPath):
     for each gene.
     """
 
-    logging.info(f"Loading MAG scores from {mag_fPath}")
+    logger.info(f"Loading MAG scores from {mag_fPath}")
     mag_df = load_mag_df(mag_fPath, mag_id)
-    logging.info(f"Loading gene scores from {gene_fPath}")
+    logger.info(f"Loading gene scores from {gene_fPath}")
     gene_df = pd.read_csv(gene_fPath, sep="\t")
 
     # Extract score columns and their suffixes
@@ -127,7 +130,7 @@ def compute_p_values(mag_fPath, mag_id, gene_fPath):
         gene_score_columns.keys()
     )
     if not common_suffixes:
-        logging.error(
+        logger.error(
             "No matching score groups found between MAG and gene files. Exiting."
         )
         exit(1)
@@ -188,11 +191,7 @@ def compute_p_values(mag_fPath, mag_id, gene_fPath):
 
 def main():
 
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Calculate outlier genes using Binomial and Poisson distributions.",
@@ -228,9 +227,9 @@ def main():
     combined_df = compute_p_values(args.mag_file, args.mag_id, args.gene_file)
 
     combined_df.to_csv(args.out_fPath, sep="\t", index=False)
-    logging.info(f"Output written to: {args.out_fPath}")
+    logger.info(f"Output written to: {args.out_fPath}")
     end_time = time.time()
-    logging.info(f"Done! Total time taken: {end_time-start_time:.2f} seconds")
+    logger.info(f"Done! Total time taken: {end_time-start_time:.2f} seconds")
 
 
 if __name__ == "__main__":

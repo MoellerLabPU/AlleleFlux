@@ -9,13 +9,16 @@ from alleleflux.scripts.utilities.utilities import (
     calculate_score,
     extract_relevant_columns,
 )
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_scores(df, p_value_threshold=0.05):
 
     test_columns_dict = extract_relevant_columns(df, capture_str="p_value_")
     # First Output: Overlapping genes are kept as combined entities
-    logging.info("Calculating scores for combined genes.")
+    logger.info("Calculating scores for combined genes.")
     group_scores_combined = calculate_score(
         df, test_columns_dict, "gene_id", p_value_threshold
     )
@@ -29,13 +32,13 @@ def get_scores(df, p_value_threshold=0.05):
     # Trim whitespace from gene_ids
     df_individual["gene_id"] = df_individual["gene_id"].str.strip()
     # Calculate group scores
-    logging.info("Calculating scores for individual genes.")
+    logger.info("Calculating scores for individual genes.")
     group_scores_individual = calculate_score(
         df_individual, test_columns_dict, "gene_id", p_value_threshold
     )
 
     # Third Output: Overlapping Genes Only
-    logging.info("Calculating scores for overlapping genes.")
+    logger.info("Calculating scores for overlapping genes.")
     overlapping_rows = df[df["gene_id"].str.contains(",", na=False)].copy()
     if not overlapping_rows.empty:
         group_scores_overlapping = calculate_score(
@@ -43,7 +46,7 @@ def get_scores(df, p_value_threshold=0.05):
         )
     else:
         # If no overlapping genes, create an empty DataFrame
-        logging.info("No overlapping genes found, creating empty DataFrame.")
+        logger.info("No overlapping genes found, creating empty DataFrame.")
         group_scores_overlapping = pd.DataFrame(
             columns=["gene_id", "total_sites", "significant_sites", "score"]
         )
@@ -53,11 +56,7 @@ def get_scores(df, p_value_threshold=0.05):
 
 def main():
 
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.DEBUG,
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Calculate significance score for each gene.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -97,7 +96,7 @@ def main():
 
     args = parser.parse_args()
 
-    logging.info("Reading p-value table.")
+    logger.info("Reading p-value table.")
     df = pd.read_csv(args.pValue_table, sep="\t")
 
     if df.empty:
@@ -106,7 +105,7 @@ def main():
     if df["gene_id"].isna().all():
         raise ValueError("No gene IDs are present in the input table.")
 
-    logging.info("Calculating significant scores...")
+    logger.info("Calculating significant scores...")
 
     group_scores_combined, group_scores_individual, group_scores_overlapping = (
         get_scores(df, args.pValue_threshold)
@@ -123,19 +122,19 @@ def main():
         args.output_dir, f"{prefix}_gene_scores_combined.tsv"
     )
     group_scores_combined.to_csv(output_combined, index=False, sep="\t")
-    logging.info(f"Combined gene scores saved to {output_combined}")
+    logger.info(f"Combined gene scores saved to {output_combined}")
 
     output_individual = os.path.join(
         args.output_dir, f"{prefix}_gene_scores_individual.tsv"
     )
     group_scores_individual.to_csv(output_individual, index=False, sep="\t")
-    logging.info(f"Individual gene scores saved to {output_individual}")
+    logger.info(f"Individual gene scores saved to {output_individual}")
 
     output_overlapping = os.path.join(
         args.output_dir, f"{prefix}_gene_scores_overlapping.tsv"
     )
     group_scores_overlapping.to_csv(output_overlapping, index=False, sep="\t")
-    logging.info(f"Overlapping gene scores saved to {output_overlapping}")
+    logger.info(f"Overlapping gene scores saved to {output_overlapping}")
 
 
 if __name__ == "__main__":

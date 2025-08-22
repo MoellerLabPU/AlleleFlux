@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
 import os
 import shutil
 import sys
 
 import pandas as pd
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
+
 
 def read_and_filter_metadata(metadata_file):
-
     metadata = pd.read_csv(metadata_file, sep="\t")
 
     required_columns = {"sample", "time", "group"}
     if not required_columns.issubset(metadata.columns):
         missing = required_columns - set(metadata.columns)
-        print(
-            f"Error: Missing required columns in metadata: {', '.join(missing)}",
-            file=sys.stderr,
-        )
+        logger.error(f"Missing required columns in metadata: {', '.join(missing)}")
         sys.exit(1)
 
     # Apply filters
@@ -28,7 +29,7 @@ def read_and_filter_metadata(metadata_file):
     ]
 
     if filtered.empty:
-        print("No samples match the specified criteria.", file=sys.stderr)
+        logger.error("No samples match the specified criteria.")
         sys.exit(1)
 
     # Extract sample IDs
@@ -44,7 +45,7 @@ def copy_mag_profiles_structured(rootDir, sample_ids, mag_ids, destination):
     total_files_not_found = 0
 
     for mag_id in mag_ids:
-        print(f"Processing MAG_ID: {mag_id}")
+        logger.info(f"Processing MAG_ID: {mag_id}")
         files_copied = 0
         files_not_found = 0
 
@@ -53,9 +54,8 @@ def copy_mag_profiles_structured(rootDir, sample_ids, mag_ids, destination):
             sorted_dir_path = os.path.join(rootDir, sorted_dir)
 
             if not os.path.isdir(sorted_dir_path):
-                print(
-                    f"Warning: Directory '{sorted_dir_path}' does not exist. Skipping sample '{sample_id}'.",
-                    file=sys.stderr,
+                logger.warning(
+                    f"Directory '{sorted_dir_path}' does not exist. Skipping sample '{sample_id}'."
                 )
                 files_not_found += 1
                 continue
@@ -70,31 +70,28 @@ def copy_mag_profiles_structured(rootDir, sample_ids, mag_ids, destination):
                 os.makedirs(dest_sorted_dir, exist_ok=True)
 
                 shutil.copy2(file_path, dest_sorted_dir)
-                # print(f"Copied: {file_path} -> {dest_sorted_dir}")
                 files_copied += 1
             else:
-                print(
-                    f"Warning: File '{file_name}' not found in '{sorted_dir_path}'.",
-                    file=sys.stderr,
-                )
+                logger.warning(f"File '{file_name}' not found in '{sorted_dir_path}'.")
                 files_not_found += 1
 
-        print(f"\nSummary for MAG_ID '{mag_id}':")
-        print(f"  Total samples processed: {len(sample_ids)}")
-        print(f"  Files successfully copied: {files_copied}")
-        print(f"  Files not found or failed to copy: {files_not_found}\n")
+        logger.info(f"Summary for MAG_ID '{mag_id}':")
+        logger.info(f"  Total samples processed: {len(sample_ids)}")
+        logger.info(f"  Files successfully copied: {files_copied}")
+        logger.info(f"  Files not found or failed to copy: {files_not_found}")
 
         total_files_copied += files_copied
         total_files_not_found += files_not_found
 
-    print("\nOverall Copying Summary:")
-    print(f"Total MAG_IDs processed: {len(mag_ids)}")
-    print(f"Total samples processed: {len(sample_ids) * len(mag_ids)}")
-    print(f"Total files successfully copied: {total_files_copied}")
-    print(f"Total files not found or failed to copy: {total_files_not_found}")
+    logger.info("Overall Copying Summary:")
+    logger.info(f"Total MAG_IDs processed: {len(mag_ids)}")
+    logger.info(f"Total samples processed: {len(sample_ids) * len(mag_ids)}")
+    logger.info(f"Total files successfully copied: {total_files_copied}")
+    logger.info(f"Total files not found or failed to copy: {total_files_not_found}")
 
 
 def main():
+    setup_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Copy MAG profile files for samples where "
@@ -130,7 +127,7 @@ def main():
     args = parser.parse_args()
 
     sample_ids = read_and_filter_metadata(args.metadata_file)
-    print(f"Filtered {len(sample_ids)} samples based on metadata criteria.\n")
+    logger.info(f"Filtered {len(sample_ids)} samples based on metadata criteria.")
 
     copy_mag_profiles_structured(
         rootDir=args.rootDir,

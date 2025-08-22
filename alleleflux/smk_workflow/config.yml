@@ -1,11 +1,12 @@
 # AlleleFlux Configuration File
 # ============================
+run_name: "alleleflux_test"
 
 # Input Files
 # ------------
 # Path specifications for all required input data
 input:
-  bam_dir: "/local1/workdir1/Shared_Folder/instrain_for_sidd/new_instrain/bt2_redo"           # Directory containing BAM files (used for backward compatibility)
+  bam_dir: "/workdir/sidd/sam_diet_manip/alleleflux_test/bt2_redo"           # Directory containing BAM files (used for backward compatibility)
   fasta_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/redo_representative_megamag.fa"  # Reference fasta file
   prodigal_path: "/workdir/sidd/sam_diet_manip/alleleflux_test/redo_representative_megamag.fna"  # Prodigal output
   # metadata_path: "/workdir1/sidd/for_sam/new_instrain/mouse_md_edit.txt"
@@ -88,6 +89,7 @@ resources:
     quality_control: 100000 # Memory in MB (100 GB) for quality control
     analyze_alleles: 100000 # Memory in MB (100 GB) for allele analysis
     significance_test: 10000 # Memory in MB for significance testing
+    dn_ds: 200000
   
   time:                     # Runtime limits in format "days-HH:MM:SS"
     profile: "08:00:00"     # 8 hours for profiling

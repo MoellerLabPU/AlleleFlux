@@ -5,16 +5,23 @@ create_mag_mapping.py
 A standalone preprocessing tool that should be run BEFORE the AlleleFlux workflow.
 
 This script processes MAG FASTA files by:
-1. Modifying contig headers to prepend the MAG filename
-2. Concatenating all modified FASTAs into one output file
-3. Generating individual genome files with modified headers
+1. Modifying contig headers to prepend the MAG filename (or using existing headers if already unique)
+2. Optionally concatenating all modified FASTAs into one output file
+3. Optionally generating individual genome files with modified headers
 4. Generating a mapping file of scaffold IDs to MAG IDs
 
 The output mapping file can be used directly in the AlleleFlux workflow
 by specifying it in the config.yml file under input.mag_mapping_path.
 
 Example usage:
+    # Standard usage with header modification
     alleleflux-create-mag-mapping --dir /path/to/mags/ --output-fasta combined.fasta --output-mapping mag_mapping.tsv --output-genomes-dir modified_genomes/
+
+    # When headers are already unique (MAGID_contigID format)
+    alleleflux-create-mag-mapping --dir /path/to/mags/ --headers-unique unique --output-mapping mag_mapping.tsv
+
+    # Only generate mapping file (minimal usage)
+    alleleflux-create-mag-mapping --dir /path/to/mags/ --output-mapping mag_mapping.tsv
 """
 
 import argparse
@@ -23,8 +30,13 @@ import logging
 import os
 from pathlib import Path
 
+import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def find_fasta_files(directory, extension):
@@ -54,7 +66,12 @@ def open_fasta(path: Path, mode: str = "rt"):
 
 
 def process_and_concatenate_fastas(
-    input_files, output_fasta, mapping_file, output_genomes_dir, extension
+    input_files,
+    output_fasta,
+    mapping_file,
+    output_genomes_dir,
+    extension,
+    headers_unique=False,
 ):
     """
     Process each FASTA file, modify headers, and concatenate into one file.
@@ -66,29 +83,40 @@ def process_and_concatenate_fastas(
         mapping_file (str): Path to output mapping file
         output_genomes_dir (str): Directory to store individual genome files with modified headers
         extension (str): File extension to match (without leading dot)
+        headers_unique (bool): If True, headers are already in MAGID_contigID format
 
     Returns:
         tuple: (total_seqs, total_mags) - Count of sequences and MAGs processed
     """
 
     # Create output directories if they don't exist
-    output_fasta = Path(output_fasta)
     mapping_file = Path(mapping_file)
-    output_fasta.parent.mkdir(parents=True, exist_ok=True)
+    mapping_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create output genomes directory
-    genomes_dir = Path(output_genomes_dir)
-    genomes_dir.mkdir(parents=True, exist_ok=True)
+    # Handle optional output_fasta
+    if output_fasta:
+        output_fasta = Path(output_fasta)
+        output_fasta.parent.mkdir(parents=True, exist_ok=True)
+        out_fasta_handle = output_fasta.open("w")
+    else:
+        out_fasta_handle = None
+
+    # Handle optional output_genomes_dir
+    if output_genomes_dir:
+        genomes_dir = Path(output_genomes_dir)
+        genomes_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        genomes_dir = None
 
     total_seqs = 0
     total_mags = 0
     mag_ids = set()
 
-    # Process each file and write to the output
-    with open(output_fasta, "w") as out_fasta, open(mapping_file, "w") as out_map:
-        # Write header to mapping file
-        out_map.write("mag_id\tcontig_id\n")
+    # We'll collect mapping rows in a small list and flush via pandas at the end
+    mapping_rows = []
 
+    # Process each file and write to the output
+    try:
         for mag_file in input_files:
             mag_basename = mag_file.name.replace(f".{extension}", "")
             # Check for duplicate MAG IDs
@@ -98,52 +126,73 @@ def process_and_concatenate_fastas(
                 )
             mag_ids.add(mag_basename)
 
-            logging.info(f"Processing {mag_file}")
+            logger.info(f"Processing {mag_file}")
 
             # If output_genomes_dir is specified, create a separate FASTA file for this MAG
-            modified_mag_path = Path(genomes_dir) / f"{mag_basename}.{extension}"
-            mag_records = []  # Collect records to write at once
+            if genomes_dir:
+                modified_mag_path = genomes_dir / f"{mag_basename}.{extension}"
+                mag_out_handle = open_fasta(modified_mag_path, "wt")
+            else:
+                mag_out_handle = None
 
             with open_fasta(mag_file, "rt") as handle:
                 seqs_in_file = 0
                 for record in SeqIO.parse(handle, "fasta"):
-                    new_id = f"{mag_basename}_{record.id}"
-                    # new_id = record.id
-                    new_record = SeqRecord(
-                        record.seq,
-                        id=new_id,
-                        description="",
-                    )
-                    SeqIO.write(new_record, out_fasta, "fasta")
-                    out_map.write(f"{mag_basename}\t{new_id}\n")
+                    # If headers are already unique, use them as-is
+                    if headers_unique:
+                        new_id = record.id
+                    else:
+                        new_id = f"{mag_basename}_{record.id}"
 
-                    # Add to individual genome file if requested
-                    mag_records.append(new_record)
+                    new_record = SeqRecord(record.seq, id=new_id, description="")
+
+                    # Write to concatenated FASTA if specified
+                    if out_fasta_handle:
+                        SeqIO.write(new_record, out_fasta_handle, "fasta")
+
+                    # Append mapping row
+                    mapping_rows.append((mag_basename, new_id))
+
+                    # Write to individual genome file if requested
+                    if mag_out_handle:
+                        SeqIO.write(new_record, mag_out_handle, "fasta")
 
                     seqs_in_file += 1
                     total_seqs += 1
 
-            # Write the individual modified genome file if requested
-            with open_fasta(modified_mag_path, "wt") as mag_out:
-                SeqIO.write(mag_records, mag_out, "fasta")
-            logging.info(f"Created modified genome file: {modified_mag_path}")
+            # Close per-MAG output if opened
+            if mag_out_handle:
+                mag_out_handle.close()
+                logger.info(f"Created modified genome file: {modified_mag_path}")
 
             total_mags += 1
-            logging.info(f"Added {seqs_in_file} sequences from {mag_basename}")
+            logger.info(f"Added {seqs_in_file} sequences from {mag_basename}")
 
-    logging.info(
-        f"Processing complete: {total_seqs:,} sequences from {total_mags} MAGs"
-    )
-    logging.info(f"Created {total_mags} individual genome files in {genomes_dir}")
-    return total_seqs, total_mags
+        # Write mapping file using pandas
+        df = (
+            pd.DataFrame(mapping_rows, columns=["mag_id", "contig_id"])
+            if mapping_rows
+            else pd.DataFrame(columns=["mag_id", "contig_id"])
+        )
+        df.to_csv(mapping_file, sep="\t", index=False)
+
+        logger.info(
+            f"Processing complete: {total_seqs:,} sequences from {total_mags} MAGs"
+        )
+        if genomes_dir:
+            logger.info(
+                f"Created {total_mags} individual genome files in {genomes_dir}"
+            )
+        return total_seqs, total_mags
+
+    finally:
+        # Close the output FASTA file if it was opened
+        if out_fasta_handle:
+            out_fasta_handle.close()
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="""
@@ -169,10 +218,18 @@ def main():
     )
 
     parser.add_argument(
+        "--headers-unique",
+        help="Specify how contig headers are formatted: 'standard' (default) or 'unique' (already in MAGID_contigID format)",
+        type=str,
+        choices=["standard", "unique"],
+        default="standard",
+    )
+
+    parser.add_argument(
         "--output-fasta",
-        help="Path for the concatenated output FASTA file",
+        help="Path for the concatenated output FASTA file (optional)",
         type=Path,
-        default="megamag.fasta",
+        default=None,
     )
 
     parser.add_argument(
@@ -184,9 +241,9 @@ def main():
 
     parser.add_argument(
         "--output-genomes-dir",
-        help="Directory to store individual genome files with modified headers",
+        help="Directory to store individual genome files with modified headers (optional)",
         type=Path,
-        default=Path.cwd() / "modified_genomes",
+        default=None,
     )
 
     args = parser.parse_args()
@@ -203,15 +260,17 @@ def main():
             f"No FASTA files with extension '{args.extension}' found in {args.dir}"
         )
 
-    logging.info(f"Found {len(fasta_files)} FASTA files to process")
+    logger.info(f"Found {len(fasta_files)} FASTA files to process")
 
     # Process files
+    headers_unique = args.headers_unique == "unique"
     total_seqs, total_mags = process_and_concatenate_fastas(
         fasta_files,
         args.output_fasta,
         args.output_mapping,
         args.output_genomes_dir,
         args.extension,
+        headers_unique=headers_unique,
     )
 
     if total_seqs == 0:

@@ -4,8 +4,12 @@ This workflow is designed to profile samples based on BAM files and generate eli
 to be used by step 2.
 """
 
+# from alleleflux.scripts.utilities.logging_config import setup_logging
+# setup_logging()
+
 # Get sample information from metadata file
 include: "shared/common.smk"
+
 samples, sample_to_bam_map = get_sample_info()
 
 # Include modular workflow components

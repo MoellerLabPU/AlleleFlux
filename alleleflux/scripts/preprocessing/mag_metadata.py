@@ -7,6 +7,10 @@ from typing import Dict, List, Set
 
 import pandas as pd
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
+
 
 def find_mag_files(root_dir: str) -> Dict[str, List[Dict[str, str]]]:
     """
@@ -38,16 +42,16 @@ def find_mag_files(root_dir: str) -> Dict[str, List[Dict[str, str]]]:
     root_path = Path(root_dir)
 
     if not root_path.is_dir():
-        logging.error(f"Root directory not found: {root_dir}")
+        logger.error(f"Root directory not found: {root_dir}")
         return {}
 
-    logging.info(f"Scanning for MAG files in: {root_path}")
+    logger.info(f"Scanning for MAG files in: {root_path}")
     for subdir_path in root_path.iterdir():
         if not subdir_path.is_dir():
             continue
 
         sample_id = subdir_path.name
-        logging.info(f"Looking for MAGs in sample directory: {sample_id}")
+        logger.info(f"Looking for MAGs in sample directory: {sample_id}")
 
         # Define the prefix and suffix for slicing based on the sample_id
         prefix = f"{sample_id}_"
@@ -63,7 +67,7 @@ def find_mag_files(root_dir: str) -> Dict[str, List[Dict[str, str]]]:
                     {"sample_id": sample_id, "file_path": str(file_path.resolve())}
                 )
             else:
-                logging.info(
+                logger.info(
                     f"Filename does not match expected sample prefix: {filename}. Skipped."
                 )
 
@@ -132,7 +136,7 @@ def merge_metadata(
 
     # If 'replicate' column doesn't exist, create one using subjectID values
     if "replicate" not in metadata_df.columns:
-        logging.info(
+        logger.info(
             "No 'replicate' column found in metadata. Using 'subjectID' as replicate values."
         )
         metadata_df["replicate"] = metadata_df["subjectID"]
@@ -256,7 +260,7 @@ def write_output_files(
 
     for mag_id, sample_info_list in mag_dict.items():
         if not sample_info_list:
-            logging.info(f"No samples left for MAG {mag_id} after filtering. Skipping.")
+            logger.info(f"No samples left for MAG {mag_id} after filtering. Skipping.")
             continue
 
         output_df = pd.DataFrame(sample_info_list)
@@ -277,7 +281,7 @@ def write_output_files(
             index=False,
             columns=columns,  # Enforce column order
         )
-        logging.info(f"Output written for MAG {mag_id}: {output_file_path}")
+        logger.info(f"Output written for MAG {mag_id}: {output_file_path}")
 
 
 def write_summary_index(
@@ -301,7 +305,7 @@ def write_summary_index(
             rows.append(row)
 
     if not rows:
-        logging.warning("No data to write to summary index file.")
+        logger.warning("No data to write to summary index file.")
         return
 
     index_df = pd.DataFrame(rows)
@@ -321,17 +325,14 @@ def write_summary_index(
 
     index_file_path = output_dir / "summary_mag_index.tsv"
     index_df.to_csv(index_file_path, sep="\t", index=False, columns=final_cols)
-    logging.info(f"Summary index file written to: {index_file_path}")
+    logger.info(f"Summary index file written to: {index_file_path}")
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
-        description="Process MAG files and generate output per MAG with metadata."
+        description="Process MAG files and generate output per MAG with metadata.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--rootDir",
@@ -393,15 +394,15 @@ def main():
             )
 
     mag_dict = find_mag_files(args.rootDir)
-    logging.info(f"Found profiles for {len(mag_dict):,} MAGs in the root directory.")
+    logger.info(f"Found profiles for {len(mag_dict):,} MAGs in the root directory.")
     if not mag_dict:
-        logging.warning("No MAG files were found. Exiting.")
+        logger.warning("No MAG files were found. Exiting.")
         return
     filtered_mag_dict = merge_metadata(
         mag_dict, args.metadata, args.timepoints, args.groups, args.data_type
     )
     if not filtered_mag_dict:
-        logging.warning(
+        logger.warning(
             "No MAGs remained after merging with metadata. No output files will be written."
         )
         return

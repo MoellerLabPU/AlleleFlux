@@ -40,10 +40,10 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.utilities import extract_relevant_columns
+from alleleflux.scripts.utilities.logging_config import setup_logging
 
 # Set up logger for this script
 logger = logging.getLogger(__name__)
-# LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -270,11 +270,7 @@ def main():
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
 
     # --- Main Workflow ---
     if not args.input_dir.exists():

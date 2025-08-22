@@ -11,6 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from tqdm import tqdm
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
@@ -40,7 +43,7 @@ def perform_unpaired_tests(
             records.append(record)
 
     end_time = time.time()
-    logging.info(
+    logger.info(
         f"2 sample unpaired tests performed in {end_time - start_time:.2f} seconds"
     )
     test_results = pd.DataFrame(records)
@@ -50,7 +53,7 @@ def perform_unpaired_tests(
     # Remove rows where all p-value columns are NaN
     test_results.dropna(subset=p_value_columns, how="all", inplace=True)
 
-    logging.info(
+    logger.info(
         f"Saving 2 sample unpaired significance results for MAG {mag_id} to {output_dir}"
     )
     test_results.to_csv(
@@ -123,11 +126,7 @@ def run_unpaired_tests(
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Run two sample unpaired test for a MAG across different samples.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -177,10 +176,10 @@ def main():
     args = parser.parse_args()
 
     input_file = args.input_df
-    logging.info(f"Loading data from {input_file}")
+    logger.info(f"Loading data from {input_file}")
 
     # Load the input data
-    logging.info("Reading input dataframe..")
+    logger.info("Reading input dataframe..")
     input_df = pd.read_csv(input_file, sep="\t", dtype={"gene_id": str})
 
     # Get unique groups
@@ -193,12 +192,12 @@ def main():
     group_1, group_2 = groups
 
     # Group the data
-    logging.info("Grouping data by contig, gene_id and position")
+    logger.info("Grouping data by contig, gene_id and position")
     grouped_df = input_df.groupby(["contig", "gene_id", "position"], dropna=False)
 
     num_tests = len(grouped_df)
 
-    logging.info(
+    logger.info(
         f"Performing {num_tests:,} unpaired tests between {group_1} and {group_2} using {args.cpus} cores."
     )
     os.makedirs(args.output_dir, exist_ok=True)

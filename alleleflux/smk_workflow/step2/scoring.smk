@@ -1,3 +1,8 @@
+
+import logging
+import pandas as pd
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
 rule significance_score_per_MAG_standard:
     input:
         # Standard test types use a single pvalue table
@@ -62,6 +67,9 @@ rule significance_score_per_MAG_cmh:
     resources:
         time=config["resources"]["time"]["general"],
     run:
+
+        setup_logging()
+        logger = logging.getLogger(__name__)
         if params.data_type == "single":
             shell(
             """
@@ -127,29 +135,23 @@ rule combine_MAG_scores:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        import logging
-        import pandas as pd
-
-        logging.basicConfig(
-            format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-            datefmt="%m/%d/%Y %I:%M:%S %p",
-            level=logging.INFO,
-        )
+        setup_logging()
+        logger = logging.getLogger(__name__)
 
         dfs = []
         for file in input.scores:
-            logging.info(f"Reading {file}")
+            logger.info(f"Reading {file}")
             df = pd.read_csv(file, sep="\t")
             dfs.append(df)
 
-        logging.info(
+        logger.info(
             f"Combining scores for {wildcards.timepoints}-{wildcards.groups} "
             f"({wildcards.test_type}{wildcards.group_str})"
         )
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
-        logging.info(f"Writing combined scores to {output.concatenated}")
+        logger.info(f"Writing combined scores to {output.concatenated}")
         combined_df.to_csv(output.concatenated, sep="\t", index=False)
 
 
@@ -180,18 +182,12 @@ rule combine_MAG_scores_cmh:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        import logging
-        import pandas as pd
-
-        logging.basicConfig(
-            format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-            datefmt="%m/%d/%Y %I:%M:%S %p",
-            level=logging.INFO,
-        )
+        setup_logging()
+        logger = logging.getLogger(__name__)
 
         dfs = []
         for file in input.scores:
-            logging.info(f"Reading {file}")
+            logger.info(f"Reading {file}")
             df = pd.read_csv(file, sep="\t")
             # Verify that the focus timepoint in the file matches the expected one
             if "focus_timepoint" in df.columns and df["focus_timepoint"].iloc[0] != wildcards.focus_tp:
@@ -199,7 +195,7 @@ rule combine_MAG_scores_cmh:
                                  f"expected {wildcards.focus_tp}, found {df['focus_timepoint'].iloc[0]}")
             dfs.append(df)
 
-        logging.info(
+        logger.info(
             f"Combining CMH scores for {wildcards.timepoints}-{wildcards.groups} "
             f"with focus timepoint {wildcards.focus_tp}"
         )
@@ -209,7 +205,7 @@ rule combine_MAG_scores_cmh:
 
         combined_df = pd.concat(dfs, ignore_index=True)
 
-        logging.info(f"Writing combined scores to {output.concatenated}")
+        logger.info(f"Writing combined scores to {output.concatenated}")
         combined_df.to_csv(output.concatenated, sep="\t", index=False)
 
 rule taxa_scores:

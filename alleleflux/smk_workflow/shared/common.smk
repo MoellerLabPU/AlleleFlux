@@ -5,6 +5,8 @@ from collections import defaultdict
 from multiprocessing import Pool
 import logging
 
+# Setup module-level logger for Snakemake shared utilities (no configuration here)
+# logger = logging.getLogger(__name__)
 
 # Load the configuration file
 # configfile: os.path.join(workflow.basedir, "config.yml")

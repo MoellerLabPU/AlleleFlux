@@ -6,12 +6,6 @@ from functools import reduce
 import pandas as pd
 from Bio import SeqIO
 
-logging.basicConfig(
-    format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-    datefmt="%m/%d/%Y %I:%M:%S %p",
-    level=logging.DEBUG,
-)
-
 # Set up logger for this module
 logger = logging.getLogger(__name__)
 

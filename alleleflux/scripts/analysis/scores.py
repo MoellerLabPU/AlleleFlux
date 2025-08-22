@@ -12,6 +12,9 @@ from alleleflux.scripts.utilities.utilities import (
     load_mag_mapping,
     read_gtdb,
 )
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_scores(df, group_by_column="MAG_ID", p_value_threshold=0.05):
@@ -87,12 +90,7 @@ def reorder_columns(final_table, relevant_taxa_columns, group_by_column):
 
 
 def main():
-
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Group MAGs and calculate significance score.",
@@ -156,10 +154,10 @@ def main():
     )
 
     args = parser.parse_args()
-    logging.info("Parsing GTDB taxa table.")
+    logger.info("Parsing GTDB taxa table.")
     gtdb_df = read_gtdb(args.gtdb_taxonomy)
 
-    logging.info("Reading p-value table.")
+    logger.info("Reading p-value table.")
     pValue_table = pd.read_csv(args.pValue_table, sep="\t")
 
     if pValue_table.empty:
@@ -171,10 +169,10 @@ def main():
             pValue_table["MAG_ID"] = extract_mag_id(contig, mag_mapping_dict)
         # pValue_table["MAG_ID"] = pValue_table["contig"].str.split(".fa").str[0]
 
-    logging.info("Merging p-value table with GTDB taxonomy.")
+    logger.info("Merging p-value table with GTDB taxonomy.")
     merged_df = pd.merge(pValue_table, gtdb_df, on="MAG_ID", how="left")
 
-    logging.info("Calculating significance score.")
+    logger.info("Calculating significance score.")
     final_table = get_scores(merged_df, args.group_by_column, args.pValue_threshold)
 
     if not args.out_fPath:
@@ -183,7 +181,7 @@ def main():
     else:
         outFpath = args.out_fPath
 
-    logging.info(f"Writing results to file: {outFpath}")
+    logger.info(f"Writing results to file: {outFpath}")
     final_table.to_csv(outFpath, sep="\t", index=False)
 
 

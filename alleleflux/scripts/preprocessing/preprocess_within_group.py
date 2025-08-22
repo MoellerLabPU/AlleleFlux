@@ -4,8 +4,12 @@ import os
 
 import pandas as pd
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
 # Constants
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
+
+logger = logging.getLogger(__name__)
 
 
 def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
@@ -31,7 +35,7 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
     pandas.DataFrame
         Processed dataframe with positions removed based on zero count threshold
     """
-    logging.info(
+    logger.info(
         f"Preprocessing: Removing positions where more than {max_zero_count} replicates have _diff_mean value zero for all nucleotides."
     )
 
@@ -47,7 +51,7 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
 
     # Identify positions where the number of replicates with all zeros exceeds the threshold.
     positions_to_remove = zeros_count[zeros_count > max_zero_count].index
-    logging.info(
+    logger.info(
         f"Removing {len(positions_to_remove):,} positions based on zero count threshold."
     )
 
@@ -70,11 +74,7 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Script to preprocess within group data.",
@@ -117,7 +117,7 @@ def main():
 
     # Filter the dataframe to only include positions from the specified group.
     input_df = input_df[input_df["group"] == args.group]
-    logging.info(
+    logger.info(
         f"Data filtered for group '{args.group}', resulting in {input_df.shape[0]:,} rows."
     )
 

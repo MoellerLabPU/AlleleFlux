@@ -4,6 +4,10 @@ import logging
 import os
 
 import pandas as pd
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def find_bam_path(sample_id, bam_dir, extension):
@@ -27,7 +31,7 @@ def find_bam_path(sample_id, bam_dir, extension):
     if not matches:
         return None
     elif len(matches) == 1:
-        logging.info(f"Found match: {matches}")
+        logger.info(f"Found match: {matches}")
         return matches[0]
     elif len(matches) >= 1:
         raise ValueError(
@@ -36,11 +40,7 @@ def find_bam_path(sample_id, bam_dir, extension):
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Add BAM file paths to metadata table.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -71,7 +71,7 @@ def main():
     )
 
     if args.drop_missing:
-        logging.info("Dropping rows without matching BAM files")
+        logger.info("Dropping rows without matching BAM files")
         df = df[df["bam_path"].notna()]
 
     df.to_csv(args.output, sep="\t", index=False)

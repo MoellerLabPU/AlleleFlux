@@ -54,3 +54,7 @@ alleleflux = ["runner.sh", "smk_workflow/**"]
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"
 "Bug Tracker" = "https://github.com/MoellerLabPU/AlleleFlux/issues"
+
+[tool.isort]
+profile = "black"
+line_length = 88 

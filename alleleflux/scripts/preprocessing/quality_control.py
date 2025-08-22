@@ -10,10 +10,13 @@ from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
     calculate_mag_sizes,
     load_mag_metadata_file,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def init_worker(metadata, mag_sizes):
@@ -110,7 +113,7 @@ def process_mag_files(args):
     mag_size = mag_size_dict.get(mag_id)
     if mag_size is None or mag_size <= 0:
         msg = f"MAG size for {mag_id} not found or invalid."
-        logging.error(f"{msg} sample={sample_id}, profile_fPath={profile_fPath}")
+        logger.error(f"{msg} sample={sample_id}, profile_fPath={profile_fPath}")
         result["breadth_fail_reason"] = msg
         return result
 
@@ -123,7 +126,7 @@ def process_mag_files(args):
 
     if breadth < breadth_threshold:
         msg = f"Breadth {breadth:.2%} < threshold {breadth_threshold:.2%}"
-        logging.info(f"{msg} - sample={sample_id}, mag={mag_id}")
+        logger.info(f"{msg} - sample={sample_id}, mag={mag_id}")
         result["breadth_fail_reason"] = msg
     else:
         result["breadth_threshold_passed"] = True
@@ -179,7 +182,7 @@ def check_timepoints(df, data_type):
         raise ValueError(f"More than 2 unique timepoints found: {unique_times}")
 
     if passed_samples.empty:
-        logging.warning("No samples passed coverage threshold")
+        logger.warning("No samples passed coverage threshold")
         return df
 
     # Find subjects with MAG in exactly 2 timepoints
@@ -197,9 +200,9 @@ def check_timepoints(df, data_type):
 
     # Add debug info
     if not valid_subjects.empty:
-        logging.info(f"Subjects with 2 valid timepoints: {len(valid_subjects)}")
+        logger.info(f"Subjects with 2 valid timepoints: {len(valid_subjects)}")
     else:
-        logging.warning("No subjects have valid MAG in 2 timepoints")
+        logger.warning("No subjects have valid MAG in 2 timepoints")
 
     return df
 
@@ -238,7 +241,7 @@ def add_subject_count_per_group(df):
     valid_subjects = df[df["two_timepoints_passed"]]
 
     if valid_subjects.empty:
-        logging.warning("No valid subjects found")
+        logger.warning("No valid subjects found")
         # Initialize the columns with NaN values
         df["subjects_per_group"] = np.nan
         df["replicates_per_group"] = np.nan
@@ -273,8 +276,8 @@ def add_subject_count_per_group(df):
     ] = np.nan
 
     # Log summary
-    logging.info("Subject and replicate counts per group (valid samples):")
-    logging.info(f"\n{counts}")
+    logger.info("Subject and replicate counts per group (valid samples):")
+    logger.info(f"\n{counts}")
     return df
 
 
@@ -318,7 +321,7 @@ def count_paired_replicates(df):
     valid_subjects = df[df["two_timepoints_passed"]]
 
     if valid_subjects.empty:
-        logging.warning("No valid subjects found")
+        logger.warning("No valid subjects found")
         # Initialize the column with NaN values
         df["paired_replicates_per_group"] = np.nan
         # Set 0 only for valid subjects that passed the timepoint check
@@ -334,7 +337,7 @@ def count_paired_replicates(df):
 
     # Check if there are any paired replicates
     if paired_reps.empty:
-        logging.warning("No paired replicates found across groups")
+        logger.warning("No paired replicates found across groups")
         # Initialize the column with NaN values
         df["paired_replicates_per_group"] = np.nan
         # Set 0 only for valid subjects that passed the timepoint check
@@ -365,8 +368,8 @@ def count_paired_replicates(df):
     )
 
     # Log summary
-    logging.info("Replicates paired per group")
-    logging.info(f"\n{paired_counts}")
+    logger.info("Replicates paired per group")
+    logger.info(f"\n{paired_counts}")
     return df
 
 
@@ -380,7 +383,7 @@ def process_mag(args):
         cpus,
         data_type,
     ) = args
-    logging.info(f"Processing MAG: {mag_id}")
+    logger.info(f"Processing MAG: {mag_id}")
 
     metadata_dict, sample_files_with_mag_id = load_mag_metadata_file(
         metadata_file, mag_id, breadth_threshold, data_type
@@ -392,7 +395,7 @@ def process_mag(args):
         )
 
     num_procs = min(cpus, len(sample_files_with_mag_id))
-    logging.info(
+    logger.info(
         f"Processing {len(sample_files_with_mag_id)} samples for {mag_id} with {num_procs} processes."
     )
 
@@ -419,15 +422,11 @@ def process_mag(args):
 
     out_file = os.path.join(output_dir, f"{mag_id}_QC.tsv")
     df_results.to_csv(out_file, sep="\t", index=False)
-    logging.info(f"Saved QC report for {mag_id} to {out_file}")
+    logger.info(f"Saved QC report for {mag_id} to {out_file}")
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Script to detect which samples for a MAG pass the breadth threshold and output a pass/fail table.",
@@ -478,7 +477,7 @@ def main():
 
     metadata_files = glob(os.path.join(args.rootDir, "*_metadata.tsv"))
     if not metadata_files:
-        logging.error("No *_metadata.tsv files found in input directory")
+        logger.error("No *_metadata.tsv files found in input directory")
         sys.exit(1)
 
     tasks = [
@@ -499,7 +498,7 @@ def main():
     for task in tasks:
         process_mag(task)
 
-    logging.info("QC analysis completed.")
+    logger.info("QC analysis completed.")
 
 
 if __name__ == "__main__":

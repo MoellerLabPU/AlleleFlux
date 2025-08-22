@@ -32,6 +32,9 @@ import logging
 import pandas as pd
 
 from alleleflux.scripts.utilities.utilities import read_gtdb
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def load_cmh_results(file_path, timepoint=None):
@@ -46,19 +49,19 @@ def load_cmh_results(file_path, timepoint=None):
     Returns:
         pd.DataFrame: DataFrame containing CMH results, filtered by timepoint if specified.
     """
-    logging.info(f"Loading CMH results from {file_path}")
+    logger.info(f"Loading CMH results from {file_path}")
     df = pd.read_csv(file_path, sep="\t")
 
     if timepoint is not None:
         if "time" in df.columns:
-            logging.info(f"Filtering results to timepoint: {timepoint}")
+            logger.info(f"Filtering results to timepoint: {timepoint}")
             df = df[df["time"] == timepoint].copy()
             if df.empty:
                 raise ValueError(
                     f"No data found for timepoint '{timepoint}' in file {file_path}"
                 )
         else:
-            logging.warning(
+            logger.warning(
                 f"Timepoint '{timepoint}' specified but 'time' column not found in {file_path}"
             )
 
@@ -67,7 +70,7 @@ def load_cmh_results(file_path, timepoint=None):
 
 def get_common_sites(df1, df2):
     """Return set of contig-position pairs common to both DataFrames."""
-    logging.info("Identifying common sites between two dataframes")
+    logger.info("Identifying common sites between two dataframes")
     set1 = set(zip(df1["contig"], df1["position"]))
     set2 = set(zip(df2["contig"], df2["position"]))
     return set1.intersection(set2)
@@ -76,10 +79,10 @@ def get_common_sites(df1, df2):
 def get_focus_and_other(args, df1, df2):
     """Determine focus and other DataFrames based on args.focus."""
     if args.focus == args.tp1_name:
-        logging.info(f"Focus timepoint set to '{args.tp1_name}'")
+        logger.info(f"Focus timepoint set to '{args.tp1_name}'")
         return df1, df2
     else:
-        logging.info(f"Focus timepoint set to '{args.tp2_name}'")
+        logger.info(f"Focus timepoint set to '{args.tp2_name}'")
         return df2, df1
 
 
@@ -100,7 +103,7 @@ def compute_diff_significance(focus_df, other_df, intersect_set, threshold):
         int: The number of positions that are significant in the focus dataframe, not significant in the other dataframe, and present in the intersection set.
     """
 
-    logging.info(
+    logger.info(
         f"Identifying differential significant sites with threshold {threshold}"
     )
     # Identify significant positions for focus timepoint
@@ -119,17 +122,13 @@ def compute_diff_significance(focus_df, other_df, intersect_set, threshold):
 
 def merge_with_taxonomy(score_df, gtdb_path):
     """Merge scores DataFrame with taxonomy information from GTDB."""
-    logging.info(f"Merging score DataFrame with taxonomy from {gtdb_path}")
+    logger.info(f"Merging score DataFrame with taxonomy from {gtdb_path}")
     gtdb_df = read_gtdb(gtdb_path)
     return pd.merge(score_df, gtdb_df, on="MAG_ID", how="left")
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Compute CMH differential significance scores",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -208,7 +207,7 @@ def main():
     # Load CMH results into DataFrames based on input mode
     if args.combined_file:
         # Using a combined file with 'time' column
-        logging.info(f"Using combined file mode: {args.combined_file}")
+        logger.info(f"Using combined file mode: {args.combined_file}")
         df1 = load_cmh_results(args.combined_file, timepoint=args.tp1_name)
         df2 = load_cmh_results(args.combined_file, timepoint=args.tp2_name)
     else:
@@ -218,18 +217,18 @@ def main():
                 "Both --tp1-file and --tp2-file must be provided when not using --combined-file"
             )
 
-        logging.info(f"Using separate files mode: {args.tp1_file} and {args.tp2_file}")
+        logger.info(f"Using separate files mode: {args.tp1_file} and {args.tp2_file}")
         df1 = load_cmh_results(args.tp1_file)
         df2 = load_cmh_results(args.tp2_file)
 
     # Identify positions common to both timepoints
     intersect_set = get_common_sites(df1, df2)
-    logging.info(
+    logger.info(
         f"Identified {len(intersect_set):,} common positions between timepoints."
     )
     total_sites = len(intersect_set)
     if total_sites == 0:
-        logging.error("No common positions found between both timepoints.")
+        logger.error("No common positions found between both timepoints.")
         raise ValueError("Warning: no positions found in union of both files.")
 
     # Determine which DataFrame is focus and which is other
@@ -243,7 +242,7 @@ def main():
     # Calculate score as percentage
     score = (significant_sites / total_sites) * 100 if total_sites > 0 else 0
 
-    logging.info(
+    logger.info(
         f"Differential significance score for '{args.focus}': {significant_sites}/{total_sites} = {score:.4f}"
     )
 
@@ -261,10 +260,10 @@ def main():
     )
 
     merged_df = merge_with_taxonomy(score_df, args.gtdb_taxonomy)
-    logging.info(f"Writing results to {args.out_fPath}")
+    logger.info(f"Writing results to {args.out_fPath}")
     merged_df.to_csv(args.out_fPath, sep="\t", index=False)
 
-    logging.info("Results successfully written.")
+    logger.info("Results successfully written.")
 
 
 if __name__ == "__main__":

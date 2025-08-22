@@ -54,6 +54,7 @@ rule dnds_from_timepoints:
         dn_ds_test_type=DN_DS_TEST_TYPE,
     resources:
         time=config["resources"]["time"]["general"],
+        mem_mb=config["resources"]["memory"]["dn_ds"],
     threads: config["resources"]["cpus"]["threads_per_job"]
     run:
         import os

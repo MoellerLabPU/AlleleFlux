@@ -7,6 +7,10 @@ import os
 import numpy as np
 import pandas as pd
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
+
 
 def process_data(df, unique_groups, mag_id, min_sample_num, data_type):
     """
@@ -113,12 +117,12 @@ def analyze_qc_files(qc_dir, min_sample_num, data_type):
 
     results = []
     for qc_file in qc_files:
-        logging.info(f"Reading {qc_file}")
+        logger.info(f"Reading {qc_file}")
         df = pd.read_csv(qc_file, sep="\t")
         mag_id = os.path.basename(qc_file).replace("_QC.tsv", "")
 
         if df.empty:
-            logging.warning(f"QC file {qc_file} is empty. Skipping MAG {mag_id}.")
+            logger.warning(f"QC file {qc_file} is empty. Skipping MAG {mag_id}.")
             continue
 
         # Get the list of groups that passed the two timepoints check
@@ -126,12 +130,12 @@ def analyze_qc_files(qc_dir, min_sample_num, data_type):
         unique_groups = passed_df["group"].unique()
 
         if len(unique_groups) != 2:
-            logging.warning(
+            logger.warning(
                 f"MAG {mag_id}: Found {len(unique_groups)} groups; expected exactly 2. Skipping."
             )
             continue
 
-        logging.info(f"Processing MAG: {mag_id}")
+        logger.info(f"Processing MAG: {mag_id}")
         result = process_data(
             passed_df, unique_groups, mag_id, min_sample_num, data_type
         )
@@ -146,11 +150,7 @@ def analyze_qc_files(qc_dir, min_sample_num, data_type):
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Generate test eligibility summary table from QC files.",
@@ -180,7 +180,7 @@ def main():
     )
     eligibility_table.to_csv(args.output_file, sep="\t", index=False)
 
-    logging.info(f"Eligibility summary table written to {args.output_file}")
+    logger.info(f"Eligibility summary table written to {args.output_file}")
 
 
 if __name__ == "__main__":

@@ -11,10 +11,11 @@ from multiprocessing import cpu_count
 
 import yaml
 
-# --- Setup basic logging ---
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Import centralized logging setup
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+# Module-level logger
+logger = logging.getLogger(__name__)
 
 
 # --- Custom YAML Formatting ---
@@ -37,7 +38,7 @@ def create_config(args):
     """Builds the configuration dictionary with command-line args overriding a base file."""
     config_data = {}
     if args.config:
-        logging.info(f"Loading base configuration from: {args.config}")
+        logger.info(f"Loading base configuration from: {args.config}")
         with open(args.config, "r") as f:
             config_data = yaml.safe_load(f)
 
@@ -81,20 +82,20 @@ def create_config(args):
     # Only perform this logic if the specific resource section is not already defined in a base config.
     if not config_data.get("resources", {}).get("cpus"):
         threads_for_parallel_jobs = min(args.cores, args.threads_per_job)
-        logging.info(
+        logger.info(
             f"Setting default threads per parallelizable job to {threads_for_parallel_jobs}"
         )
         set_nested(["resources", "cpus", "threads_per_job"], threads_for_parallel_jobs)
 
     if not config_data.get("resources", {}).get("memory"):
-        logging.info(
+        logger.info(
             f"Setting default memory tiers: low_mem={args.low_mem}MB, high_mem={args.high_mem}MB"
         )
         set_nested(["resources", "memory", "low_mem"], args.low_mem)
         set_nested(["resources", "memory", "high_mem"], args.high_mem)
 
     if not config_data.get("resources", {}).get("time"):
-        logging.info(
+        logger.info(
             f"Setting default time tiers: low_time='{args.low_time}', high_time='{args.high_time}'"
         )
         set_nested(["resources", "time", "low_time"], args.low_time)
@@ -141,6 +142,8 @@ def create_config(args):
 
 def main():
     """Python entry point for the AlleleFlux pipeline."""
+    setup_logging()
+
     parser = argparse.ArgumentParser(
         description="AlleleFlux: A tool to identify genomic targets of natural selection in bacterial communities.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -380,7 +383,7 @@ def main():
     if args.generate_config:
         with open(args.generate_config, "w") as f:
             yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-        logging.info(
+        logger.info(
             f"Successfully generated configuration file at: {args.generate_config}"
         )
         sys.exit(0)
@@ -388,7 +391,7 @@ def main():
     # --- Normal Workflow Execution ---
     with open(runtime_config_path, "w") as f:
         yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-    logging.info(f"Created runtime config file for this run: {runtime_config_path}")
+    logger.info(f"Created runtime config file for this run: {runtime_config_path}")
 
     runner_resource = resources.files("alleleflux").joinpath("runner.sh")
 
@@ -417,7 +420,7 @@ def main():
             exit_code = process.wait()
             sys.exit(exit_code)
         except KeyboardInterrupt:
-            logging.warning(
+            logger.warning(
                 "\nKeyboard interrupt received. Sending SIGINT to child process group..."
             )
             os.killpg(os.getpgid(process.pid), signal.SIGINT)

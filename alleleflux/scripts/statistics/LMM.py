@@ -12,6 +12,9 @@ import statsmodels.formula.api as smf
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.utilities import load_and_filter_data
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Accept any suffix that does *not* begin with "diff"
 _FREQ_PATTERN = re.compile(r"^[ATGC]_frequency_(?!diff\b).*")
@@ -83,7 +86,7 @@ def convert_suffix_to_long(df_source):
         df, stubnames=NUCLEOTIDES, i=id_vars, j="time", sep="_", suffix=r".+"
     ).reset_index()
 
-    logging.info(
+    logger.info(
         f"Converted wide-format frequencies to long format with timepoints: {suffixes}"
     )
     return df_long
@@ -194,7 +197,7 @@ def run_model(args):
                         note=f"{nucleotide}: Singular matrix error, perfect separation with {predictor_col}, p-value set to 0; ",
                         p_value=0,
                     )
-                    logging.info(
+                    logger.info(
                         f"{contig}, {position}, {nucleotide}: Singular matrix error, perfect separation with {predictor_col}, p-value set to 0; ",
                     )
                 elif freq_values.nunique() == 1:
@@ -204,7 +207,7 @@ def run_model(args):
                         note=f"{nucleotide}: Singular matrix error, constant values, p-value set to 1; ",
                         p_value=1,
                     )
-                    logging.info(
+                    logger.info(
                         f"{contig}, {position}, {nucleotide}: Singular matrix error, constant values, p-value set to 1; ",
                     )
                 else:
@@ -281,11 +284,7 @@ def run_model(args):
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.INFO,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Analyze allele frequency and perform significance tests.",
@@ -356,7 +355,7 @@ def main():
             "--input_time_format 'suffix' is only valid with --data_type 'across_time'."
         )
 
-    logging.info("Reading input dataframe...")
+    logger.info("Reading input dataframe...")
     dtype_map = {
         "subjectID": str,
         "contig": str,
@@ -367,7 +366,7 @@ def main():
     }
     if args.preprocessed_df and args.data_type == "across_time":
         # If preprocessed_df is provided, load and filter input_df based on it
-        logging.info(
+        logger.info(
             f"Preprocessed dataframe provided. Loading and filtering input_df based on {args.preprocessed_df}"
         )
 
@@ -386,17 +385,17 @@ def main():
             )
 
         if args.input_time_format == "suffix":
-            logging.info(
+            logger.info(
                 "Converting frequency columns with timepoint suffixes to long format."
             )
             df = convert_suffix_to_long(df)
     else:
         if args.data_type == "across_time":
-            logging.info(
+            logger.info(
                 f"No preprocessed dataframe provided. Loading input_df directly from {args.input_df}"
             )
             if args.input_time_format == "suffix":
-                logging.info(
+                logger.info(
                     "Converting frequency columns with timepoint suffixes to long format."
                 )
                 df = convert_suffix_to_long(args.input_df)
@@ -417,7 +416,7 @@ def main():
                 args.input_df,
                 sep="\t",
             )
-        logging.info(f"Loaded {df.shape[0]:,} rows from {args.input_df}.")
+        logger.info(f"Loaded {df.shape[0]:,} rows from {args.input_df}.")
 
     # Initial filtering for across_time mode
     if args.data_type == "across_time":
@@ -429,7 +428,7 @@ def main():
                 f"Group '{args.group_to_analyze}' not found in input data. LMM analysis will yield no results."
             )
         df = df[df["group"] == args.group_to_analyze].copy()
-        logging.info(f"Filtered data for group: {args.group_to_analyze}")
+        logger.info(f"Filtered data for group: {args.group_to_analyze}")
 
         # Handle time format based on input_time_format
         if "time" not in df.columns:
@@ -478,12 +477,12 @@ def main():
 
         grouped_positions.append((contig, gene_id, position, sub_df, args.data_type))
 
-    logging.info(
+    logger.info(
         f"Found {len(grouped_positions):,} unique (contig, gene_id, position) groups with sufficient replicates."
     )
 
     results = []
-    logging.info(
+    logger.info(
         "Warnings will be captured and saved to the output table. warnings.simplefilter('default') is used."
     )
 
@@ -506,7 +505,7 @@ def main():
     )
     removed_count = initial_count - len(results_df)
     if removed_count:
-        logging.info(f"Removed {removed_count:,} rows with all NaN p-values.")
+        logger.info(f"Removed {removed_count:,} rows with all NaN p-values.")
 
     output_file_name = f"{args.mag_id}_lmm.tsv.gz"
     if args.data_type == "across_time" and args.group_to_analyze:
@@ -517,7 +516,7 @@ def main():
     output_path = os.path.join(args.output_dir, output_file_name)
 
     os.makedirs(args.output_dir, exist_ok=True)
-    logging.info(f"Saving LMM results for MAG {args.mag_id} to {output_path}")
+    logger.info(f"Saving LMM results for MAG {args.mag_id} to {output_path}")
     results_df.to_csv(
         output_path,
         index=False,
@@ -525,7 +524,7 @@ def main():
         compression="gzip",
     )
 
-    logging.info(f"LMM modeling complete. Results saved to {output_path}")
+    logger.info(f"LMM modeling complete. Results saved to {output_path}")
 
 
 if __name__ == "__main__":

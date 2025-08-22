@@ -6,11 +6,14 @@ import os
 import pandas as pd
 
 from alleleflux.scripts.utilities.utilities import extract_relevant_columns
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 def taxa_scores(df, group_col):
     columns_dict = extract_relevant_columns(df, capture_str="sites_per_group_")
-    logging.info(f"Calculating scores for {len(columns_dict)} tests.")
+    logger.info(f"Calculating scores for {len(columns_dict)} tests.")
 
     taxonomy_order = [
         "domain",
@@ -73,11 +76,7 @@ def taxa_scores(df, group_col):
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Group a table by a specified taxonomic level and calculate new scores, retaining higher-level taxonomy columns."
@@ -107,7 +106,7 @@ def main():
     else:
         outFpath = args.out_fPath
 
-    logging.info(f"Writing results to file: {outFpath}")
+    logger.info(f"Writing results to file: {outFpath}")
     grouped_scores.to_csv(outFpath, sep="\t", index=False)
 
 

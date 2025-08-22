@@ -15,6 +15,9 @@ from intervaltree import IntervalTree
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.utilities import extract_mag_id, load_mag_mapping
+from alleleflux.scripts.utilities.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Global variables for BAM and FASTA files in worker processes
 bamfile = None
@@ -84,7 +87,7 @@ def process_contig(contig_name):
 
         # Fetch the reference base at this position
         if ref_name not in reference_fasta.references:
-            logging.warning(
+            logger.warning(
                 f"Contig '{ref_name}' not found in the reference FASTA. Assigning 'X' as a reference base."
             )
             ref_base = "X"
@@ -157,7 +160,7 @@ def map_genes(prodigal_fasta):
         ValueError: If the header format in the FASTA file is unexpected.
     """
     # Initialize a list to store gene information
-    logging.info("Parsing Prodigal FASTA file to extract gene information.")
+    logger.info("Parsing Prodigal FASTA file to extract gene information.")
     genes_data = []
 
     # Parse the FASTA file
@@ -181,13 +184,13 @@ def map_genes(prodigal_fasta):
                 }
             )
         else:
-            logging.warning(f"Warning: Unexpected header format: {header}.")
+            logger.warning(f"Warning: Unexpected header format: {header}.")
             raise ValueError("Unexpected header format in the FASTA file.")
 
     # Convert the list to a DataFrame
     genes_df = pd.DataFrame(genes_data)
     genes_df["contig"] = genes_df["gene_id"].apply(extract_contigID)
-    logging.info("Gene information extracted successfully.")
+    logger.info("Gene information extracted successfully.")
     return genes_df
 
 
@@ -304,11 +307,7 @@ def map_positions_to_genes(positions_df, contig_trees):
 
 
 def main():
-    logging.basicConfig(
-        format="[%(asctime)s %(levelname)s] %(name)s: %(message)s",
-        datefmt="%m/%d/%Y %I:%M:%S %p",
-        level=logging.DEBUG,
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Profile MAGs using alignment files.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -377,13 +376,13 @@ def main():
 
     # Open BAM file to get the list of contigs
     if not os.path.exists(args.bam_path + ".bai"):
-        logging.info("BAM file index not found. Indexing it now..")
+        logger.info("BAM file index not found. Indexing it now..")
         pysam.index(
             args.bam_path, "-o", args.bam_path + ".bai", "--threads", "args.cpus"
         )
 
     if not os.path.exists(args.fasta_path + ".fai"):
-        logging.info("FASTA file index not found. Indexing it now..")
+        logger.info("FASTA file index not found. Indexing it now..")
         pysam.faidx(args.fasta_path, "-o", args.fasta_path + ".fai")
 
     # Load MAG mappings
@@ -465,7 +464,7 @@ def main():
             gc.collect()
 
     end_time = time.time()
-    logging.info(f"Total time taken {end_time - start_time:.2f} seconds")
+    logger.info(f"Total time taken {end_time - start_time:.2f} seconds")
 
 
 if __name__ == "__main__":

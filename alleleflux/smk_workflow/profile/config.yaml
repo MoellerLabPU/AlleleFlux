@@ -2,13 +2,13 @@
 # https://bioconda.github.io/recipes/snakemake-executor-plugin-cluster-generic/README.html
 executor: cluster-generic
 cluster-generic-submit-cmd:
-  mkdir -p logs/`date +"%d-%m-%y"`/{rule} &&
+  mkdir -p logs/{config[run_name]}/`date +"%d-%m-%y"`/{rule} &&
   sbatch
     --cpus-per-task={threads}
     --mem={resources.mem_mb}
     --time={resources.time}
     --job-name=smk-{rule}-{wildcards}
-    --output=logs/`date +"%d-%m-%y"`/{rule}/{rule}-{wildcards}-%j.out
+    --output=logs/{config[run_name]}/`date +"%d-%m-%y"`/{rule}/{rule}-{wildcards}-%j.out
     --parsable
 
 default-resources:

@@ -27,16 +27,17 @@ import numpy as np
 import pandas as pd
 import rpy2.robjects as ro
 from rpy2.rinterface_lib.embedded import RRuntimeError
-from rpy2.robjects import pandas2ri, r
+from rpy2.robjects import default_converter, pandas2ri, r
+from rpy2.robjects.conversion import localconverter
 from rpy2.robjects.packages import importr
 from tqdm import tqdm
 
+from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import load_and_filter_data
 
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
 
-# Rpy2 Setup. Enable pandas <-> R DataFrame conversion
-pandas2ri.activate()
+logger = logging.getLogger(__name__)
 
 
 def process_group(
@@ -82,7 +83,7 @@ def process_group(
     try:
         cmh_result = run_cmh_test_in_r(pivoted_filtered)
     except RRuntimeError as e:
-        logging.error(
+        logger.error(
             f"Error running CMH test for {contig}:{position} in MAG {mag_id}: {e}"
         )
         # Return NaN p-value with error note
@@ -273,8 +274,9 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
     Returns:
         Optional[float]: The p-value from the CMH test if successful, otherwise None.
     """
-    # Transfer DataFrame to R
-    ro.globalenv["r_df"] = pivoted_filtered
+    # Transfer DataFrame to R (new rpy2 conversion API)
+    with localconverter(default_converter + pandas2ri.converter):
+        ro.globalenv["r_df"] = pivoted_filtered
     # R code is generic: group names are parsed from column names
     r(
         f"""
@@ -295,6 +297,7 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
         cmh_result <- mantelhaen.test(tab3d, alternative = c("two.sided"), correct=FALSE)$p.value
         """
     )
+    # cmh_result is an R vector of length 1
     cmh_result = ro.globalenv["cmh_result"]
     return cmh_result[0]
 
@@ -325,10 +328,10 @@ def run_cmh_tests(
             f"Expected exactly 2 groups, but found {len(groups)} groups: {groups}"
         )
     group_1, group_2 = groups
-    logging.info(f"Grouping data by contig, gene_id and position")
+    logger.info(f"Grouping data by contig, gene_id and position")
     grouped = df.groupby(["contig", "gene_id", "position"], dropna=False)
     count = len(grouped)
-    logging.info(
+    logger.info(
         f"Analyzing {count:,} positions for CMH tests between {group_1} and {group_2}{f' (timepoint: {timepoint})' if timepoint else ''} using {cpus} cores"
     )
     with Pool(processes=cpus) as pool:
@@ -350,7 +353,7 @@ def run_cmh_tests(
             if res is not None
         ]
     if not results:
-        logging.warning(
+        logger.warning(
             f"No results for {mag_id} {f' (timepoint: {timepoint})' if timepoint else ''}."
         )
         return None
@@ -394,10 +397,10 @@ def run_cmh_tests_across_time(
     group_df["original_group"] = group_df["group"]  # Store original group
     group_df["group"] = group_df["time"]  # Use timepoint as the group for comparison
 
-    logging.info(f"Grouping data by contig, gene_id and position")
+    logger.info(f"Grouping data by contig, gene_id and position")
     grouped = group_df.groupby(["contig", "gene_id", "position"], dropna=False)
     count = len(grouped)
-    logging.info(
+    logger.info(
         f"Analyzing {count:,} positions for CMH tests for group '{group_to_analyze}' across timepoints {timepoints[0]} and {timepoints[1]} using {cpus} cores"
     )
 
@@ -421,7 +424,7 @@ def run_cmh_tests_across_time(
         ]
 
     if not results:
-        logging.warning(
+        logger.warning(
             f"No results for {mag_id} group '{group_to_analyze}' across timepoints."
         )
         return None
@@ -435,11 +438,7 @@ def run_cmh_tests_across_time(
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s %(levelname)s %(filename)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Run Cochran-Mantel-Haenszel test for a MAG across different samples using R's mantelhaen.test via rpy2. Uses raw counts and filters by preprocessed positions.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -505,7 +504,7 @@ def main() -> None:
 
     # Load and possibly filter data
     if args.data_type == "single":
-        logging.info(
+        logger.info(
             "Datatype set to single. Loading input dataframe without any filtering."
         )
         df = pd.read_csv(
@@ -533,7 +532,7 @@ def main() -> None:
         dtype_map["time"] = str
 
         if args.preprocessed_df:
-            logging.info(
+            logger.info(
                 "Datatype set to across_time. Loading input dataframe with filtering."
             )
             df = load_and_filter_data(
@@ -544,7 +543,7 @@ def main() -> None:
                 group_to_analyze=args.group,
             )
         else:
-            logging.info(
+            logger.info(
                 "Datatype set to across_time. No preprocessed dataframe provided. Using input_df directly."
             )
             df = pd.read_csv(
@@ -568,14 +567,14 @@ def main() -> None:
         # Longitudinal
         dtype_map["time"] = str
         if args.preprocessed_df:
-            logging.info(
+            logger.info(
                 "Datatype set to longitudinal. Loading input dataframe with filtering."
             )
             df = load_and_filter_data(
                 args.input_df, args.preprocessed_df, args.mag_id, dtype_map
             )
         else:
-            logging.info(
+            logger.info(
                 "Datatype set to longitudinal. No preprocessed dataframe provided. Using input_df directly."
             )
             df = pd.read_csv(
@@ -594,7 +593,7 @@ def main() -> None:
         # Process each timepoint and collect results
         all_results = []
         for tp in timepoints:
-            logging.info(f"Processing timepoint: {tp}")
+            logger.info(f"Processing timepoint: {tp}")
             df_tp = df[df["time"] == tp].copy()
 
             # For individual timepoint files
@@ -622,13 +621,13 @@ def main() -> None:
                 args.output_dir, f"{args.mag_id}_cmh.tsv.gz"
             )
 
-        logging.info(f"Saving combined CMH results to {combined_out_file}")
+        logger.info(f"Saving combined CMH results to {combined_out_file}")
         combined_results.to_csv(
             combined_out_file, sep="\t", index=False, compression="gzip"
         )
-        logging.info(f"Saved combined CMH test results to {combined_out_file}")
+        logger.info(f"Saved combined CMH test results to {combined_out_file}")
     else:
-        logging.warning(f"No results from any timepoint for {args.mag_id}.")
+        logger.warning(f"No results from any timepoint for {args.mag_id}.")
 
 
 if __name__ == "__main__":
