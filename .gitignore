@@ -166,3 +166,4 @@ smk_workflow/.snakemake
 smk_workflow/logs
 logs/
 .vscode
+.github/chatmodes

@@ -10,7 +10,15 @@ from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
 from scipy import stats
-from tqdm import tqdm
+
+try:
+    from tqdm import tqdm  # type: ignore
+except ImportError:  # pragma: no cover
+
+    def tqdm(iterable=None, **kwargs):  # minimal fallback
+        return iterable if iterable is not None else []
+
+
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -78,6 +86,9 @@ def run_unpaired_tests(
     for nucleotide in NUCLEOTIDES:
         p_values[f"{nucleotide}_p_value_tTest"] = np.nan
         p_values[f"{nucleotide}_p_value_MannWhitney"] = np.nan
+        if data_type == "longitudinal":
+            p_values[f"{nucleotide}_p_value_tTest_abs"] = np.nan
+            p_values[f"{nucleotide}_p_value_MannWhitney_abs"] = np.nan
 
     # Counts of samples in each group
     num_samples_group1 = group1.shape[0]
@@ -94,12 +105,13 @@ def run_unpaired_tests(
 
             mean1 = np.mean(group1[nuc_col])
             mean2 = np.mean(group2[nuc_col])
-            # ddof of 1 is used as we are calculating sample variance. "0" is used for population variance
-            var1 = np.var(group1[nuc_col], ddof=1)
-            var2 = np.var(group2[nuc_col], ddof=1)
             # In t-test if both groups have identical values, the p-value is NaN, eg. 5,5,5,5 and 5,5,5,5,5,5,5,5
             # I'm setting it 1 for consistency with Mann Whitney
-            if var1 == 0 and var2 == 0 and mean1 == mean2:
+            # np.ptp is the range of values (max - min), if it's 0 then all values are identical
+            const1 = np.isclose(np.ptp(group1[nuc_col]), 0.0, atol=1e-8, rtol=0)
+            const2 = np.isclose(np.ptp(group2[nuc_col]), 0.0, atol=1e-8, rtol=0)
+            means_equal = np.isclose(mean1, mean2, atol=1e-8, rtol=0)
+            if const1 and const2 and means_equal:
                 p_values[f"{nucleotide}_p_value_tTest"] = 1
                 notes += f"{nucleotide}: identical values in both groups, p-value for t-test is set to 1; "
             else:
@@ -121,6 +133,42 @@ def run_unpaired_tests(
                 nan_policy="raise",  # No NaN values should be present. But if present a ValueError will be raised
             )
             p_values[f"{nucleotide}_p_value_MannWhitney"] = res_non_para.pvalue
+
+            # Perform tests on absolute values only for longitudinal data
+            if data_type == "longitudinal":
+                abs_group1 = np.abs(group1[nuc_col])
+                abs_group2 = np.abs(group2[nuc_col])
+
+                abs_mean1 = np.mean(abs_group1)
+                abs_mean2 = np.mean(abs_group2)
+
+                abs_const1 = np.isclose(np.ptp(abs_group1), 0.0, atol=1e-8, rtol=0)
+                abs_const2 = np.isclose(np.ptp(abs_group2), 0.0, atol=1e-8, rtol=0)
+                abs_means_equal = np.isclose(abs_mean1, abs_mean2, atol=1e-8, rtol=0)
+
+                if abs_const1 and abs_const2 and abs_means_equal:
+                    p_values[f"{nucleotide}_p_value_tTest_abs"] = 1
+                    notes += f"{nucleotide}: absolute values identical in both groups, p-value for t-test abs is set to 1; "
+                else:
+                    res_para_abs = stats.ttest_ind(
+                        abs_group1,
+                        abs_group2,
+                        equal_var=False,
+                        nan_policy="raise",
+                        alternative="two-sided",
+                    )
+                    p_values[f"{nucleotide}_p_value_tTest_abs"] = res_para_abs.pvalue
+
+                res_non_para_abs = stats.mannwhitneyu(
+                    abs_group1,
+                    abs_group2,
+                    alternative="two-sided",
+                    nan_policy="raise",
+                )
+                p_values[f"{nucleotide}_p_value_MannWhitney_abs"] = (
+                    res_non_para_abs.pvalue
+                )
+            # If single, abs test p-values are not included as columns.
 
     return (name_tuple, p_values, num_samples_group1, num_samples_group2, notes)
 
@@ -222,4 +270,5 @@ def main():
 
 
 if __name__ == "__main__":
+    main()
     main()

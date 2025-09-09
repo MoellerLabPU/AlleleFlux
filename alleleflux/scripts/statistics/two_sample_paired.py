@@ -9,7 +9,14 @@ from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
 from scipy import stats
-from tqdm import tqdm
+
+try:
+    from tqdm import tqdm  # type: ignore
+except ImportError:  # pragma: no cover
+
+    def tqdm(iterable=None, **kwargs):  # minimal fallback
+        return iterable if iterable is not None else []
+
 
 import alleleflux.scripts.utilities.supress_warning as supress_warning
 from alleleflux.scripts.utilities.logging_config import setup_logging
@@ -84,6 +91,9 @@ def run_paired_tests(
     for nucleotide in NUCLEOTIDES:
         p_values[f"{nucleotide}_p_value_tTest"] = np.nan
         p_values[f"{nucleotide}_p_value_Wilcoxon"] = np.nan
+        if data_type == "longitudinal":
+            p_values[f"{nucleotide}_p_value_tTest_abs"] = np.nan
+            p_values[f"{nucleotide}_p_value_Wilcoxon_abs"] = np.nan
 
     # Number of pairs
     num_pairs = merged_data.shape[0]
@@ -99,9 +109,11 @@ def run_paired_tests(
                 data1 = merged_data[f"{nucleotide}_group1"]
                 data2 = merged_data[f"{nucleotide}_group2"]
 
-            # Check for identical values
+            # --- Test 1: Paired test on raw values ---
+            # Pre-emptively check if all paired differences are zero.
+            # This avoids errors from scipy functions and correctly reflects no difference.
             d = data1 - data2
-            if np.all(d == 0):
+            if np.allclose(d, 0, atol=1e-8, rtol=0):
                 p_values[f"{nucleotide}_p_value_tTest"] = (
                     1.0  # Paired t-test outputs NaN if both groups have identical values
                 )
@@ -126,6 +138,36 @@ def run_paired_tests(
                     nan_policy="raise",
                 )
                 p_values[f"{nucleotide}_p_value_Wilcoxon"] = res_wilcoxon.pvalue
+
+            # --- Test 2: Paired test on absolute values (only for longitudinal) ---
+            if data_type == "longitudinal":
+                # This tests if the *magnitude* of the values differs between groups.
+                abs_data1 = np.abs(data1)
+                abs_data2 = np.abs(data2)
+                d = abs_data1 - abs_data2
+                if np.allclose(d, 0, atol=1e-8, rtol=0):
+                    p_values[f"{nucleotide}_p_value_tTest_abs"] = 1.0
+                    p_values[f"{nucleotide}_p_value_Wilcoxon_abs"] = 1.0
+                    notes += f"{nucleotide}: absolute values identical in both groups, p-value for both abs tests is set to 1; "
+                else:
+                    res_ttest_abs = stats.ttest_rel(
+                        abs_data1,
+                        abs_data2,
+                        nan_policy="raise",
+                        alternative="two-sided",
+                    )
+                    p_values[f"{nucleotide}_p_value_tTest_abs"] = res_ttest_abs.pvalue
+
+                    res_wilcoxon_abs = stats.wilcoxon(
+                        abs_data1,
+                        abs_data2,
+                        alternative="two-sided",
+                        nan_policy="raise",
+                    )
+                    p_values[f"{nucleotide}_p_value_Wilcoxon_abs"] = (
+                        res_wilcoxon_abs.pvalue
+                    )
+            # If data_type == 'single' absolute value tests are not added at all.
 
     return (name_tuple, p_values, num_pairs, notes)
 
@@ -219,4 +261,5 @@ def main():
 
 
 if __name__ == "__main__":
+    main()
     main()
