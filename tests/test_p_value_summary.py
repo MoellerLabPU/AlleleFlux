@@ -138,6 +138,31 @@ class TestProcessResultsFile(unittest.TestCase):
             result = process_results_file(test_file, "lmm", "pre_post")
             self.assertEqual(result, {})
 
+    def test_process_results_file_cmh_with_time_column(self):
+        """Test CMH processing assigns group_analyzed from 'time' column when present."""
+        cmh_df = pd.DataFrame(
+            {
+                "mag_id": ["MAG002", "MAG002", "MAG002"],
+                "contig": ["c1", "c1", "c2"],
+                "position": [10, 20, 30],
+                "gene_id": ["g1", "g1", "g2"],
+                "time": ["t0", "t1", "t2"],
+                "p_value_testA": [0.05, 0.01, 0.2],
+            }
+        )
+        test_file = self.temp_path / "MAG002_cmh_results.tsv.gz"
+        cmh_df.to_csv(test_file, sep="\t", compression="gzip", index=False)
+
+        result = process_results_file(test_file, "cmh", "pre_post")
+        expected_key = "cmh_pre_post"
+        self.assertIn(expected_key, result)
+        df = result[expected_key]
+        self.assertIn("group_analyzed", df.columns)
+        # Ensure group_analyzed matches the original time column values
+        # Because p_value columns collapse into min_p_value and rows replicate across sub-tests,
+        # we check that the set of values equals the expected set.
+        self.assertSetEqual(set(df["group_analyzed"].unique()), {"t0", "t1", "t2"})
+
 
 class TestFdrCorrection(unittest.TestCase):
     """Test FDR-BH correction functionality."""

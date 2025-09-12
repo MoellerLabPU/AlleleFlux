@@ -39,8 +39,8 @@ import pandas as pd
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
-from alleleflux.scripts.utilities.utilities import extract_relevant_columns
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import extract_relevant_columns
 
 # Set up logger for this script
 logger = logging.getLogger(__name__)
@@ -148,8 +148,13 @@ def process_results_file(
                 sub_df["group_analyzed"] = df["group_analyzed"]
         elif test_type in ["cmh", "cmh_across_time"]:
             new_test_type = "CMH"
+            # For cmh_across_time retain analyzed_group if provided.
             if test_type == "cmh_across_time" and "analyzed_group" in df.columns:
                 sub_df["group_analyzed"] = df["analyzed_group"]
+            # if a 'time' column exists (some CMH outputs) use it as group_analyzed
+            # only if group_analyzed has not already been set.
+            if "group_analyzed" not in sub_df.columns and "time" in df.columns:
+                sub_df["group_analyzed"] = df["time"]
         elif test_type == "single_sample":
             # Handles "tTest_{group}" and "Wilcoxon_{group}"
             if sub_test_name.startswith("tTest_"):
