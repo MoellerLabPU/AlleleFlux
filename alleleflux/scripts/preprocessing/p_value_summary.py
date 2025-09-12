@@ -62,16 +62,52 @@ def find_test_files(
     input_dir: Path, test_types: list[str], timepoint_label: str
 ) -> dict[str, list[Path]]:
     """
-    Finds all AlleleFlux test result files in the input directory for the specified test types and timepoint label.
+    Find and group compressed TSV test result files by statistical test type.
 
-    Args:
-        input_dir: The directory containing AlleleFlux result folders.
-        test_types: A list of test types to search for (e.g., ['lmm', 'cmh']).
-        timepoint_label: The timepoint label to include (e.g., 'pre_post' or 'pre').
+    This function searches a given input directory for subdirectories whose names
+    start with a specific test type followed by an underscore, a timepoint label,
+    a hyphen, and any suffix (pattern: f"{test_type}_{timepoint_label}-*"). Within
+    each matching directory it collects all files ending with ".tsv.gz" and groups
+    them by test type.
 
-    Returns:
-        A dictionary mapping each test type to a list of its result file paths.
+    Parameters
+    ----------
+    input_dir : Path
+        Root directory under which test result subdirectories are located.
+    test_types : list[str]
+        List of test type identifiers (e.g., ["lmm", "two_sample_paired"]) to search for.
+    timepoint_label : str
+        Label identifying the timepoint segment to match between the test type and
+        the variable portion of the directory name.
+
+    Returns
+    -------
+    dict[str, list[Path]]
+        A mapping from each test type to a (possibly empty) list of matching
+        compressed TSV result file paths.
+
+    Side Effects
+    ------------
+    Logs (via the module-level logger) informational messages about:
+      * The root directory being searched.
+      * How many files were found per test type and directory.
+
+    Notes
+    -----
+    A test type key will always be present in the returned dictionary even if
+    no corresponding files were found (value will be an empty list).
+
+    Example
+    -------
+    >>> from pathlib import Path
+    >>> test_files = find_test_files(
+    ...     input_dir=Path("results"),
+    ...     test_types=["lmm", "two_sample_paired"],
+    ...     timepoint_label="tp1"
+    ... )
+    >>> test_files["lmm"]  # list of Path objects (possibly empty)
     """
+
     test_files = {test_type: [] for test_type in test_types}
     logger.info(f"Searching for test results in: {input_dir}")
 
@@ -95,18 +131,48 @@ def process_results_file(
     filepath: Path, test_type: str, timepoint_label: str
 ) -> dict[str, pd.DataFrame]:
     """
-    Processes a single result file, consolidating all sub-tests into a single table.
-    The output filename is determined by the test type and timepoint label, not the
-    sub-test name. A new 'test_type' column is added to the DataFrame to specify
-    the sub-test, and a 'group_analyzed' column is added for relevant tests.
-    Args:
-        filepath: Path to the AlleleFlux result file.
-        test_type: The name of the test being processed.
-        timepoint_label: The timepoint label to include.
+    Process a results file for a given test type and timepoint, extracting and summarizing p-values.
+
+    This function loads a gzipped, tab-separated CSV file, identifies p-value columns grouped by sub-test,
+    validates or extracts the MAG ID, adds metadata columns, and processes each sub-test to calculate
+    the minimum p-value. It sets appropriate test_type and group_analyzed values based on the input
+    test_type and sub-test name. Finally, it consolidates the results into a single DataFrame and
+    returns it in a dictionary keyed by a combination of test_type and timepoint_label.
+
+    Parameters:
+    -----------
+    filepath : Path
+        The path to the input CSV file (expected to be gzipped and tab-separated).
+    test_type : str
+        The type of test (e.g., 'lmm', 'lmm_across_time', 'cmh', 'cmh_across_time', 'single_sample').
+        This influences how test_type and group_analyzed are set for each sub-test.
+    timepoint_label : str
+        A label for the timepoint or period associated with the data.
+
     Returns:
-        A dictionary mapping a generated file group key to a consolidated DataFrame
-        for the given file, or an empty dictionary if no sites are found.
+    --------
+    dict[str, pd.DataFrame]
+        A dictionary with a single key in the format '{test_type}_{timepoint_label}' and a value
+        that is a pandas DataFrame containing the processed results. The DataFrame includes columns
+        such as 'period', 'mag_id', 'contig', 'position', 'gene_id', 'test_type', 'group_analyzed',
+        'min_p_value', and 'source_file' (only those that exist in the data). Returns an empty dict
+        if the file is empty, no p-value columns are found, or no sites are processed.
+
+    Raises:
+    -------
+    ValueError
+        If multiple MAG IDs are found in the file when 'mag_id' column is present, or if an unexpected
+        sub-test name is encountered for 'single_sample' test type.
+
+    Notes:
+    ------
+    - Assumes the presence of certain columns like 'contig', 'position', 'gene_id' in the input file.
+    - For 'single_sample' test type, sub-test names must start with 'tTest_' or 'Wilcoxon_' followed by the group.
+    - Uses logging to warn about empty files, missing p-value columns, or no sites found.
+    - Dependencies: pandas (pd), Path from pathlib, and custom functions like extract_relevant_columns,
+      extract_mag_id_from_filepath, and a logger.
     """
+
     # Load the data
     df = pd.read_csv(filepath, sep="\t", compression="gzip", low_memory=False)
     if df.empty:
@@ -140,6 +206,19 @@ def process_results_file(
         sub_df = df.copy()
         # Calculate minimum p-value for this sub-test
         sub_df["min_p_value"] = sub_df[p_value_cols].min(axis=1)
+        # Validate min_p_value; if NAs exist, warn and drop those rows instead of aborting
+        na_rows = sub_df[sub_df["min_p_value"].isna()]
+        if not na_rows.empty:
+            logger.warning(
+                f"Dropping {len(na_rows)} row(s) with NA min_p_value in file {filepath} (test_type={test_type}, sub_test={sub_test_name}). "
+                f"Showing offending rows:\n{na_rows}"
+            )
+            sub_df = sub_df.dropna(subset=["min_p_value"])
+            if sub_df.empty:
+                logger.warning(
+                    f"All rows dropped due to NA min_p_value for file {filepath} (test_type={test_type}, sub_test={sub_test_name}). Skipping this sub-test."
+                )
+                continue
         # Set test_type and group_analyzed based on test_type and sub_test_name
         new_test_type = f"{test_type}_{sub_test_name}"  # Default
         if test_type in ["lmm", "lmm_across_time"]:

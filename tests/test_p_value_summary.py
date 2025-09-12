@@ -163,6 +163,31 @@ class TestProcessResultsFile(unittest.TestCase):
         # we check that the set of values equals the expected set.
         self.assertSetEqual(set(df["group_analyzed"].unique()), {"t0", "t1", "t2"})
 
+    def test_process_results_file_min_p_value_na_dropped(self):
+        """Rows with NA min_p_value should be dropped with a warning, not raise."""
+        df_with_na = pd.DataFrame(
+            {
+                "mag_id": ["MAG003", "MAG003"],
+                "contig": ["c1", "c1"],
+                "position": [1, 2],
+                "gene_id": ["g1", "g2"],
+                # One valid row, one row of all NAs for p-value cols -> NA min_p_value
+                "p_value_testA": [0.05, None],
+                "p_value_testB": [0.10, None],
+            }
+        )
+        test_file = self.temp_path / "MAG003_lmm_results.tsv.gz"
+        df_with_na.to_csv(test_file, sep="\t", compression="gzip", index=False)
+        result = process_results_file(test_file, "lmm", "pre_post")
+        key = "lmm_pre_post"
+        self.assertIn(key, result)
+        df = result[key]
+        # Only one non-NA row should remain
+        self.assertEqual(
+            len(df), 2
+        )  # two sub-tests (testA,testB) each from same surviving original row
+        self.assertTrue(df["min_p_value"].notna().all())
+
 
 class TestFdrCorrection(unittest.TestCase):
     """Test FDR-BH correction functionality."""
