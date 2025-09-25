@@ -12,14 +12,16 @@ import pandas as pd
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
+    build_contig_length_index,
     calculate_mag_sizes,
+    load_mag_mapping,
     load_mag_metadata_file,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def init_worker(metadata, mag_sizes):
+def init_worker(metadata, mag_sizes, contig_lengths, contig_to_mag_map):
     """
     Initialize worker process with metadata and MAG sizes.
 
@@ -37,6 +39,12 @@ def init_worker(metadata, mag_sizes):
     global mag_size_dict
     metadata_dict = metadata
     mag_size_dict = mag_sizes
+    # Store contig lengths for weighted coverage
+    global contig_length_dict
+    contig_length_dict = contig_lengths
+    # Mapping: contig_id -> mag_id (for validation/subsetting)
+    global contig_to_mag
+    contig_to_mag = contig_to_mag_map
 
 
 def process_mag_files(args):
@@ -69,6 +77,11 @@ def process_mag_files(args):
         - time: Time point (if available in metadata)
         - genome_size: Size of the MAG in base pairs
         - breadth: Calculated breadth of coverage (proportion of genome covered)
+        - average_coverage: Average genome coverage depth (sum of all total_coverage values divided by genome size)
+        - median_coverage: Median of per-position total_coverage
+        - length_weighted_coverage: Length-weighted mean of per-contig mean coverage: Σ(mean_cov_contig * contig_length)/Σ(contig_length)
+        - coverage_std: Standard deviation of per-position total_coverage (population, ddof=0)
+        - coverage_std_including_zeros: Population std over entire genome length (absent positions treated as zero)
         - breadth_threshold_passed: Boolean indicating if breadth threshold was met
         - breadth_fail_reason: Explanation if threshold not met
 
@@ -102,6 +115,12 @@ def process_mag_files(args):
         "replicate": metadata_dict[sample_id]["replicate"],
         "genome_size": mag_size_dict.get(mag_id, 0),
         "breadth": None,
+        "average_coverage": None,
+        "median_coverage": None,
+        "median_coverage_including_zeros": None,
+        "length_weighted_coverage": None,
+        "coverage_std": None,
+        "coverage_std_including_zeros": None,
         "breadth_threshold_passed": False,
         "breadth_fail_reason": "",
     }
@@ -119,10 +138,109 @@ def process_mag_files(args):
 
     df = pd.read_csv(profile_fPath, sep="\t", dtype={"gene_id": str})
 
+    # Ensure the profile only includes contigs for this MAG; log if rows are dropped
+    if "contig" in df.columns:
+        before_rows = len(df)
+        # Map contigs to mag; unknown contigs map to None and will be excluded
+        mag_lookup = df["contig"].map(contig_to_mag)
+        mask = mag_lookup == mag_id
+        dropped = int(before_rows - mask.sum())
+        if dropped > 0:
+            logger.warning(
+                f"Profile contains {dropped} rows not belonging to MAG {mag_id}; filtering them out. "
+                f"file={profile_fPath} sample={sample_id}"
+            )
+        df = df.loc[mask].copy()
+        if df.empty:
+            msg = (
+                f"No rows remain after filtering profile to MAG {mag_id}. "
+                f"file={profile_fPath}"
+            )
+            logger.error(msg)
+            result["breadth_fail_reason"] = msg
+            return result
+
+    # Check for zero coverage values in the profile (should not exist)
+    zero_coverage_count = (df["total_coverage"] == 0).sum()
+    if zero_coverage_count > 0:
+        logger.warning(
+            f"Profile contains {zero_coverage_count} positions with zero coverage for MAG {mag_id}. "
+            f"These should typically be absent from the profile. file={profile_fPath} sample={sample_id}"
+        )
+
     # Compute breadth coverage
     positions_with_coverage = df[df["total_coverage"] >= 1].shape[0]
     breadth = positions_with_coverage / mag_size
     result["breadth"] = breadth
+
+    # Average genome coverage depth = sum of coverage across all rows divided by genome length
+    total_coverage_sum = df["total_coverage"].sum()
+    avg_cov = total_coverage_sum / mag_size if mag_size > 0 else None
+    result["average_coverage"] = avg_cov
+
+    # Median coverage (per-position) among observed covered bases only (exclude zeros if any slipped in)
+    pos_cov = df.loc[df["total_coverage"] > 0, "total_coverage"]
+    result["median_coverage"] = float(pos_cov.median()) if not pos_cov.empty else np.nan
+
+    # Median coverage including zeros for absent positions across entire genome
+    observed_positions = len(df)
+    absent_positions = mag_size - observed_positions
+    if absent_positions >= 0:
+        # Create array with observed coverage values plus zeros for absent positions
+        all_coverage = np.concatenate(
+            [df["total_coverage"].values, np.zeros(absent_positions)]
+        )
+        result["median_coverage_including_zeros"] = float(np.median(all_coverage))
+    else:
+        # This shouldn't happen, but handle gracefully
+        logger.warning(
+            f"Profile has more positions ({observed_positions}) than genome size ({mag_size}) for {mag_id} sample {sample_id}"
+        )
+        result["median_coverage_including_zeros"] = result["median_coverage"]
+
+    # Standard deviation across covered positions only (population std, ddof=0)
+    result["coverage_std"] = float(pos_cov.std(ddof=0)) if not pos_cov.empty else np.nan
+
+    # Population std including zeros across entire genome length (absent positions treated as 0)
+    sumsq = float((df["total_coverage"] ** 2).sum())
+    ex2 = sumsq / mag_size
+    var = ex2 - (avg_cov * avg_cov)
+    result["coverage_std_including_zeros"] = float(np.sqrt(max(var, 0.0)))
+
+    # --- Length-Weighted Coverage Metrics (contig-level) ---
+    # Expect a column 'contig' with per-position coverage; aggregate to per-contig mean first.
+    # Sum coverage per contig; later divide by contig length to get mean over all bases
+    contig_means = (
+        df.groupby("contig", as_index=False)["total_coverage"]
+        .sum()
+        .rename(columns={"total_coverage": "coverage_sum"})
+    )
+    # Initialize to NaN if contig_means is empty
+    result["length_weighted_coverage"] = np.nan
+
+    if not contig_means.empty:
+        # Map lengths (no need to declare global again; read-only lookup)
+        contig_means["length"] = contig_means["contig"].map(contig_length_dict)
+        before = contig_means.shape[0]
+        contig_means = contig_means[
+            pd.to_numeric(contig_means["length"], errors="coerce") > 0
+        ]
+        dropped = before - contig_means.shape[0]
+        if dropped > 0:
+            logger.warning(
+                f"Dropped {dropped} contigs without valid lengths for {mag_id} (sample {sample_id})."
+            )
+        if not contig_means.empty:
+            # Compute per-contig mean as sum(coverage)/contig_length to include implicit zeros
+            contig_means["mean_coverage"] = (
+                contig_means["coverage_sum"] / contig_means["length"]
+            )
+            total_len = contig_means["length"].sum()
+            if total_len > 0:
+                weighted_sum = (
+                    contig_means["mean_coverage"] * contig_means["length"]
+                ).sum()
+                result["length_weighted_coverage"] = weighted_sum / total_len
 
     if breadth < breadth_threshold:
         msg = f"Breadth {breadth:.2%} < threshold {breadth_threshold:.2%}"
@@ -373,11 +491,91 @@ def count_paired_replicates(df):
     return df
 
 
+def _aggregate_mag_stats(
+    df_results: pd.DataFrame,
+    mag_id: str,
+    group_cols: list,
+    overall: bool = False,
+):
+    """
+    Generic aggregator for MAG QC metrics.
+
+    Parameters
+    ----------
+    df_results : pd.DataFrame
+        Sample-level QC results for a single MAG.
+    mag_id : str
+        MAG identifier.
+    group_cols : list
+        Column names to group by. Empty list means collapse across all samples.
+    output_filename : str
+        Name of TSV to write.
+    output_dir : str
+        Destination directory.
+    overall : bool
+        If True, produce single-row overall summary with *_mean suffix; else per-group means.
+    """
+    if df_results.empty:
+        logger.warning(f"No results to summarize for {mag_id}")
+        return None
+
+    passing = df_results[df_results["breadth_threshold_passed"]]
+    if passing.empty:
+        logger.warning(
+            f"No passing samples for {mag_id}; summarizing all samples instead."
+        )
+        passing = df_results.copy()
+
+    metric_cols = [
+        c
+        for c in [
+            "subjects_per_group",
+            "replicates_per_group",
+            "paired_replicates_per_group",
+            "breadth",
+            "average_coverage",
+            "median_coverage",
+            "median_coverage_including_zeros",
+            "length_weighted_coverage",
+            "coverage_std",
+            "coverage_std_including_zeros",
+        ]
+        if c in passing.columns
+    ]
+
+    if overall:
+        row = {"MAG_ID": mag_id, "num_samples": passing.shape[0]}
+        for col in metric_cols:
+            row[col + "_mean"] = passing[col].mean()
+        out_df = pd.DataFrame([row])
+    else:
+        if not group_cols:
+            logger.error(
+                "group_cols empty but overall flag False; nothing to aggregate."
+            )
+            return None
+        agg_dict = {c: "mean" for c in metric_cols}
+        agg_dict["sample_id"] = "count"
+        grouped = passing.groupby(group_cols, dropna=False).agg(agg_dict)
+        out_df = grouped.rename(columns={"sample_id": "num_samples"}).reset_index()
+        out_df.insert(0, "MAG_ID", mag_id)
+
+        # Add _mean suffix to all metric columns for consistency
+        rename_dict = {
+            col: col + "_mean" for col in metric_cols if col in out_df.columns
+        }
+        out_df = out_df.rename(columns=rename_dict)
+
+    return out_df
+
+
 def process_mag(args):
     (
         mag_id,
         metadata_file,
         mag_size_dict,
+        contig_length_dict_global,
+        contig_to_mag_map,
         output_dir,
         breadth_threshold,
         cpus,
@@ -403,7 +601,12 @@ def process_mag(args):
     with Pool(
         processes=num_procs,
         initializer=init_worker,
-        initargs=(metadata_dict, mag_size_dict),
+        initargs=(
+            metadata_dict,
+            mag_size_dict,
+            contig_length_dict_global,
+            contig_to_mag_map,
+        ),
     ) as pool:
         results_list = list(
             pool.imap_unordered(process_mag_files, sample_files_with_mag_id),
@@ -423,6 +626,19 @@ def process_mag(args):
     out_file = os.path.join(output_dir, f"{mag_id}_QC.tsv")
     df_results.to_csv(out_file, sep="\t", index=False)
     logger.info(f"Saved QC report for {mag_id} to {out_file}")
+    # Prepare summaries (do not write here; collected in main)
+    group_summary = _aggregate_mag_stats(
+        df_results, mag_id, group_cols=["group"], overall=False
+    )
+    group_time_summary = None
+    if "time" in df_results.columns:
+        group_time_summary = _aggregate_mag_stats(
+            df_results, mag_id, group_cols=["group", "time"], overall=False
+        )
+    overall_summary = _aggregate_mag_stats(
+        df_results, mag_id, group_cols=[], overall=True
+    )
+    return group_summary, group_time_summary, overall_summary
 
 
 def main():
@@ -463,7 +679,7 @@ def main():
     parser.add_argument(
         "--mag_mapping_file",
         help="Path to tab-separated file mapping contig names to MAG IDs. "
-        "Must have columns 'contig_name' and 'mag_id'.",
+        "Must have columns 'contig_id' and 'mag_id'.",
         type=str,
         required=True,
         metavar="filepath",
@@ -474,6 +690,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     mag_size_dict = calculate_mag_sizes(args.fasta, args.mag_mapping_file)
+    # Build contig length index once (re-used by workers)
+    contig_length_dict = build_contig_length_index(args.fasta, args.mag_mapping_file)
+    # Load mapping for MAG membership validation/subsetting
+    contig_to_mag_global = load_mag_mapping(args.mag_mapping_file)
 
     metadata_files = glob(os.path.join(args.rootDir, "*_metadata.tsv"))
     if not metadata_files:
@@ -487,6 +707,9 @@ def main():
             ],  # mag_id extracted from filename
             metadata_file,
             mag_size_dict,
+            contig_length_dict,
+            # pass mapping for validation
+            contig_to_mag_global,
             args.output_dir,
             args.breadth_threshold,
             args.cpus,
@@ -495,8 +718,37 @@ def main():
         for metadata_file in metadata_files
     ]
 
+    all_group = []
+    all_group_time = []
+    all_overall = []
     for task in tasks:
-        process_mag(task)
+        group_df, group_time_df, overall_df = process_mag(task)
+        if group_df is not None:
+            all_group.append(group_df)
+        if group_time_df is not None:
+            all_group_time.append(group_time_df)
+        if overall_df is not None:
+            all_overall.append(overall_df)
+
+    # Write combined summaries
+    if all_group:
+        pd.concat(all_group, ignore_index=True).to_csv(
+            os.path.join(args.output_dir, "ALL_MAGs_QC_group_summary.tsv"),
+            sep="\t",
+            index=False,
+        )
+    if all_group_time:
+        pd.concat(all_group_time, ignore_index=True).to_csv(
+            os.path.join(args.output_dir, "ALL_MAGs_QC_group_time_summary.tsv"),
+            sep="\t",
+            index=False,
+        )
+    if all_overall:
+        pd.concat(all_overall, ignore_index=True).to_csv(
+            os.path.join(args.output_dir, "ALL_MAGs_QC_overall_summary.tsv"),
+            sep="\t",
+            index=False,
+        )
 
     logger.info("QC analysis completed.")
 

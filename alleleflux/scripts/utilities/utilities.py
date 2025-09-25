@@ -42,6 +42,41 @@ def calculate_mag_sizes(fasta_file, mag_mapping_file):
     return mag_sizes
 
 
+def build_contig_length_index(fasta_file, mag_mapping_file):
+    """
+    Build an index of contig lengths limited to contigs present in the mapping file.
+
+    Parameters
+    ----------
+    fasta_file : str
+        Path to FASTA with contig sequences.
+    mag_mapping_file : str
+        Tab-separated mapping file with columns: mag_id, contig_id.
+
+    Returns
+    -------
+    dict
+        contig_id -> length (only for contigs referenced in mapping file)
+    """
+    logger.info("Building contig length index...")
+    mag_mapping_df = pd.read_csv(mag_mapping_file, sep="\t")
+    required_columns = {"mag_id", "contig_id"}
+    missing = required_columns - set(mag_mapping_df.columns)
+    if missing:
+        raise ValueError(
+            f"Missing columns in MAG mapping file: {missing}. Required: {required_columns}"
+        )
+
+    contig_whitelist = set(mag_mapping_df["contig_id"].tolist())
+    contig_lengths = {}
+    for record in SeqIO.parse(fasta_file, "fasta"):
+        if record.id in contig_whitelist:
+            contig_lengths[record.id] = len(record.seq)
+
+    logger.info(f"Indexed {len(contig_lengths):,} contigs with lengths for coverage weighting.")
+    return contig_lengths
+
+
 def load_mag_mapping(mapping_file):
     """
     Load a MAG-to-contig mapping file.
