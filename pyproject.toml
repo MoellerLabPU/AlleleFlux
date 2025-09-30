@@ -46,7 +46,7 @@ alleleflux-dnds-from-timepoints = "alleleflux.scripts.evolution.dnds_from_timepo
 # Accessory scripts
 alleleflux-create-mag-mapping = "alleleflux.scripts.accessory.create_mag_mapping:main"
 alleleflux-add-bam-path = "alleleflux.scripts.accessory.add_bam_path_to_metadata:main"
-alleleflux-mean-coverage = "alleleflux.scripts.accessory.mean_coverage_per_position:main"
+alleleflux-mean-coverage = "alleleflux.scripts.accessory.coverage_and_allele_stats:main"
 
 [tool.setuptools.package-data]
 # Include the runner script AND everything inside the smk_workflow directory

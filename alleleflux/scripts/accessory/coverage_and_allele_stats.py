@@ -35,6 +35,7 @@ Notes:
 
 import argparse
 import logging
+import multiprocessing
 import os
 import re
 from collections import defaultdict
@@ -688,6 +689,40 @@ def compute_mean_coverage(
     return out
 
 
+def process_metadata_file_worker(
+    metadata_file: str, output_dir: str, treat_absent_as_zero: bool
+) -> str:
+    """
+    Worker function to process a single metadata file in parallel.
+
+    This function is designed to be called by multiprocessing.Pool workers.
+    It processes one MAG metadata file, computes coverage statistics, and saves the output.
+
+    Args:
+        metadata_file: Path to the metadata TSV file for a single MAG.
+        output_dir: Directory where output files should be saved.
+        treat_absent_as_zero: Whether to treat absent positions as zero coverage.
+
+    """
+    mag_id = os.path.basename(metadata_file).split("_metadata")[0]
+
+    logger.info(f"Processing MAG: {mag_id}")
+
+    # Compute mean coverage for this MAG
+    df = compute_mean_coverage(
+        mag_metadata=Path(metadata_file),
+        treat_absent_as_zero=treat_absent_as_zero,
+    )
+
+    # Save output file
+    out_file = Path(output_dir) / f"{mag_id}_mean_coverage.tsv"
+    df.to_csv(out_file, sep="\t", index=False)
+
+    logger.info(
+        f"Saved mean coverage ({df.shape[0]:,} rows) for {mag_id} to {out_file}"
+    )
+
+
 def main():
     """
     Main entry point for the script.
@@ -695,6 +730,9 @@ def main():
     Parses command-line arguments, finds all *_metadata.tsv files in the input directory,
     and processes each MAG to compute mean coverage per position. Outputs are saved as
     TSV files in the specified output directory.
+
+    This function uses multiprocessing to process multiple metadata files concurrently,
+    utilizing all available CPU cores for improved performance when processing many files.
     """
     # Initialize logging for the module
     setup_logging()
@@ -725,6 +763,14 @@ def main():
             "Include absent positions as zero coverage when calculating averages (default: average only over present samples)."
         ),
     )
+    args.add_argument(
+        "--cpus",
+        type=int,
+        default=multiprocessing.cpu_count(),
+        help=(
+            f"Number of CPU cores to use for parallel processing, all available cores)."
+        ),
+    )
     args = args.parse_args()
 
     treat_absent_as_zero = args.include_zeros
@@ -737,18 +783,22 @@ def main():
         )
         return
 
-    for metadata_file in metadata_files:
-        mag_id = os.path.basename(metadata_file).split("_metadata")[0]
-        logger.info(f"Processing MAG: {mag_id}")
-        df = compute_mean_coverage(
-            mag_metadata=Path(metadata_file),
-            treat_absent_as_zero=treat_absent_as_zero,
-        )
-        out_file = Path(args.output_dir) / f"{mag_id}_mean_coverage.tsv"
-        df.to_csv(out_file, sep="\t", index=False)
-        logger.info(
-            f"Saved mean coverage ({df.shape[0]:,} rows) for {mag_id} to {out_file}"
-        )
+    num_files = len(metadata_files)
+    # Ensure we don't use more CPUs than files to process
+    num_cpus = min(args.cpus, num_files)
+
+    logger.info(f"Found {num_files} metadata file(s) to process")
+    logger.info(f"Using {num_cpus} CPU core(s) for parallel processing")
+
+    # Prepare task arguments for starmap
+    tasks = [
+        (metadata_file, args.output_dir, treat_absent_as_zero)
+        for metadata_file in metadata_files
+    ]
+
+    # Process files using multiprocessing with starmap; exceptions will propagate
+    with multiprocessing.Pool(processes=num_cpus) as pool:
+        pool.starmap(process_metadata_file_worker, tasks)
 
 
 if __name__ == "__main__":

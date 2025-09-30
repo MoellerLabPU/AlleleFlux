@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alleleflux.scripts.accessory.mean_coverage_per_position import (
+from alleleflux.scripts.accessory.coverage_and_allele_stats import (
     ALLELES,
     _aggregate_with_freqs,
     _std_from_moments,
