@@ -34,6 +34,7 @@ Notes:
 """
 
 import argparse
+import functools
 import logging
 import multiprocessing
 import os
@@ -45,6 +46,7 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
@@ -292,6 +294,7 @@ def compute_grouped_statistics(
     meta: pd.DataFrame,
     result: pd.DataFrame,
     treat_absent_as_zero: bool,
+    mag_id: str,
 ) -> pd.DataFrame:
     """
     Compute grouped statistics for samples with group and/or time information.
@@ -331,7 +334,7 @@ def compute_grouped_statistics(
     # Iterate over grouping levels: first 'group', then 'group'+'time' if both
     for i in range(len(grouping_cols)):
         current_groups = grouping_cols[: i + 1]
-        logger.info(f"Grouped stats for: {current_groups}")
+        logger.info(f"Grouped stats for: {current_groups} for MAG {mag_id}")
 
         # Group by contig, position, and group(s), aggregate sums and counts
         idx = ["contig", "position", *current_groups]
@@ -623,11 +626,14 @@ def compute_mean_coverage(
     """
     # Read and validate the MAG metadata file
     meta = read_mag_metadata(mag_metadata)
+    mag_id = os.path.basename(mag_metadata).split("_metadata")[0]
     n_samples = len(meta)
     logger.info(f"Aggregating coverage across {n_samples} samples from {mag_metadata}")
 
+    logger.info(f"Combining profiles for MAG: {mag_id}")
     # Load and combine all sample data
     df = load_and_combine_sample_data(meta)
+    logger.info(f"Combined data for MAG {mag_id} shape: {df.shape}")
 
     # Handle case where no data was found
     if df.empty:
@@ -645,6 +651,7 @@ def compute_mean_coverage(
         )
 
     # Compute allele frequencies and prepare data for statistical calculations
+    logger.info(f"Computing allele frequencies for MAG: {mag_id}")
     df = compute_allele_frequencies(df)
     # Log the mode for accounting of absent positions
     mode_desc = "include-zeros" if treat_absent_as_zero else "present-only"
@@ -654,7 +661,7 @@ def compute_mean_coverage(
     result = compute_overall_statistics(df, n_samples, treat_absent_as_zero)
 
     # Compute grouped statistics if group/time information is available
-    result = compute_grouped_statistics(df, meta, result, treat_absent_as_zero)
+    result = compute_grouped_statistics(df, meta, result, treat_absent_as_zero, mag_id)
 
     # Finalize and return results
     base = [
@@ -722,6 +729,8 @@ def process_metadata_file_worker(
         f"Saved mean coverage ({df.shape[0]:,} rows) for {mag_id} to {out_file}"
     )
 
+    return str(out_file)
+
 
 def main():
     """
@@ -788,17 +797,22 @@ def main():
     num_cpus = min(args.cpus, num_files)
 
     logger.info(f"Found {num_files} metadata file(s) to process")
-    logger.info(f"Using {num_cpus} CPU core(s) for parallel processing")
+    logger.info(f"Using {num_cpus} CPU(s) for parallel processing")
 
-    # Prepare task arguments for starmap
-    tasks = [
-        (metadata_file, args.output_dir, treat_absent_as_zero)
-        for metadata_file in metadata_files
-    ]
-
-    # Process files using multiprocessing with starmap; exceptions will propagate
+    # Parallel path with unordered completion and progress bar
+    worker = functools.partial(
+        process_metadata_file_worker,
+        output_dir=args.output_dir,
+        treat_absent_as_zero=treat_absent_as_zero,
+    )
     with multiprocessing.Pool(processes=num_cpus) as pool:
-        pool.starmap(process_metadata_file_worker, tasks)
+        for _ in tqdm(
+            pool.imap_unordered(worker, metadata_files),
+            total=num_files,
+            desc="Processing MAGs",
+            unit="file",
+        ):
+            pass
 
 
 if __name__ == "__main__":
