@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
@@ -16,6 +17,7 @@ from alleleflux.scripts.preprocessing.quality_control import (
     check_timepoints,
     count_paired_replicates,
     init_worker,
+    load_positions_file,
     process_mag_files,
 )
 
@@ -78,6 +80,8 @@ class TestQualityControl(unittest.TestCase):
             self.mag_size_dict,
             self.contig_length_dict,
             self.contig_to_mag,
+            positions_filter_map=None,
+            positions_denominator="positions",
         )
 
     def create_temp_profile(self, data):
@@ -467,6 +471,279 @@ class TestAggregation(TestQualityControl):
 
         # Should return None for empty input
         self.assertIsNone(result)
+
+
+class TestPositionsFiltering(TestQualityControl):
+    """Test the new positions filtering functionality."""
+
+    def test_positions_considered_field(self):
+        """positions_considered only exists when positions filter is used."""
+        # Scenario 1: No positions filter - positions_considered should be absent
+        profile_data = {
+            "contig": ["contig1", "contig1"],
+            "position": [1, 2],
+            "gene_id": ["gene1", "gene2"],
+            "total_coverage": [10.0, 20.0],
+        }
+
+        profile_file = self.create_temp_profile(profile_data)
+
+        try:
+            # No positions filter
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=None,
+                positions_denominator="positions",
+            )
+
+            args = ("sample1", profile_file, "MAG001", 0.1)
+            result = process_mag_files(args)
+
+            # positions_considered should not be present when no filter is provided
+            self.assertNotIn("positions_considered", result)
+
+        finally:
+            os.unlink(profile_file)
+
+    def test_positions_filter_with_set(self):
+        """Test filtering with positions set (new implementation)."""
+        # Create test profile data
+        profile_data = {
+            "contig": ["contig1", "contig1", "contig1", "contig2"],
+            "position": [1, 2, 3, 1],
+            "gene_id": ["gene1", "gene2", "gene3", "gene4"],
+            "total_coverage": [10.0, 20.0, 30.0, 40.0],
+        }
+
+        profile_file = self.create_temp_profile(profile_data)
+
+        try:
+            # Create positions filter as a set of tuples (new format)
+            positions_filter = {
+                "MAG001": {("contig1", 1), ("contig1", 2)}  # Only first 2 positions
+            }
+
+            # Re-initialize worker with positions filter
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=positions_filter,
+                positions_denominator="positions",
+            )
+
+            args = ("sample1", profile_file, "MAG001", 0.0001)
+            result = process_mag_files(args)
+
+            # Should only include 2 positions (contig1:1 and contig1:2)
+            self.assertEqual(result["positions_considered"], 2)
+            # Average coverage: (10 + 20) / 2 = 15 (denominator is positions count)
+            self.assertAlmostEqual(result["average_coverage"], 15.0)
+            # Breadth: 2 positions with coverage / 2 total positions = 1.0
+            self.assertAlmostEqual(result["breadth"], 1.0)
+            # Median coverage: median of [10, 20] = 15
+            self.assertAlmostEqual(result["median_coverage"], 15.0)
+            # Breadth threshold fields should not exist when positions filter is active
+            self.assertNotIn("breadth_threshold_passed", result)
+            self.assertNotIn("breadth_fail_reason", result)
+
+        finally:
+            os.unlink(profile_file)
+            # Reset worker to default state
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=None,
+                positions_denominator="positions",
+            )
+
+    def test_positions_filter_genome_denominator(self):
+        """Test filtering with genome denominator mode."""
+        profile_data = {
+            "contig": ["contig1", "contig1"],
+            "position": [1, 2],
+            "gene_id": ["gene1", "gene2"],
+            "total_coverage": [10.0, 20.0],
+        }
+
+        profile_file = self.create_temp_profile(profile_data)
+
+        try:
+            # Create positions filter
+            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
+
+            # Initialize with genome denominator mode
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=positions_filter,
+                positions_denominator="genome",  # Use genome size as denominator
+            )
+
+            args = ("sample1", profile_file, "MAG001", 0.0001)
+            result = process_mag_files(args)
+
+            # positions_considered should still be recorded
+            self.assertEqual(result["positions_considered"], 2)
+            # Average coverage: (10 + 20) / 1000000 (genome size) = 0.00003
+            self.assertAlmostEqual(result["average_coverage"], 30.0 / 1000000)
+            # Breadth: 2 positions / 1000000 = 0.000002
+            self.assertAlmostEqual(result["breadth"], 2.0 / 1000000)
+            # Breadth threshold fields should not exist when positions filter is active
+            self.assertNotIn("breadth_threshold_passed", result)
+            self.assertNotIn("breadth_fail_reason", result)
+
+        finally:
+            os.unlink(profile_file)
+            # Reset worker
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=None,
+                positions_denominator="positions",
+            )
+
+    def test_positions_filter_no_matches(self):
+        """Test positions filter when no positions match."""
+        profile_data = {
+            "contig": ["contig1"],
+            "position": [100],  # Position not in filter
+            "gene_id": ["gene1"],
+            "total_coverage": [10.0],
+        }
+
+        profile_file = self.create_temp_profile(profile_data)
+
+        try:
+            # Create positions filter with different positions
+            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
+
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=positions_filter,
+                positions_denominator="positions",
+            )
+
+            args = ("sample1", profile_file, "MAG001", 0.1)
+            result = process_mag_files(args)
+
+            # Should return early with empty df - breadth fields don't exist
+            self.assertNotIn("breadth_threshold_passed", result)
+            self.assertNotIn("breadth_fail_reason", result)
+            self.assertEqual(result["positions_considered"], 2)
+
+        finally:
+            os.unlink(profile_file)
+            # Reset worker
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=None,
+                positions_denominator="positions",
+            )
+
+    def test_positions_filter_skips_length_weighted_coverage(self):
+        """Test that length-weighted coverage is absent when positions filter is active."""
+        profile_data = {
+            "contig": ["contig1", "contig1"],
+            "position": [1, 2],
+            "gene_id": ["gene1", "gene2"],
+            "total_coverage": [10.0, 20.0],
+        }
+
+        profile_file = self.create_temp_profile(profile_data)
+
+        try:
+            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
+
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=positions_filter,
+                positions_denominator="positions",
+            )
+
+            args = ("sample1", profile_file, "MAG001", 0.0001)
+            result = process_mag_files(args)
+
+            # Length-weighted coverage should not exist when positions filter is active
+            self.assertNotIn("length_weighted_coverage", result)
+            # Breadth threshold fields should not exist when positions filter is active
+            self.assertNotIn("breadth_threshold_passed", result)
+            self.assertNotIn("breadth_fail_reason", result)
+
+        finally:
+            os.unlink(profile_file)
+            # Reset worker
+            init_worker(
+                self.metadata_dict,
+                self.mag_size_dict,
+                self.contig_length_dict,
+                self.contig_to_mag,
+                positions_filter_map=None,
+                positions_denominator="positions",
+            )
+
+
+class TestPathHandling(unittest.TestCase):
+    """Test Path object handling in quality_control."""
+
+    def test_load_positions_file_with_path_object(self):
+        """Test that load_positions_file accepts Path objects."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
+            f.write("MAG\tcontig\tposition\n")
+            f.write("MAG001\tcontig1\t1\n")
+            f.write("MAG001\tcontig1\t2\n")
+            f.write("MAG002\tcontig2\t5\n")
+            temp_path = Path(f.name)
+
+        try:
+            # Should accept Path object
+            positions_map = load_positions_file(temp_path)
+
+            self.assertIsInstance(positions_map, dict)
+            self.assertIn("MAG001", positions_map)
+            self.assertIn("MAG002", positions_map)
+            # Verify set-based storage
+            self.assertIsInstance(positions_map["MAG001"], set)
+            self.assertIn(("contig1", 1), positions_map["MAG001"])
+            self.assertIn(("contig1", 2), positions_map["MAG001"])
+            self.assertIn(("contig2", 5), positions_map["MAG002"])
+
+        finally:
+            temp_path.unlink()
+
+    def test_load_positions_file_with_string_path(self):
+        """Test that load_positions_file still accepts string paths."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
+            f.write("MAG\tcontig\tposition\n")
+            f.write("MAG001\tcontig1\t1\n")
+            temp_str_path = f.name
+
+        try:
+            # Should accept string path (converted internally)
+            positions_map = load_positions_file(temp_str_path)
+            self.assertIn("MAG001", positions_map)
+
+        finally:
+            Path(temp_str_path).unlink()
 
 
 class TestEdgeCases(TestQualityControl):
