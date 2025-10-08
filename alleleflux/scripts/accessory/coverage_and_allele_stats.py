@@ -35,12 +35,12 @@ Usage:
 Output:
 A TSV per MAG with columns:
 - contig, position, total_coverage, n_present, n_samples
-- mean_coverage, std_coverage (present-only statistics)
-- mean_coverage_with_zeros, std_coverage_with_zeros (include-zeros statistics)
-- mean_coverage_group_<group>, std_coverage_group_<group> (present-only, if group column present)
-- mean_coverage_with_zeros_group_<group>, std_coverage_with_zeros_group_<group> (include-zeros, if group column present)
-- mean_coverage_group_<group>_time_<time>, std_coverage_group_<group>_time_<time> (present-only, if both group and time present)
-- mean_coverage_with_zeros_group_<group>_time_<time>, std_coverage_with_zeros_group_<group>_time_<time> (include-zeros)
+- stats, std_coverage (present-only statistics)
+- stats_with_zeros, std_coverage_with_zeros (include-zeros statistics)
+- stats_group_<group>, std_coverage_group_<group> (present-only, if group column present)
+- stats_with_zeros_group_<group>, std_coverage_with_zeros_group_<group> (include-zeros, if group column present)
+- stats_group_<group>_time_<time>, std_coverage_group_<group>_time_<time> (present-only, if both group and time present)
+- stats_with_zeros_group_<group>_time_<time>, std_coverage_with_zeros_group_<group>_time_<time> (include-zeros)
 - n_present_group_<group> and n_present_group_<group>_time_<time> (number of samples with coverage)
 - n_samples_group_<group> and n_samples_group_<group>_time_<time> (total number of samples in group)
 
@@ -299,8 +299,8 @@ def compute_overall_statistics(df: pd.DataFrame, n_samples: int) -> pd.DataFrame
 
     Notes:
         - Computes two sets of coverage statistics:
-            * mean_coverage/std_coverage: present-only (denominator = n_present)
-            * mean_coverage_with_zeros/std_coverage_with_zeros: include-zeros (denominator = n_samples)
+            * stats/std_coverage: present-only (denominator = n_present)
+            * stats_with_zeros/std_coverage_with_zeros: include-zeros (denominator = n_samples)
         - Allele frequencies (mean_freq_*, std_freq_*) are always computed using only the
           present samples as the denominator to avoid downward bias when many samples are absent.
     """
@@ -326,9 +326,9 @@ def compute_overall_statistics(df: pd.DataFrame, n_samples: int) -> pd.DataFrame
     # Build result DataFrame with both sets of statistics
     tmp = overall.assign(
         total_coverage=overall["sum_cov"],  # Total coverage across all samples
-        mean_coverage=mean_present,
+        stats=mean_present,
         std_coverage=std_present,
-        mean_coverage_with_zeros=mean_with_zeros,
+        stats_with_zeros=mean_with_zeros,
         std_coverage_with_zeros=std_with_zeros,
         n_samples=n_samples,
         n_present=overall["n_present"].astype(int),
@@ -339,9 +339,9 @@ def compute_overall_statistics(df: pd.DataFrame, n_samples: int) -> pd.DataFrame
             "contig",
             "position",
             "total_coverage",
-            "mean_coverage",
+            "stats",
             "std_coverage",
-            "mean_coverage_with_zeros",
+            "stats_with_zeros",
             "std_coverage_with_zeros",
             "n_present",
             "n_samples",
@@ -380,8 +380,8 @@ def compute_grouped_statistics(
 
     Notes:
         - Computes two sets of coverage statistics per group:
-            * mean_coverage_group_X/std_coverage_group_X: present-only (denominator = n_present)
-            * mean_coverage_with_zeros_group_X/std_coverage_with_zeros_group_X: include-zeros (denominator = group size)
+            * stats_group_X/std_coverage_group_X: present-only (denominator = n_present)
+            * stats_with_zeros_group_X/std_coverage_with_zeros_group_X: include-zeros (denominator = group size)
         - Allele frequencies per group/time are always computed using only present samples in that
           group/time combination.
     """
@@ -456,10 +456,10 @@ def compute_grouped_statistics(
         wide_ns = ns_series.unstack(current_groups)
 
         # Rename columns to descriptive names
-        mean_cols = _flatten_cols("mean_coverage_", current_groups, wide_mean.columns)
+        mean_cols = _flatten_cols("stats_", current_groups, wide_mean.columns)
         std_cols = _flatten_cols("std_coverage_", current_groups, wide_std.columns)
         mean_with_zeros_cols = _flatten_cols(
-            "mean_coverage_with_zeros_", current_groups, wide_mean_with_zeros.columns
+            "stats_with_zeros_", current_groups, wide_mean_with_zeros.columns
         )
         std_with_zeros_cols = _flatten_cols(
             "std_coverage_with_zeros_", current_groups, wide_std_with_zeros.columns
@@ -585,7 +585,7 @@ def _flatten_cols(prefix: str, current_groups: List[str], cols) -> List[str]:
     entry in ``current_groups`` is used. All labels are sanitized by ``_sanitize``.
 
     Parameters:
-        prefix (str): Column name prefix to start with, e.g., 'mean_coverage_'.
+        prefix (str): Column name prefix to start with, e.g., 'stats_'.
         current_groups (List[str]): Ordered list of group keys, e.g., ['group', 'time'].
         cols (Iterable[Any]): Labels from an unstacked index, either tuples or scalars.
 
@@ -596,8 +596,8 @@ def _flatten_cols(prefix: str, current_groups: List[str], cols) -> List[str]:
 
     Examples:
         Single grouping level:
-        >>> _flatten_cols('mean_coverage_', ['group'], ['A', 'B'])
-        ['mean_coverage_group_A', 'mean_coverage_group_B']
+        >>> _flatten_cols('stats_', ['group'], ['A', 'B'])
+        ['stats_group_A', 'stats_group_B']
 
         Two grouping levels (tuples expected in cols):
         >>> _flatten_cols('std_coverage_', ['group', 'time'], [('A', '1'), ('B', '2')])
@@ -688,7 +688,7 @@ def _compute_allele_means_stds(
 # --- main computation function ------------------------------------------------
 
 
-def compute_mean_coverage(mag_metadata: Path, qc_dir: str = None) -> pd.DataFrame:
+def compute_stats(mag_metadata: Path, qc_dir: str = None) -> pd.DataFrame:
     """
     Computes mean and standard deviation coverage statistics for a single MAG.
 
@@ -748,7 +748,7 @@ def compute_mean_coverage(mag_metadata: Path, qc_dir: str = None) -> pd.DataFram
                 "contig",
                 "position",
                 "total_coverage",
-                "mean_coverage",
+                "stats",
                 "std_coverage",
                 "n_present",
                 "n_samples",
@@ -771,9 +771,9 @@ def compute_mean_coverage(mag_metadata: Path, qc_dir: str = None) -> pd.DataFram
         "contig",
         "position",
         "total_coverage",
-        "mean_coverage",
+        "stats",
         "std_coverage",
-        "mean_coverage_with_zeros",
+        "stats_with_zeros",
         "std_coverage_with_zeros",
         "n_present",
         "n_samples",
@@ -785,9 +785,9 @@ def compute_mean_coverage(mag_metadata: Path, qc_dir: str = None) -> pd.DataFram
         for col in result.columns
         if col.startswith(
             (
-                "mean_coverage_",  # total coverage grouped means
+                "stats_",  # total coverage grouped means
                 "std_coverage_",  # total coverage grouped stds
-                "mean_coverage_with_zeros_",  # with zeros grouped means
+                "stats_with_zeros_",  # with zeros grouped means
                 "std_coverage_with_zeros_",  # with zeros grouped stds
                 "n_present_",
                 "n_samples_",
@@ -797,9 +797,9 @@ def compute_mean_coverage(mag_metadata: Path, qc_dir: str = None) -> pd.DataFram
         )
         and col
         not in {
-            "mean_coverage",
+            "stats",
             "std_coverage",
-            "mean_coverage_with_zeros",
+            "stats_with_zeros",
             "std_coverage_with_zeros",
         }
     ]
@@ -829,13 +829,13 @@ def process_metadata_file_worker(
     logger.info(f"Processing MAG: {mag_id}")
 
     # Compute mean coverage for this MAG
-    df = compute_mean_coverage(
+    df = compute_stats(
         mag_metadata=Path(metadata_file),
         qc_dir=qc_dir,
     )
 
     # Save output file
-    out_file = Path(output_dir) / f"{mag_id}_mean_coverage.tsv"
+    out_file = Path(output_dir) / f"{mag_id}_stats.tsv"
     df.to_csv(out_file, sep="\t", index=False)
 
     logger.info(
