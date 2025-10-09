@@ -185,6 +185,11 @@ def process_mag_files(args):
         "coverage_std_including_zeros": None,
     }
 
+    # Add breadth_genome field when dual breadth mode is active
+    # (positions file provided AND positions_denominator="positions")
+    if using_position_filter and positions_den_mode == "positions":
+        result["breadth_genome"] = None
+
     # Only include length_weighted_coverage when positions filter is NOT active
     # (this metric is not meaningful for sparse position sets)
     if not using_position_filter:
@@ -195,9 +200,14 @@ def process_mag_files(args):
             f"Positions filter detected for MAG {mag_id} with {len(positions_filter.get(mag_id, set()))} positions"
         )
 
-    # Only add breadth threshold fields if positions filter is NOT active
-    # (breadth threshold is not meaningful when a subset positions file is specified)
-    if positions_filter is None or not using_position_filter:
+    # Add breadth threshold fields in two scenarios:
+    # 1. When positions filter is NOT active (standard case)
+    # 2. When positions filter is active AND positions_denominator="positions" (dual breadth mode)
+    if (
+        positions_filter is None
+        or not using_position_filter
+        or (using_position_filter and positions_den_mode == "positions")
+    ):
         result["breadth_threshold_passed"] = False
         result["breadth_fail_reason"] = ""
     # Add time if available in metadata
@@ -237,6 +247,11 @@ def process_mag_files(args):
             if positions_filter is None or not using_position_filter:
                 result["breadth_fail_reason"] = msg
             return result
+
+    # In dual breadth mode, capture genome-wide positions with coverage BEFORE filtering
+    positions_with_coverage_genome = None
+    if using_position_filter and positions_den_mode == "positions":
+        positions_with_coverage_genome = df[df["total_coverage"] >= 1].shape[0]
 
     # Optionally filter to positions-of-interest if provided for this MAG
     positions_universe_n = None
@@ -294,6 +309,14 @@ def process_mag_files(args):
     positions_with_coverage = df[df["total_coverage"] >= 1].shape[0]
     breadth = positions_with_coverage / denom if denom > 0 else np.nan
     result["breadth"] = breadth
+
+    # Compute breadth_genome when dual breadth mode is active
+    # (positions file provided AND positions_denominator="positions")
+    if using_position_filter and positions_den_mode == "positions":
+        breadth_genome = (
+            positions_with_coverage_genome / mag_size if mag_size > 0 else np.nan
+        )
+        result["breadth_genome"] = breadth_genome
 
     # Average coverage depth = sum of coverage across all rows divided by denominator
     total_coverage_sum = df["total_coverage"].sum()
@@ -365,11 +388,22 @@ def process_mag_files(args):
                     ).sum()
                     result["length_weighted_coverage"] = weighted_sum / total_len
 
-    # Only perform breadth threshold check if positions filter is NOT active
-    # (breadth threshold is not meaningful when a subset positions file is specified)
+    # Perform breadth threshold check in two scenarios:
+    # 1. When positions filter is NOT active (standard case) - check against breadth
+    # 2. When positions filter is active AND positions_denominator="positions" (dual breadth mode) - check against breadth_genome
     if positions_filter is None or not using_position_filter:
+        # Standard case: check breadth (genome-based or full genome without filter)
         if breadth < breadth_threshold:
             msg = f"Breadth {breadth:.2%} < threshold {breadth_threshold:.2%}"
+            logger.info(f"{msg} - sample={sample_id}, mag={mag_id}")
+            result["breadth_fail_reason"] = msg
+        else:
+            result["breadth_threshold_passed"] = True
+    elif using_position_filter and positions_den_mode == "positions":
+        # Dual breadth mode: check breadth_genome against threshold
+        breadth_genome_val = result.get("breadth_genome", np.nan)
+        if breadth_genome_val < breadth_threshold:
+            msg = f"Breadth (genome) {breadth_genome_val:.2%} < threshold {breadth_threshold:.2%}"
             logger.info(f"{msg} - sample={sample_id}, mag={mag_id}")
             result["breadth_fail_reason"] = msg
         else:
@@ -649,7 +683,10 @@ def _aggregate_mag_stats(
     # If breadth_threshold_passed is absent (positions mode), consider all rows as passing
     if "breadth_threshold_passed" in df_results.columns:
         passing = df_results[df_results["breadth_threshold_passed"]]
+        # logger.info("breadth_threshold_passed column found.")
+        # logger.info(f"Number of passing samples for {mag_id}: {passing.shape[0]}")
     else:
+        # logger.info("breadth_threshold_passed column not found; using all samples.")
         passing = df_results.copy()
     if passing.empty:
         logger.warning(
