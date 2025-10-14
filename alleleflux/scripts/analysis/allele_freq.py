@@ -9,101 +9,132 @@ from multiprocessing import Pool, cpu_count
 import pandas as pd
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
-from alleleflux.scripts.utilities.utilities import (
-    calculate_mag_sizes,
-    load_mag_metadata_file,
-)
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 logger = logging.getLogger(__name__)
 
 
-def init_worker(metadata, mag_sizes, data_type):
+def load_qc_results(qc_file_path, mag_id):
     """
-    Initialize worker process with metadata and MAG sizes.
+    Load QC results and return samples that passed coverage threshold.
 
-    This function sets up global dictionaries for metadata and MAG sizes
+    Parameters:
+        qc_file_path (str): Path to the QC TSV file for this MAG
+        mag_id (str): MAG identifier (for logging)
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame containing only samples that passed coverage threshold,
+                     with columns: sample_id, file_path, group, subjectID, replicate, time (if available),
+                     breadth, average_coverage, genome_size, and other QC metrics
+
+    Raises:
+        ValueError: If no samples passed the coverage threshold
+        FileNotFoundError: If QC file doesn't exist
+    """
+    logger.info(f"Loading QC results from {qc_file_path}")
+
+    qc_df = pd.read_csv(qc_file_path, sep="\t", dtype={"sample_id": str})
+
+    # Filter to samples that passed coverage threshold
+    if "coverage_threshold_passed" not in qc_df.columns:
+        raise ValueError(
+            f"QC file {qc_file_path} missing 'coverage_threshold_passed' column. "
+            "Ensure quality_control.py was run properly."
+        )
+
+    passed_df = qc_df[qc_df["coverage_threshold_passed"] == True].copy()
+
+    if passed_df.empty:
+        raise ValueError(
+            f"No samples passed coverage threshold for MAG {mag_id}. "
+            f"Total samples in QC file: {len(qc_df)}"
+        )
+
+    logger.info(
+        f"Loaded {len(passed_df)} samples (out of {len(qc_df)} total) that passed coverage and breadth thresholds"
+    )
+
+    return passed_df
+
+
+def init_worker(metadata, data_type):
+    """
+    Initialize worker process with metadata.
+
+    This function sets up global dictionary for metadata
     that can be accessed by worker processes.
 
     Parameters:
-        metadata (dict): A dictionary containing metadata information.
-        mag_sizes (dict): A dictionary containing sizes of MAGs (Metagenome-Assembled Genomes).
+        metadata (dict): A dictionary containing metadata information with QC metrics.
+        data_type (str): Type of data analysis ("single" or "longitudinal").
 
     Returns:
         None
     """
     global metadata_dict
-    global mag_size_dict
     global DATA_TYPE
     metadata_dict = metadata
-    mag_size_dict = mag_sizes
     DATA_TYPE = data_type
 
 
 def process_mag_files(args):
     """
-    Processes a MAG (Metagenome-Assembled Genome) file and adds metadata information.
+    Processes a MAG profile file using metadata from QC results.
+
+    This function reads a coverage profile and adds metadata from QC analysis.
+    Since QC has already verified breadth and coverage thresholds, this function
+    simply loads the profile and enriches it with metadata.
 
     Parameters:
-        args (tuple): A tuple containing the following elements:
-            sample_id (str): The sample identifier.
-            filepath (str): The path to the MAG file.
-            mag_id (str): The MAG identifier.
-            breath_threshold (float): The threshold for breadth coverage.
+        args (tuple): A tuple containing:
+            - sample_id (str): The sample identifier
+            - filepath (str): Path to the coverage profile file
+            - mag_id (str): MAG identifier
 
     Returns:
-        pd.DataFrame or None: A DataFrame with added metadata and calculated breadth if the breadth is above the threshold,
-                              otherwise None if the breadth is below the threshold or if the MAG size is not found.
+        pd.DataFrame or None: DataFrame with nucleotide frequencies and metadata if successful,
+                             None if file cannot be read
 
     Notes:
-        - The function reads the MAG file from the given filepath.
-        - Adds sample_id, group, and subjectID columns to the DataFrame.
-        - Inserts the MAG_ID as the first column.
-        - Calculates the breadth of coverage for the MAG.
-        - If the breadth is below the given threshold, the function logs a message and returns None.
-        - If the breadth is above the threshold, the function adds the breadth and genome size to the DataFrame and returns it.
+        - Reads the profile file from filepath
+        - Adds metadata columns from the global metadata_dict (from QC results)
+        - Inserts MAG_ID as the first column
+        - Calculates nucleotide frequencies
+        - All samples have already passed breadth and coverage thresholds (verified in QC)
     """
-    sample_id, filepath, mag_id, breath_threshold = args
+    sample_id, filepath, mag_id = args
+
     df = pd.read_csv(filepath, sep="\t", dtype={"gene_id": str})
 
     # Add sample_id column
     df["sample_id"] = sample_id
-    # Add metadata columns
+
+    # Add metadata columns from QC results
     metadata_info = metadata_dict.get(sample_id)
+    if metadata_info is None:
+        logger.error(f"Sample ID not found for sample {sample_id}")
+        return None
+
     df["group"] = metadata_info["group"]
     df["subjectID"] = metadata_info["subjectID"]
     df["replicate"] = metadata_info["replicate"]
 
-    # For longitudinal data, add time column if available.
+    # Add QC metrics from metadata
+    df["breadth"] = metadata_info["breadth"]
+    df["genome_size"] = metadata_info["genome_size"]
+    df["average_coverage"] = metadata_info["average_coverage"]
+
+    # For longitudinal data, add time column if available
     if DATA_TYPE == "longitudinal" and "time" in metadata_info:
         df["time"] = metadata_info["time"]
 
-    # This adds MAG_ID as the first column
+    # Insert MAG_ID as the first column
     df.insert(0, "MAG_ID", mag_id)
 
-    # Get MAG size (total number of positions in the MAG)
-    mag_size = mag_size_dict.get(mag_id)
-    if mag_size is None:
-        logger.warning(f"Size for MAG {mag_id} not found in sample {sample_id}.")
-        return None  # Skip this sample-MAG combination
-
-    # Calculate the number of positions with total_coverage >= 1
-    positions_with_coverage = df[df["total_coverage"] >= 1].shape[0]
-
-    # Calculate breadth
-    breadth = positions_with_coverage / mag_size
-
-    if breadth < breath_threshold:
-        logger.info(
-            f"MAG {mag_id} in sample {sample_id} has breadth {breadth:.2%}, which is less than {breath_threshold:.2%}. Skipping this sample-MAG combination."
-        )
-        return None  # Skip this sample-MAG combination
-    else:
-        df["breadth"] = breadth
-        df["genome_size"] = mag_size
-        df = calculate_frequencies(df)
-        return df
+    # Calculate nucleotide frequencies
+    df = calculate_frequencies(df)
+    return df
 
 
 def calculate_frequencies(df):
@@ -558,7 +589,7 @@ def main():
     setup_logging()
 
     parser = argparse.ArgumentParser(
-        description="Analyze allele frequency and perform significance tests.",
+        description="Analyze allele frequency using QC-filtered samples.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -570,33 +601,11 @@ def main():
         metavar="str",
     )
     parser.add_argument(
-        "--mag_metadata_file",
-        help="Path to metadata file",
+        "--qc_file",
+        help="Path to QC results TSV file (output from quality_control.py) for this MAG",
         type=str,
         required=True,
         metavar="filepath",
-    )
-    parser.add_argument(
-        "--fasta",
-        help="Path to FASTA file with contigs",
-        type=str,
-        required=True,
-        metavar="filepath",
-    )
-    parser.add_argument(
-        "--mag_mapping_file",
-        help="Path to tab-separated file mapping contig names to MAG IDs. "
-        "Must have columns 'contig_id' and 'mag_id'.",
-        type=str,
-        required=True,
-        metavar="filepath",
-    )
-    parser.add_argument(
-        "--breath_threshold",
-        help="Breath threshold to use for MAGs.",
-        type=float,
-        default=0.1,
-        metavar="float",
     )
     parser.add_argument(
         "--data_type",
@@ -636,39 +645,61 @@ def main():
     args = parser.parse_args()
     start_time = time.time()
 
-    # Calculate MAG sizes using the mapping if provided
-    mag_size_dict = calculate_mag_sizes(args.fasta, args.mag_mapping_file)
     mag_id = args.magID
 
-    # Load per-MAG metadata file and get required data structures
-    metadata_dict, sample_files_with_mag_id = load_mag_metadata_file(
-        args.mag_metadata_file, mag_id, args.breath_threshold, data_type=args.data_type
-    )
+    # Load QC results and filter to passing samples
+    qc_df = load_qc_results(args.qc_file, mag_id)
+
+    # Build metadata dict from QC results (sample_id -> metadata with QC metrics)
+    metadata_dict = {}
+    sample_file_tuples = []
+
+    for _, row in qc_df.iterrows():
+        sample_id = str(row["sample_id"])
+
+        # Build metadata dict entry with all relevant info
+        meta = {
+            "group": row["group"],
+            "subjectID": row["subjectID"],
+            "replicate": row["replicate"],
+            "breadth": row["breadth"],
+            "genome_size": row["genome_size"],
+            "average_coverage": row["average_coverage"],
+        }
+
+        # Add time if available (longitudinal data)
+        if "time" in row and pd.notna(row["time"]):
+            meta["time"] = row["time"]
+
+        metadata_dict[sample_id] = meta
+
+        # Build tuple for processing: (sample_id, file_path, mag_id)
+        sample_file_tuples.append((sample_id, row["file_path"], mag_id))
 
     # Process the samples
-    number_of_processes = min(args.cpus, len(sample_files_with_mag_id))
+    number_of_processes = min(args.cpus, len(sample_file_tuples))
 
     logger.info(
-        f"Processing {len(sample_files_with_mag_id)} samples for MAG {mag_id} using {number_of_processes} processes."
+        f"Processing {len(sample_file_tuples)} samples for MAG {mag_id} using {number_of_processes} processes."
     )
 
     # Load sample data in parallel
     with Pool(
         processes=number_of_processes,
         initializer=init_worker,
-        initargs=(metadata_dict, mag_size_dict, args.data_type),
+        initargs=(metadata_dict, args.data_type),
     ) as pool:
-        data_list = list(
-            pool.imap_unordered(process_mag_files, sample_files_with_mag_id)
-        )
-    # Filter out None values (samples with breadth < 50%)
+        data_list = list(pool.imap_unordered(process_mag_files, sample_file_tuples))
+
+    # Filter out None values (in case of read failures)
     data_list = [df for df in data_list if df is not None]
 
     if not data_list:
         logger.error(
-            f"No samples for MAG {mag_id} passed the breadth threshold. Exiting...."
+            f"No sample profiles could be loaded for MAG {mag_id}. Check file paths in QC results."
         )
-        sys.exit(0)  # Exit the program
+        sys.exit(1)
+
     os.makedirs(args.output_dir, exist_ok=True)
     if args.data_type == "single":
         process_single_data(data_list, args.output_dir, mag_id, args.disable_filtering)

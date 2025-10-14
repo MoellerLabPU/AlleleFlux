@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
 
+"""
+Genome-wide Quality Control Script for AlleleFlux
+
+This script performs comprehensive quality control analysis on metagenome-assembled genomes (MAGs).
+It calculates coverage statistics, validates sample quality, and performs threshold-based filtering.
+
+Key Features:
+- Genome-wide breadth and coverage analysis
+- Length-weighted coverage calculations
+- Timepoint validation for longitudinal studies
+- Subject and replicate counting per experimental group
+- Parallel processing for multiple samples
+- Comprehensive logging and error handling
+
+The script processes coverage profile files for each MAG and determines whether samples pass
+breadth and coverage thresholds. It supports both single timepoint and longitudinal study designs.
+
+For position-specific QC analysis (analyzing coverage at specific genomic positions),
+use the separate positions_qc.py script in alleleflux/scripts/accessory/.
+
+Author: AlleleFlux Development Team
+"""
+
 import argparse
 import logging
 import sys
@@ -10,6 +33,16 @@ import numpy as np
 import pandas as pd
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.qc_metrics import (
+    aggregate_mag_stats,
+    calculate_breadth_metrics,
+    calculate_coverage_metrics,
+    calculate_length_weighted_coverage,
+    calculate_median_and_std_metrics,
+    check_breadth_threshold,
+    check_coverage_threshold,
+    load_and_validate_profile,
+)
 from alleleflux.scripts.utilities.utilities import (
     build_contig_length_index,
     calculate_mag_sizes,
@@ -20,57 +53,11 @@ from alleleflux.scripts.utilities.utilities import (
 logger = logging.getLogger(__name__)
 
 
-def load_positions_file(positions_file_path):
-    """
-    Load positions filter file and return MAG -> set of (contig, position) tuples.
-
-    Parameters:
-        positions_file_path (Path or str): Path to TSV file with columns: MAG, contig, position
-
-    Returns:
-        dict: Mapping of MAG ID -> set of (contig, position) tuples
-
-    Raises:
-        ValueError: If duplicate positions are found for a MAG
-    """
-    pos_df = pd.read_csv(
-        positions_file_path,
-        sep="\t",
-        dtype={"MAG": str, "contig": str, "position": "Int64"},
-        usecols=["MAG", "contig", "position"],
-    )
-
-    # Check for duplicates
-    dup_mask = pos_df.duplicated(subset=["MAG", "contig", "position"], keep=False)
-    if dup_mask.any():
-        dup_rows = pos_df[dup_mask].sort_values(["MAG", "contig", "position"])
-        logger.error(f"Duplicate (MAG, contig, position) rows found:\n{dup_rows}")
-        raise ValueError(
-            f"Positions file contains {dup_mask.sum()} duplicate (MAG, contig, position) rows. "
-            "Each position must appear only once per MAG."
-        )
-
-    # Build mapping MAG -> set of (contig, position) tuples for fast lookup
-    positions_by_mag = {
-        mag: set(
-            zip(
-                sub_df["contig"].astype(str),
-                sub_df["position"].astype(int),
-            )
-        )
-        for mag, sub_df in pos_df.groupby("MAG")
-    }
-
-    return positions_by_mag
-
-
 def init_worker(
     metadata,
     mag_sizes,
     contig_lengths,
     contig_to_mag_map,
-    positions_filter_map=None,
-    positions_denominator="positions",
 ):
     """
     Initialize worker process with metadata and MAG sizes.
@@ -81,11 +68,14 @@ def init_worker(
     Parameters:
         metadata (dict): A dictionary containing metadata information.
         mag_sizes (dict): A dictionary containing sizes of MAGs (Metagenome-Assembled Genomes).
-        positions_filter_map (dict): Optional mapping MAG -> set of (contig, position) tuples.
-        positions_denominator (str): Either 'positions' or 'genome' - determines denominator for metrics.
+        contig_lengths (dict): A dictionary containing contig lengths.
+        contig_to_mag_map (dict): Mapping of contig_id -> mag_id for validation.
 
     Returns:
         None
+
+    Notes:
+        For position-based QC analysis, use the separate positions_qc.py script.
     """
     global metadata_dict
     global mag_size_dict
@@ -97,12 +87,6 @@ def init_worker(
     # Mapping: contig_id -> mag_id (for validation/subsetting)
     global contig_to_mag
     contig_to_mag = contig_to_mag_map
-    # Optional: mapping MAG -> DataFrame of allowed (contig, position)
-    global positions_filter
-    positions_filter = positions_filter_map
-    # Denominator mode: 'positions' or 'genome'
-    global positions_den_mode
-    positions_den_mode = positions_denominator
 
 
 def process_mag_files(args):
@@ -110,8 +94,9 @@ def process_mag_files(args):
     Process a MAG (Metagenome-Assembled Genome) profile file and calculate coverage statistics.
 
     This function reads a coverage profile for a specific MAG in a sample and determines
-    whether it passes the breadth of coverage threshold. The function uses global dictionaries
-    `metadata_dict` and `mag_size_dict` to access sample metadata and MAG sizes.
+    whether it passes the breadth of coverage threshold and coverage depth threshold.
+    The function uses global dictionaries `metadata_dict` and `mag_size_dict` to access
+    sample metadata and MAG sizes.
 
     Parameters
     ----------
@@ -121,6 +106,7 @@ def process_mag_files(args):
         - profile_fPath (str): Path to the coverage profile file
         - mag_id (str): Identifier for the MAG
         - breadth_threshold (float): Minimum required breadth of coverage (0.0-1.0)
+        - coverage_threshold (float): Minimum required average coverage depth
 
     Returns
     -------
@@ -135,13 +121,16 @@ def process_mag_files(args):
         - time: Time point (if available in metadata)
         - genome_size: Size of the MAG in base pairs
         - breadth: Calculated breadth of coverage (proportion of genome covered)
-        - average_coverage: Average genome coverage depth (sum of all total_coverage values divided by genome size)
-        - median_coverage: Median of per-position total_coverage
-        - length_weighted_coverage: Length-weighted mean of per-contig mean coverage: Σ(mean_cov_contig * contig_length)/Σ(contig_length)
-        - coverage_std: Standard deviation of per-position total_coverage (population, ddof=0)
-        - coverage_std_including_zeros: Population std over entire genome length (absent positions treated as zero)
         - breadth_threshold_passed: Boolean indicating if breadth threshold was met
         - breadth_fail_reason: Explanation if threshold not met
+        - average_coverage: Average coverage depth across genome
+        - coverage_threshold_passed: Boolean indicating if coverage threshold was met
+        - coverage_fail_reason: Explanation if threshold not met
+        - median_coverage: Median of per-position total_coverage
+        - median_coverage_including_zeros: Median coverage including zeros for absent positions
+        - coverage_std: Standard deviation of per-position total_coverage (population, ddof=0)
+        - coverage_std_including_zeros: Population std over entire genome length (absent positions as zero)
+        - length_weighted_coverage: Length-weighted mean: Σ(mean_cov_contig * contig_length)/Σ(contig_length)
 
     Raises
     ------
@@ -150,10 +139,10 @@ def process_mag_files(args):
 
     Notes
     -----
-    Breadth of coverage is calculated as the number of positions with at least
-    1x coverage divided by the total genome size.
+    Breadth of coverage is calculated as the number of positions with at least 1x coverage
+    divided by the genome size.
     """
-    sample_id, profile_fPath, mag_id, breadth_threshold = args
+    sample_id, profile_fPath, mag_id, breadth_threshold, coverage_threshold = args
 
     # Check if there are more than 2 unique groups in the metadata
     unique_groups = {meta["group"] for meta in metadata_dict.values()}
@@ -161,15 +150,10 @@ def process_mag_files(args):
         msg = f"More than 2 unique groups found: {unique_groups}"
         raise ValueError(msg)
 
-    # Check if we'll be using a positions filter (determines which fields are added)
-    using_position_filter = (
-        positions_filter is not None
-        and positions_filter.get(mag_id) is not None
-        and len(positions_filter.get(mag_id, set())) > 0
-    )
-
     # Build a dictionary to store coverage stats
+    # Columns are organized by category for better readability
     result = {
+        # Sample metadata
         "sample_id": sample_id,
         "MAG_ID": mag_id,
         "file_path": profile_fPath,
@@ -177,39 +161,22 @@ def process_mag_files(args):
         "subjectID": metadata_dict[sample_id]["subjectID"],
         "replicate": metadata_dict[sample_id]["replicate"],
         "genome_size": mag_size_dict.get(mag_id, 0),
+        # Breadth metrics (grouped together)
         "breadth": None,
+        "breadth_threshold_passed": False,
+        "breadth_fail_reason": "",
+        # Coverage metrics (grouped together)
         "average_coverage": None,
+        "coverage_threshold_passed": False,
+        "coverage_fail_reason": "",
+        # Additional coverage statistics
         "median_coverage": None,
         "median_coverage_including_zeros": None,
         "coverage_std": None,
         "coverage_std_including_zeros": None,
+        "length_weighted_coverage": None,
     }
 
-    # Add breadth_genome field when dual breadth mode is active
-    # (positions file provided AND positions_denominator="positions")
-    if using_position_filter and positions_den_mode == "positions":
-        result["breadth_genome"] = None
-
-    # Only include length_weighted_coverage when positions filter is NOT active
-    # (this metric is not meaningful for sparse position sets)
-    if not using_position_filter:
-        result["length_weighted_coverage"] = None
-
-    if using_position_filter:
-        logger.debug(
-            f"Positions filter detected for MAG {mag_id} with {len(positions_filter.get(mag_id, set()))} positions"
-        )
-
-    # Add breadth threshold fields in two scenarios:
-    # 1. When positions filter is NOT active (standard case)
-    # 2. When positions filter is active AND positions_denominator="positions" (dual breadth mode)
-    if (
-        positions_filter is None
-        or not using_position_filter
-        or (using_position_filter and positions_den_mode == "positions")
-    ):
-        result["breadth_threshold_passed"] = False
-        result["breadth_fail_reason"] = ""
     # Add time if available in metadata
     if "time" in metadata_dict[sample_id]:
         result["time"] = metadata_dict[sample_id]["time"]
@@ -219,75 +186,16 @@ def process_mag_files(args):
     if mag_size is None or mag_size <= 0:
         msg = f"MAG size for {mag_id} not found or invalid."
         logger.error(f"{msg} sample={sample_id}, profile_fPath={profile_fPath}")
-        if positions_filter is None or not using_position_filter:
-            result["breadth_fail_reason"] = msg
+        result["breadth_fail_reason"] = msg
         return result
 
-    df = pd.read_csv(profile_fPath, sep="\t", dtype={"gene_id": str})
-
-    # Ensure the profile only includes contigs for this MAG; log if rows are dropped
-    if "contig" in df.columns:
-        before_rows = len(df)
-        # Map contigs to mag; unknown contigs map to None and will be excluded
-        mag_lookup = df["contig"].map(contig_to_mag)
-        mask = mag_lookup == mag_id
-        dropped = int(before_rows - mask.sum())
-        if dropped > 0:
-            logger.warning(
-                f"Profile contains {dropped} rows not belonging to MAG {mag_id}; filtering them out. "
-                f"file={profile_fPath} sample={sample_id}"
-            )
-        df = df.loc[mask].copy()
-        if df.empty:
-            msg = (
-                f"No rows remain after filtering profile to MAG {mag_id}. "
-                f"file={profile_fPath}"
-            )
-            logger.error(msg)
-            if positions_filter is None or not using_position_filter:
-                result["breadth_fail_reason"] = msg
-            return result
-
-    # In dual breadth mode, capture genome-wide positions with coverage BEFORE filtering
-    positions_with_coverage_genome = None
-    if using_position_filter and positions_den_mode == "positions":
-        positions_with_coverage_genome = df[df["total_coverage"] >= 1].shape[0]
-
-    # Optionally filter to positions-of-interest if provided for this MAG
-    positions_universe_n = None
-    if "contig" in df.columns and "position" in df.columns and using_position_filter:
-        wanted = positions_filter.get(mag_id)
-        if wanted is not None and len(wanted) > 0:
-            positions_universe_n = len(wanted)
-            # logger.info(
-            #     f"Positions filter active for {mag_id} (mode={positions_den_mode}, N={positions_universe_n})"
-            # )
-            # Filter df to only rows present in positions set (fast set membership)
-            df["contig"] = df["contig"].astype(str)
-            df["position"] = pd.to_numeric(df["position"]).astype("Int64")
-            # before_rows_pos = len(df)
-            # Create boolean mask using set membership (much faster than merge)
-            mask = df.apply(
-                lambda row: (row["contig"], int(row["position"])) in wanted, axis=1
-            )
-            df = df.loc[mask].copy()
-            # dropped_pos = before_rows_pos - len(df)
-            # if dropped_pos > 0:
-            #     logger.info(
-            #         f"Filtered out {dropped_pos} positions not in provided list for MAG {mag_id} (sample {sample_id})."
-            #     )
-            if df.empty:
-                msg = f"No matching (contig, position) rows for MAG {mag_id} in sample {sample_id} after applying positions filter."
-                logger.info(msg)
-                result["positions_considered"] = positions_universe_n or 0
-                # Note: breadth_threshold_passed and breadth_fail_reason fields don't exist when using filter
-                return result
-    elif using_position_filter:
-        # Position filter was intended but profile doesn't have required columns
-        logger.warning(
-            f"Positions filter specified for {mag_id} but profile file lacks 'contig' and/or 'position' columns. "
-            f"Available columns: {df.columns.tolist()}. Sample: {sample_id}"
-        )
+    # Load and validate profile (filter to MAG's contigs)
+    try:
+        df = load_and_validate_profile(profile_fPath, mag_id, sample_id, contig_to_mag)
+    except ValueError as e:
+        # Profile empty after filtering to MAG contigs
+        result["breadth_fail_reason"] = str(e)
+        return result
 
     # Check for zero coverage values in the profile (should not exist)
     zero_coverage_count = (df["total_coverage"] == 0).sum()
@@ -297,117 +205,60 @@ def process_mag_files(args):
             f"These should typically be absent from the profile. file={profile_fPath} sample={sample_id}"
         )
 
-    # Compute metrics denominator: genome_size (default) or positions universe if filtered
-    if using_position_filter and positions_universe_n:
-        denom = positions_universe_n if positions_den_mode == "positions" else mag_size
-        # Only include positions_considered when a positions file is provided
-        result["positions_considered"] = positions_universe_n
-    else:
-        denom = mag_size
+    # Use genome size as denominator for all metrics
+    denom = mag_size
 
-    # Compute breadth coverage
-    positions_with_coverage = df[df["total_coverage"] >= 1].shape[0]
-    breadth = positions_with_coverage / denom if denom > 0 else np.nan
-    result["breadth"] = breadth
+    # Calculate breadth metrics (genome-wide only)
+    breadth_metrics = calculate_breadth_metrics(
+        df, denom, mag_size, using_filter=False, positions_with_coverage_genome=None
+    )
+    # Only update with non-None values (filters out breadth_genome)
+    result.update({k: v for k, v in breadth_metrics.items() if v is not None})
 
-    # Compute breadth_genome when dual breadth mode is active
-    # (positions file provided AND positions_denominator="positions")
-    if using_position_filter and positions_den_mode == "positions":
-        breadth_genome = (
-            positions_with_coverage_genome / mag_size if mag_size > 0 else np.nan
-        )
-        result["breadth_genome"] = breadth_genome
+    # Calculate coverage metrics (genome-wide only)
+    coverage_metrics = calculate_coverage_metrics(
+        df, denom, mag_size, using_filter=False, total_coverage_sum_genome=None
+    )
+    # Only update with non-None values (filters out average_coverage_genome)
+    result.update({k: v for k, v in coverage_metrics.items() if v is not None})
 
-    # Average coverage depth = sum of coverage across all rows divided by denominator
-    total_coverage_sum = df["total_coverage"].sum()
-    avg_cov = total_coverage_sum / denom if denom > 0 else np.nan
-    result["average_coverage"] = avg_cov
+    # Get average coverage for use in median/std calculations
+    avg_cov = result["average_coverage"]
 
-    # Median coverage (per-position) among observed covered bases only (exclude zeros if any slipped in)
-    pos_cov = df.loc[df["total_coverage"] > 0, "total_coverage"]
-    result["median_coverage"] = float(pos_cov.median()) if not pos_cov.empty else np.nan
+    # Calculate median and standard deviation metrics
+    median_std_metrics = calculate_median_and_std_metrics(df, denom, avg_cov)
+    result.update(median_std_metrics)
 
-    # Median coverage including zeros for absent positions across entire genome
-    observed_positions = len(df)
-    absent_positions = int(denom - observed_positions) if denom is not None else 0
-    if absent_positions >= 0:
-        # Create array with observed coverage values plus zeros for absent positions
-        all_coverage = np.concatenate(
-            [df["total_coverage"].values, np.zeros(absent_positions)]
-        )
-        result["median_coverage_including_zeros"] = float(np.median(all_coverage))
-    else:
-        # This shouldn't happen, but handle gracefully
-        logger.warning(
-            f"Profile has more positions ({observed_positions}) than denominator ({denom}) for {mag_id} sample {sample_id}"
-        )
-        result["median_coverage_including_zeros"] = result["median_coverage"]
+    # Calculate length-weighted coverage
+    length_weighted_cov = calculate_length_weighted_coverage(
+        df, contig_length_dict, mag_id, sample_id, mag_size
+    )
+    result["length_weighted_coverage"] = length_weighted_cov
 
-    # Standard deviation across covered positions only (population std, ddof=0)
-    result["coverage_std"] = float(pos_cov.std(ddof=0)) if not pos_cov.empty else np.nan
+    # Check breadth threshold
+    breadth_passed, breadth_fail_reason = check_breadth_threshold(
+        result["breadth"],
+        breadth_genome=None,
+        threshold=breadth_threshold,
+        using_filter=False,
+        sample_id=sample_id,
+        mag_id=mag_id,
+    )
+    result["breadth_threshold_passed"] = breadth_passed
+    result["breadth_fail_reason"] = breadth_fail_reason
 
-    # Population std including zeros across entire genome length (absent positions treated as 0)
-    if denom > 0 and np.isfinite(avg_cov):
-        ex2 = float((df["total_coverage"] ** 2).sum()) / denom
-        var = max(ex2 - (avg_cov * avg_cov), 0.0)
-        result["coverage_std_including_zeros"] = float(np.sqrt(var))
-    else:
-        result["coverage_std_including_zeros"] = np.nan
-
-    # --- Length-Weighted Coverage Metrics (contig-level) ---
-    # Only compute when positions filter is NOT active (not meaningful for sparse positions)
-    if not using_position_filter:
-        # Expect a column 'contig' with per-position coverage; aggregate to per-contig mean first.
-        # Sum coverage per contig; later divide by contig length to get mean over all bases
-        contig_means = (
-            df.groupby("contig", as_index=False)["total_coverage"]
-            .sum()
-            .rename(columns={"total_coverage": "coverage_sum"})
-        )
-        if not contig_means.empty:
-            # Map lengths (no need to declare global again; read-only lookup)
-            contig_means["length"] = contig_means["contig"].map(contig_length_dict)
-            before = contig_means.shape[0]
-            contig_means = contig_means[
-                pd.to_numeric(contig_means["length"], errors="coerce") > 0
-            ]
-            dropped = before - contig_means.shape[0]
-            if dropped > 0:
-                logger.warning(
-                    f"Dropped {dropped} contigs without valid lengths for {mag_id} (sample {sample_id})."
-                )
-            if not contig_means.empty:
-                # Compute per-contig mean as sum(coverage)/contig_length to include implicit zeros
-                contig_means["mean_coverage"] = (
-                    contig_means["coverage_sum"] / contig_means["length"]
-                )
-                total_len = contig_means["length"].sum()
-                if total_len > 0:
-                    weighted_sum = (
-                        contig_means["mean_coverage"] * contig_means["length"]
-                    ).sum()
-                    result["length_weighted_coverage"] = weighted_sum / total_len
-
-    # Perform breadth threshold check in two scenarios:
-    # 1. When positions filter is NOT active (standard case) - check against breadth
-    # 2. When positions filter is active AND positions_denominator="positions" (dual breadth mode) - check against breadth_genome
-    if positions_filter is None or not using_position_filter:
-        # Standard case: check breadth (genome-based or full genome without filter)
-        if breadth < breadth_threshold:
-            msg = f"Breadth {breadth:.2%} < threshold {breadth_threshold:.2%}"
-            logger.info(f"{msg} - sample={sample_id}, mag={mag_id}")
-            result["breadth_fail_reason"] = msg
-        else:
-            result["breadth_threshold_passed"] = True
-    elif using_position_filter and positions_den_mode == "positions":
-        # Dual breadth mode: check breadth_genome against threshold
-        breadth_genome_val = result.get("breadth_genome", np.nan)
-        if breadth_genome_val < breadth_threshold:
-            msg = f"Breadth (genome) {breadth_genome_val:.2%} < threshold {breadth_threshold:.2%}"
-            logger.info(f"{msg} - sample={sample_id}, mag={mag_id}")
-            result["breadth_fail_reason"] = msg
-        else:
-            result["breadth_threshold_passed"] = True
+    # Check coverage threshold (cascades from breadth)
+    coverage_passed, coverage_fail_reason = check_coverage_threshold(
+        avg_cov,
+        avg_cov_genome=None,
+        threshold=coverage_threshold,
+        breadth_passed=breadth_passed,
+        using_filter=False,
+        sample_id=sample_id,
+        mag_id=mag_id,
+    )
+    result["coverage_threshold_passed"] = coverage_passed
+    result["coverage_fail_reason"] = coverage_fail_reason
 
     return result
 
@@ -416,12 +267,12 @@ def check_timepoints(df, data_type):
     """
     Check if MAGs (Metagenome-Assembled Genomes) are present in two timepoints for each subject.
     This function verifies that subjects have data from exactly two timepoints for longitudinal analysis.
-    For single datatype, it skips the timepoint checks and sets two_timepoints_passed to match breadth_threshold_passed.
+    For single datatype, it skips the timepoint checks and sets two_timepoints_passed to match coverage_threshold_passed.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        Input dataframe containing sample data with 'subjectID', 'time', and 'breadth_threshold_passed' columns
+        Input dataframe containing sample data with 'subjectID', 'time', and 'coverage_threshold_passed' columns
     data_type : str
         Type of data analysis, either "single" or assumed to be longitudinal
 
@@ -440,20 +291,20 @@ def check_timepoints(df, data_type):
     -----
     - For longitudinal analysis, the function ensures there are exactly 2 unique timepoints globally
     - A sample is marked as passing if its subject has data at both timepoints and the sample has passed
-      the breadth threshold
+      the coverage threshold
     - Logs information about subjects with valid timepoints
     """
     # For single datatype, skip timepoint checks
     if data_type == "single":
-        # Set two_timepoints_passed to match breadth_threshold_passed for single data type
-        df["two_timepoints_passed"] = df["breadth_threshold_passed"]
+        # Set two_timepoints_passed to match coverage_threshold_passed for single data type
+        df["two_timepoints_passed"] = df["coverage_threshold_passed"]
         return df
 
     # Initialize columns
     df["two_timepoints_passed"] = False
 
     # Get samples that passed coverage threshold
-    passed_samples = df[df["breadth_threshold_passed"]]
+    passed_samples = df[df["coverage_threshold_passed"]]
 
     # Check that there are exactly 2 unique timepoints globally.
     unique_times = passed_samples["time"].unique()
@@ -652,91 +503,6 @@ def count_paired_replicates(df):
     return df
 
 
-def _aggregate_mag_stats(
-    df_results: pd.DataFrame,
-    mag_id: str,
-    group_cols: list,
-    overall: bool = False,
-):
-    """
-    Generic aggregator for MAG QC metrics.
-
-    Parameters
-    ----------
-    df_results : pd.DataFrame
-        Sample-level QC results for a single MAG.
-    mag_id : str
-        MAG identifier.
-    group_cols : list
-        Column names to group by. Empty list means collapse across all samples.
-    output_filename : str
-        Name of TSV to write.
-    output_dir : str
-        Destination directory.
-    overall : bool
-        If True, produce single-row overall summary with *_mean suffix; else per-group means.
-    """
-    if df_results.empty:
-        logger.warning(f"No results to summarize for {mag_id}")
-        return None
-
-    # If breadth_threshold_passed is absent (positions mode), consider all rows as passing
-    if "breadth_threshold_passed" in df_results.columns:
-        passing = df_results[df_results["breadth_threshold_passed"]]
-        # logger.info("breadth_threshold_passed column found.")
-        # logger.info(f"Number of passing samples for {mag_id}: {passing.shape[0]}")
-    else:
-        # logger.info("breadth_threshold_passed column not found; using all samples.")
-        passing = df_results.copy()
-    if passing.empty:
-        logger.warning(
-            f"No passing samples for {mag_id}; summarizing all samples instead."
-        )
-        passing = df_results.copy()
-
-    metric_cols = [
-        c
-        for c in [
-            "subjects_per_group",
-            "replicates_per_group",
-            "paired_replicates_per_group",
-            "breadth",
-            "average_coverage",
-            "median_coverage",
-            "median_coverage_including_zeros",
-            "length_weighted_coverage",
-            "coverage_std",
-            "coverage_std_including_zeros",
-        ]
-        if c in passing.columns
-    ]
-
-    if overall:
-        row = {"MAG_ID": mag_id, "num_samples": passing.shape[0]}
-        for col in metric_cols:
-            row[col + "_mean"] = passing[col].mean()
-        out_df = pd.DataFrame([row])
-    else:
-        if not group_cols:
-            logger.error(
-                "group_cols empty but overall flag False; nothing to aggregate."
-            )
-            return None
-        agg_dict = {c: "mean" for c in metric_cols}
-        agg_dict["sample_id"] = "count"
-        grouped = passing.groupby(group_cols, dropna=False).agg(agg_dict)
-        out_df = grouped.rename(columns={"sample_id": "num_samples"}).reset_index()
-        out_df.insert(0, "MAG_ID", mag_id)
-
-        # Add _mean suffix to all metric columns for consistency
-        rename_dict = {
-            col: col + "_mean" for col in metric_cols if col in out_df.columns
-        }
-        out_df = out_df.rename(columns=rename_dict)
-
-    return out_df
-
-
 def process_mag(args):
     (
         mag_id,
@@ -744,17 +510,16 @@ def process_mag(args):
         mag_size_dict,
         contig_length_dict_global,
         contig_to_mag_map,
-        positions_filter_map,
         output_dir,
         breadth_threshold,
+        coverage_threshold,
         cpus,
         data_type,
-        positions_denominator,
     ) = args
     logger.info(f"Processing MAG: {mag_id}")
 
     metadata_dict, sample_files_with_mag_id = load_mag_metadata_file(
-        metadata_file, mag_id, breadth_threshold, data_type
+        metadata_file, mag_id, breadth_threshold, coverage_threshold, data_type
     )
 
     if not sample_files_with_mag_id:
@@ -776,8 +541,6 @@ def process_mag(args):
             mag_size_dict,
             contig_length_dict_global,
             contig_to_mag_map,
-            positions_filter_map,
-            positions_denominator,
         ),
     ) as pool:
         results_list = list(
@@ -786,31 +549,28 @@ def process_mag(args):
     # Build results DataFrame
     df_results = pd.DataFrame(results_list)
 
-    # When positions filter is active, skip timepoint validation and subject/replicate counting
-    # (these metrics are not meaningful for subset position analysis)
-    if positions_filter_map is None:
-        # Check that each subject has exactly 2 timepoints (for longitudinal data only)
-        df_results = check_timepoints(df_results, data_type)
+    # Check that each subject has exactly 2 timepoints (for longitudinal data only)
+    df_results = check_timepoints(df_results, data_type)
 
-        # Count the number of unique subjects and replicates per group
-        df_results = add_subject_count_per_group(df_results)
+    # Count the number of unique subjects and replicates per group
+    df_results = add_subject_count_per_group(df_results)
 
-        # Count the number of paired replicates per group
-        df_results = count_paired_replicates(df_results)
+    # Count the number of paired replicates per group
+    df_results = count_paired_replicates(df_results)
 
     out_file = Path(output_dir) / f"{mag_id}_QC.tsv"
     df_results.to_csv(out_file, sep="\t", index=False)
     logger.info(f"Saved QC report for {mag_id} to {out_file}")
     # Prepare summaries (do not write here; collected in main)
-    group_summary = _aggregate_mag_stats(
+    group_summary = aggregate_mag_stats(
         df_results, mag_id, group_cols=["group"], overall=False
     )
     group_time_summary = None
     if "time" in df_results.columns:
-        group_time_summary = _aggregate_mag_stats(
+        group_time_summary = aggregate_mag_stats(
             df_results, mag_id, group_cols=["group", "time"], overall=False
         )
-    overall_summary = _aggregate_mag_stats(
+    overall_summary = aggregate_mag_stats(
         df_results, mag_id, group_cols=[], overall=True
     )
     return group_summary, group_time_summary, overall_summary
@@ -820,7 +580,7 @@ def main():
     setup_logging()
 
     parser = argparse.ArgumentParser(
-        description="Script to detect which samples for a MAG pass the breadth threshold and output a pass/fail table.",
+        description=("Script to perform genome-wide quality control on MAGs."),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -840,6 +600,12 @@ def main():
         type=float,
         default=0.1,
         help="Minimum breadth coverage required to pass.",
+    )
+    parser.add_argument(
+        "--coverage_threshold",
+        type=float,
+        default=1,
+        help="Minimum average coverage depth required to pass.",
     )
     parser.add_argument(
         "--cpus", type=int, default=cpu_count(), help="Number of processors to use."
@@ -866,34 +632,11 @@ def main():
         required=True,
         metavar="filepath",
     )
-    parser.add_argument(
-        "--positions_file",
-        help=(
-            "Optional TSV file with columns 'MAG', 'contig', 'position'. If provided, "
-            "QC metrics are computed only for the specified positions for each MAG, and breadth/averages "
-            "are calculated relative to the number of specified positions."
-        ),
-        type=Path,
-        required=False,
-        metavar="filepath",
-    )
-    parser.add_argument(
-        "--positions_denominator",
-        choices=["positions", "genome"],
-        default="positions",
-        help=(
-            "When --positions_file is provided: use 'positions' to divide by the "
-            "number of specified sites per MAG, or 'genome' to divide by genome_size."
-        ),
-    )
 
     args = parser.parse_args()
 
-    # Validate: positions_denominator requires positions_file
-    if "--positions_denominator" in sys.argv and not args.positions_file:
-        raise ValueError(
-            "--positions_denominator can only be used when --positions_file is provided."
-        )
+    # Note: For position-based QC analysis, use the separate positions_qc.py script
+    # located in alleleflux/scripts/accessory/positions_qc.py
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -903,34 +646,9 @@ def main():
     # Load mapping for MAG membership validation/subsetting
     contig_to_mag_global = load_mag_mapping(args.mag_mapping_file)
 
-    # Optional positions filter
-    positions_by_mag = None
-    if args.positions_file:
-        positions_by_mag = load_positions_file(args.positions_file)
-        logger.info(
-            f"Loaded positions filter for {len(positions_by_mag)} MAG(s) from {args.positions_file}"
-        )
-
     metadata_files = list(args.rootDir.glob("*_metadata.tsv"))
     if not metadata_files:
         raise ValueError("No *_metadata.tsv files found in input directory")
-
-    # If positions file provided, only process MAGs that are in the positions file
-    if positions_by_mag is not None:
-        mags_in_positions = set(positions_by_mag.keys())
-        metadata_files = [
-            mf
-            for mf in metadata_files
-            if mf.stem.split("_metadata")[0] in mags_in_positions
-        ]
-        logger.info(
-            f"Filtered to {len(metadata_files)} MAG(s) that have positions in the filter file"
-        )
-        if not metadata_files:
-            raise ValueError(
-                "No MAGs from metadata directory found in positions file. "
-                "Check that MAG IDs in positions file match metadata filenames."
-            )
 
     tasks = [
         (
@@ -938,14 +656,12 @@ def main():
             metadata_file,
             mag_size_dict,
             contig_length_dict,
-            # pass mapping for validation
             contig_to_mag_global,
-            positions_by_mag,
             args.output_dir,
             args.breadth_threshold,
+            args.coverage_threshold,
             args.cpus,
             args.data_type,
-            args.positions_denominator,
         )
         for metadata_file in metadata_files
     ]

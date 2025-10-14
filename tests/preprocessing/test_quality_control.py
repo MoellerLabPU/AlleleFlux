@@ -4,7 +4,6 @@ import os
 import sys
 import tempfile
 import unittest
-from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -12,14 +11,13 @@ import numpy as np
 import pandas as pd
 
 from alleleflux.scripts.preprocessing.quality_control import (
-    _aggregate_mag_stats,
     add_subject_count_per_group,
     check_timepoints,
     count_paired_replicates,
     init_worker,
-    load_positions_file,
     process_mag_files,
 )
+from alleleflux.scripts.utilities.qc_metrics import aggregate_mag_stats
 
 
 class TestQualityControl(unittest.TestCase):
@@ -80,8 +78,6 @@ class TestQualityControl(unittest.TestCase):
             self.mag_size_dict,
             self.contig_length_dict,
             self.contig_to_mag,
-            positions_filter_map=None,
-            positions_denominator="positions",
         )
 
     def create_temp_profile(self, data):
@@ -108,7 +104,7 @@ class TestProcessMagFiles(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            args = ("sample1", profile_file, "MAG001", 0.1)
+            args = ("sample1", profile_file, "MAG001", 0.1, 1.0)
             result = process_mag_files(args)
 
             # Check basic structure
@@ -135,7 +131,7 @@ class TestProcessMagFiles(TestQualityControl):
                 result["median_coverage_including_zeros"], expected_median_with_zeros
             )
 
-            # Should pass breadth threshold (4/1000000 > 0.1 is False, but we can adjust)
+            # Verify that either threshold passed or a failure reason is provided
             self.assertTrue(
                 result["breadth_threshold_passed"] or result["breadth_fail_reason"]
             )
@@ -158,7 +154,7 @@ class TestProcessMagFiles(TestQualityControl):
             with patch(
                 "alleleflux.scripts.preprocessing.quality_control.logger"
             ) as mock_logger:
-                args = ("sample1", profile_file, "MAG001", 0.1)
+                args = ("sample1", profile_file, "MAG001", 0.1, 1.0)
                 result = process_mag_files(args)
 
                 # Check that warning was logged
@@ -186,10 +182,14 @@ class TestProcessMagFiles(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            with patch(
-                "alleleflux.scripts.preprocessing.quality_control.logger"
-            ) as mock_logger:
-                args = ("sample1", profile_file, "MAG001", 0.1)  # Processing MAG001
+            with patch("alleleflux.scripts.utilities.qc_metrics.logger") as mock_logger:
+                args = (
+                    "sample1",
+                    profile_file,
+                    "MAG001",
+                    0.1,
+                    1.0,
+                )  # Processing MAG001
                 result = process_mag_files(args)
 
                 # Should warn about filtering out contig3
@@ -215,7 +215,7 @@ class TestProcessMagFiles(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            args = ("sample1", profile_file, "INVALID_MAG", 0.1)
+            args = ("sample1", profile_file, "INVALID_MAG", 0.1, 1.0)
             result = process_mag_files(args)
 
             # Should fail with appropriate error message
@@ -244,13 +244,12 @@ class TestProcessMagFiles(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            args = ("sample1", profile_file, "MAG001", 0.1)
+            args = ("sample1", profile_file, "MAG001", 0.1, 1.0)
             result = process_mag_files(args)
 
             # contig1: mean_coverage = 30/500000, contig2: mean_coverage = 70/300000
-            # length_weighted = (30/500000 * 500000 + 70/300000 * 300000) / (500000 + 300000)
-            # = (30 + 70) / 800000 = 100/800000 = 0.000125
-            expected_lw_coverage = (30 + 70) / (500000 + 300000)
+            # length_weighted = (30 + 70) / mag_size = 100 / 1000000
+            expected_lw_coverage = (30 + 70) / 1000000
             self.assertAlmostEqual(
                 result["length_weighted_coverage"], expected_lw_coverage
             )
@@ -266,13 +265,13 @@ class TestCheckTimepoints(TestQualityControl):
         df = pd.DataFrame(
             {
                 "subjectID": ["subject1", "subject2"],
-                "breadth_threshold_passed": [True, False],
+                "coverage_threshold_passed": [True, False],
             }
         )
 
         result = check_timepoints(df, "single")
 
-        # Should match breadth_threshold_passed
+        # Should match coverage_threshold_passed
         self.assertTrue(result.loc[0, "two_timepoints_passed"])
         self.assertFalse(result.loc[1, "two_timepoints_passed"])
 
@@ -282,7 +281,7 @@ class TestCheckTimepoints(TestQualityControl):
             {
                 "subjectID": ["subject1", "subject1", "subject2", "subject2"],
                 "time": ["T1", "T2", "T1", "T2"],
-                "breadth_threshold_passed": [True, True, True, True],
+                "coverage_threshold_passed": [True, True, True, True],
             }
         )
 
@@ -301,7 +300,7 @@ class TestCheckTimepoints(TestQualityControl):
                     "subject2",
                 ],  # subject2 missing T2
                 "time": ["T1", "T2", "T1"],
-                "breadth_threshold_passed": [True, True, True],
+                "coverage_threshold_passed": [True, True, True],
             }
         )
 
@@ -320,7 +319,7 @@ class TestCheckTimepoints(TestQualityControl):
             {
                 "subjectID": ["subject1", "subject1", "subject1"],
                 "time": ["T1", "T2", "T3"],  # 3 timepoints
-                "breadth_threshold_passed": [True, True, True],
+                "coverage_threshold_passed": [True, True, True],
             }
         )
 
@@ -419,33 +418,33 @@ class TestAggregation(TestQualityControl):
             }
         )
 
-        result = _aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
+        result = aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
 
         # Should have 2 rows (treatment and control)
         self.assertEqual(len(result), 2)
         self.assertIn("MAG_ID", result.columns)
         self.assertTrue(all(result["MAG_ID"] == "MAG001"))
 
-        # Check treatment group means (now with _mean suffix)
+        # Check treatment group means
         treatment_row = result[result["group"] == "treatment"].iloc[0]
         self.assertAlmostEqual(treatment_row["breadth_mean"], 0.85)  # (0.8 + 0.9) / 2
         self.assertAlmostEqual(
             treatment_row["average_coverage_mean"], 55.0
         )  # (50 + 60) / 2
 
-    def test_aggregate_excludes_breadth_genome(self):
-        """Test that breadth_genome is NOT included in aggregated statistics."""
-        # Create sample data with breadth_genome field (dual breadth mode)
+    def test_aggregate_includes_all_metrics(self):
+        """Test that all metrics including breadth_genome are aggregated."""
+        # Create sample data with breadth_genome field (from positions-based QC)
         df_results = pd.DataFrame(
             {
                 "sample_id": ["sample1", "sample2"],
-                "breadth_threshold_passed": [True, True],
+                "coverage_threshold_passed": [True, True],
                 "group": ["treatment", "treatment"],
                 "breadth": [0.8, 0.9],
                 "breadth_genome": [
                     0.0001,
                     0.0002,
-                ],  # Should be excluded from aggregation
+                ],  # Should be included in aggregation
                 "average_coverage": [50.0, 60.0],
                 "median_coverage": [45.0, 55.0],
                 "median_coverage_including_zeros": [0.1, 0.2],
@@ -458,24 +457,21 @@ class TestAggregation(TestQualityControl):
         )
 
         # Test group aggregation
-        result = _aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
+        result = aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
 
-        # breadth_genome should NOT be in the aggregated results
-        self.assertNotIn("breadth_genome", result.columns)
-        self.assertNotIn("breadth_genome_mean", result.columns)
-
-        # But breadth should be aggregated
+        # Both breadth metrics should be aggregated
         self.assertIn("breadth_mean", result.columns)
+        self.assertIn("breadth_genome_mean", result.columns)
+
+        # Verify breadth_genome aggregation
+        self.assertAlmostEqual(result.iloc[0]["breadth_genome_mean"], 0.00015)
 
         # Test overall aggregation
-        result_overall = _aggregate_mag_stats(df_results, "MAG001", [], overall=True)
+        result_overall = aggregate_mag_stats(df_results, "MAG001", [], overall=True)
 
-        # breadth_genome should NOT be in overall results either
-        self.assertNotIn("breadth_genome", result_overall.columns)
-        self.assertNotIn("breadth_genome_mean", result_overall.columns)
-
-        # But breadth should be aggregated
+        # Both breadth metrics should be in overall results too
         self.assertIn("breadth_mean", result_overall.columns)
+        self.assertIn("breadth_genome_mean", result_overall.columns)
 
     def test_aggregate_mag_stats_overall(self):
         """Test overall MAG statistics aggregation."""
@@ -496,7 +492,7 @@ class TestAggregation(TestQualityControl):
             }
         )
 
-        result = _aggregate_mag_stats(df_results, "MAG001", [], overall=True)
+        result = aggregate_mag_stats(df_results, "MAG001", [], overall=True)
 
         # Should have 1 row with _mean suffix columns
         self.assertEqual(len(result), 1)
@@ -511,533 +507,10 @@ class TestAggregation(TestQualityControl):
         """Test aggregation with empty results."""
         df_results = pd.DataFrame()
 
-        result = _aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
+        result = aggregate_mag_stats(df_results, "MAG001", ["group"], overall=False)
 
         # Should return None for empty input
         self.assertIsNone(result)
-
-
-class TestPositionsFiltering(TestQualityControl):
-    """Test the new positions filtering functionality."""
-
-    def test_positions_considered_field(self):
-        """positions_considered only exists when positions filter is used."""
-        # Scenario 1: No positions filter - positions_considered should be absent
-        profile_data = {
-            "contig": ["contig1", "contig1"],
-            "position": [1, 2],
-            "gene_id": ["gene1", "gene2"],
-            "total_coverage": [10.0, 20.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # No positions filter
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.1)
-            result = process_mag_files(args)
-
-            # positions_considered should not be present when no filter is provided
-            self.assertNotIn("positions_considered", result)
-            # breadth_genome should also not be present without positions filter
-            self.assertNotIn("breadth_genome", result)
-
-        finally:
-            os.unlink(profile_file)
-
-    def test_positions_filter_with_set(self):
-        """Test filtering with positions set (new implementation)."""
-        # Create test profile data
-        profile_data = {
-            "contig": ["contig1", "contig1", "contig1", "contig2"],
-            "position": [1, 2, 3, 1],
-            "gene_id": ["gene1", "gene2", "gene3", "gene4"],
-            "total_coverage": [10.0, 20.0, 30.0, 40.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Create positions filter as a set of tuples (new format)
-            positions_filter = {
-                "MAG001": {("contig1", 1), ("contig1", 2)}  # Only first 2 positions
-            }
-
-            # Re-initialize worker with positions filter
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="positions",
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.0001)
-            result = process_mag_files(args)
-
-            # Should only include 2 positions (contig1:1 and contig1:2)
-            self.assertEqual(result["positions_considered"], 2)
-            # Average coverage: (10 + 20) / 2 = 15 (denominator is positions count)
-            self.assertAlmostEqual(result["average_coverage"], 15.0)
-            # Breadth: 2 positions with coverage / 2 total positions = 1.0
-            self.assertAlmostEqual(result["breadth"], 1.0)
-            # Median coverage: median of [10, 20] = 15
-            self.assertAlmostEqual(result["median_coverage"], 15.0)
-            # In dual breadth mode (positions + positions_denominator="positions"),
-            # breadth_threshold_passed should exist and breadth_genome should be calculated
-            self.assertIn("breadth_threshold_passed", result)
-            self.assertIn("breadth_genome", result)
-            # breadth_genome should be 4/1000000 (all 4 positions in profile had coverage)
-            self.assertAlmostEqual(result["breadth_genome"], 4 / 1000000)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker to default state
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_positions_filter_genome_denominator(self):
-        """Test filtering with genome denominator mode."""
-        profile_data = {
-            "contig": ["contig1", "contig1"],
-            "position": [1, 2],
-            "gene_id": ["gene1", "gene2"],
-            "total_coverage": [10.0, 20.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Create positions filter
-            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
-
-            # Initialize with genome denominator mode
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="genome",  # Use genome size as denominator
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.0001)
-            result = process_mag_files(args)
-
-            # positions_considered should still be recorded
-            self.assertEqual(result["positions_considered"], 2)
-            # Average coverage: (10 + 20) / 1000000 (genome size) = 0.00003
-            self.assertAlmostEqual(result["average_coverage"], 30.0 / 1000000)
-            # Breadth: 2 positions / 1000000 = 0.000002
-            self.assertAlmostEqual(result["breadth"], 2.0 / 1000000)
-            # Breadth threshold fields should not exist when positions filter is active
-            self.assertNotIn("breadth_threshold_passed", result)
-            self.assertNotIn("breadth_fail_reason", result)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_positions_filter_no_matches(self):
-        """Test positions filter when no positions match."""
-        profile_data = {
-            "contig": ["contig1"],
-            "position": [100],  # Position not in filter
-            "gene_id": ["gene1"],
-            "total_coverage": [10.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Create positions filter with different positions
-            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
-
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="genome",
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.1)
-            result = process_mag_files(args)
-
-            # Should return early with empty df - breadth fields don't exist
-            self.assertNotIn("breadth_threshold_passed", result)
-            self.assertNotIn("breadth_fail_reason", result)
-            self.assertEqual(result["positions_considered"], 2)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_positions_filter_skips_length_weighted_coverage(self):
-        """Test that length-weighted coverage is absent when positions filter is active."""
-        profile_data = {
-            "contig": ["contig1", "contig1"],
-            "position": [1, 2],
-            "gene_id": ["gene1", "gene2"],
-            "total_coverage": [10.0, 20.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
-
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="positions",
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.0001)
-            result = process_mag_files(args)
-
-            # Length-weighted coverage should not exist when positions filter is active
-            self.assertNotIn("length_weighted_coverage", result)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_dual_breadth_mode_basic(self):
-        """Test dual breadth mode: positions file + positions_denominator='positions'."""
-        # Create profile with 4 positions total, but filter to only 2
-        profile_data = {
-            "contig": ["contig1", "contig1", "contig1", "contig1"],
-            "position": [1, 2, 3, 4],
-            "gene_id": ["gene1", "gene2", "gene3", "gene4"],
-            "total_coverage": [10.0, 20.0, 30.0, 40.0],  # All have coverage
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Filter to only positions 1 and 2
-            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
-
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="positions",  # Dual breadth mode
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.000001)  # Low threshold
-            result = process_mag_files(args)
-
-            # Verify breadth_genome exists and is calculated from all 4 positions
-            self.assertIn("breadth_genome", result)
-            # All 4 positions have coverage, genome size is 1M
-            expected_breadth_genome = 4 / 1000000
-            self.assertAlmostEqual(result["breadth_genome"], expected_breadth_genome)
-
-            # Verify breadth is calculated from filtered positions (2 out of 2)
-            self.assertEqual(result["breadth"], 1.0)
-
-            # Verify breadth_threshold_passed exists in dual breadth mode
-            self.assertIn("breadth_threshold_passed", result)
-            # Should pass because breadth_genome (4/1M) > threshold
-            self.assertTrue(result["breadth_threshold_passed"])
-
-            # Verify positions_considered is present
-            self.assertEqual(result["positions_considered"], 2)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_dual_breadth_mode_threshold_check(self):
-        """Test that breadth_threshold_passed uses breadth_genome in dual breadth mode."""
-        # Profile with 100 positions total, only 10 in filter
-        profile_data = {
-            "contig": ["contig1"] * 100,
-            "position": list(range(1, 101)),
-            "gene_id": [f"gene{i}" for i in range(1, 101)],
-            "total_coverage": [10.0] * 100,  # All covered
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Filter to only first 10 positions
-            positions_filter = {"MAG001": {("contig1", i) for i in range(1, 11)}}
-
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="positions",
-            )
-
-            # Set threshold that breadth_genome passes but breadth wouldn't if checked
-            # breadth_genome = 100/1M = 0.0001
-            # breadth (filtered) = 10/10 = 1.0
-            # Set threshold at 0.00005 (breadth_genome should pass)
-            args = ("sample1", profile_file, "MAG001", 0.00005)
-            result = process_mag_files(args)
-
-            # Verify breadth_genome passes
-            self.assertAlmostEqual(result["breadth_genome"], 100 / 1000000)
-            self.assertTrue(result["breadth_threshold_passed"])
-            self.assertEqual(result["breadth_fail_reason"], "")
-
-            # Now test with threshold that breadth_genome fails
-            args = ("sample1", profile_file, "MAG001", 0.0002)  # Higher threshold
-            result = process_mag_files(args)
-
-            self.assertFalse(result["breadth_threshold_passed"])
-            self.assertIn("Breadth (genome)", result["breadth_fail_reason"])
-            self.assertIn("threshold", result["breadth_fail_reason"])
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_dual_breadth_mode_partial_coverage(self):
-        """Test dual breadth with partial coverage (some positions lack coverage)."""
-        # Profile with positions that have varying coverage including some zeros
-        profile_data = {
-            "contig": ["contig1"] * 10,
-            "position": list(range(1, 11)),
-            "gene_id": [f"gene{i}" for i in range(1, 11)],
-            "total_coverage": [10.0, 0.0, 20.0, 0.0, 30.0, 0.0, 40.0, 0.0, 50.0, 0.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # Filter to all 10 positions
-            positions_filter = {"MAG001": {("contig1", i) for i in range(1, 11)}}
-
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="positions",
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.1)
-            result = process_mag_files(args)
-
-            # breadth_genome: 5 positions with coverage >= 1 out of 1M genome
-            expected_breadth_genome = 5 / 1000000
-            self.assertAlmostEqual(result["breadth_genome"], expected_breadth_genome)
-
-            # breadth: 5 positions with coverage >= 1 out of 10 filtered positions
-            expected_breadth = 5 / 10
-            self.assertAlmostEqual(result["breadth"], expected_breadth)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_positions_genome_denominator_no_dual_breadth(self):
-        """Test that positions_denominator='genome' does NOT create dual breadth."""
-        profile_data = {
-            "contig": ["contig1", "contig1"],
-            "position": [1, 2],
-            "gene_id": ["gene1", "gene2"],
-            "total_coverage": [10.0, 20.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            positions_filter = {"MAG001": {("contig1", 1), ("contig1", 2)}}
-
-            # Use genome denominator mode (not dual breadth)
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=positions_filter,
-                positions_denominator="genome",  # Uses genome, not dual breadth
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.0001)
-            result = process_mag_files(args)
-
-            # breadth_genome should NOT exist with genome denominator
-            self.assertNotIn("breadth_genome", result)
-
-            # breadth_threshold_passed should NOT exist in genome denominator mode with filter
-            self.assertNotIn("breadth_threshold_passed", result)
-            self.assertNotIn("breadth_fail_reason", result)
-
-            # But positions_considered should still exist
-            self.assertEqual(result["positions_considered"], 2)
-
-        finally:
-            os.unlink(profile_file)
-            # Reset worker
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",
-            )
-
-    def test_no_positions_file_no_dual_breadth(self):
-        """Test that without positions file, no dual breadth fields are created."""
-        profile_data = {
-            "contig": ["contig1", "contig1"],
-            "position": [1, 2],
-            "gene_id": ["gene1", "gene2"],
-            "total_coverage": [10.0, 20.0],
-        }
-
-        profile_file = self.create_temp_profile(profile_data)
-
-        try:
-            # No positions filter
-            init_worker(
-                self.metadata_dict,
-                self.mag_size_dict,
-                self.contig_length_dict,
-                self.contig_to_mag,
-                positions_filter_map=None,
-                positions_denominator="positions",  # Doesn't matter without filter
-            )
-
-            args = ("sample1", profile_file, "MAG001", 0.1)
-            result = process_mag_files(args)
-
-            # breadth_genome should NOT exist without positions filter
-            self.assertNotIn("breadth_genome", result)
-
-            # Standard breadth_threshold_passed should exist
-            self.assertIn("breadth_threshold_passed", result)
-
-            # positions_considered should NOT exist
-            self.assertNotIn("positions_considered", result)
-
-        finally:
-            os.unlink(profile_file)
-
-
-class TestPathHandling(unittest.TestCase):
-    """Test Path object handling in quality_control."""
-
-    def test_load_positions_file_with_path_object(self):
-        """Test that load_positions_file accepts Path objects."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
-            f.write("MAG\tcontig\tposition\n")
-            f.write("MAG001\tcontig1\t1\n")
-            f.write("MAG001\tcontig1\t2\n")
-            f.write("MAG002\tcontig2\t5\n")
-            temp_path = Path(f.name)
-
-        try:
-            # Should accept Path object
-            positions_map = load_positions_file(temp_path)
-
-            self.assertIsInstance(positions_map, dict)
-            self.assertIn("MAG001", positions_map)
-            self.assertIn("MAG002", positions_map)
-            # Verify set-based storage
-            self.assertIsInstance(positions_map["MAG001"], set)
-            self.assertIn(("contig1", 1), positions_map["MAG001"])
-            self.assertIn(("contig1", 2), positions_map["MAG001"])
-            self.assertIn(("contig2", 5), positions_map["MAG002"])
-
-        finally:
-            temp_path.unlink()
-
-    def test_load_positions_file_with_string_path(self):
-        """Test that load_positions_file still accepts string paths."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
-            f.write("MAG\tcontig\tposition\n")
-            f.write("MAG001\tcontig1\t1\n")
-            temp_str_path = f.name
-
-        try:
-            # Should accept string path (converted internally)
-            positions_map = load_positions_file(temp_str_path)
-            self.assertIn("MAG001", positions_map)
-
-        finally:
-            Path(temp_str_path).unlink()
 
 
 class TestEdgeCases(TestQualityControl):
@@ -1054,7 +527,7 @@ class TestEdgeCases(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            args = ("sample1", profile_file, "MAG001", 0.1)  # Processing MAG001
+            args = ("sample1", profile_file, "MAG001", 0.1, 1.0)  # Processing MAG001
             result = process_mag_files(args)
 
             # Should fail because no rows remain after filtering
@@ -1078,7 +551,7 @@ class TestEdgeCases(TestQualityControl):
         profile_file = self.create_temp_profile(profile_data)
 
         try:
-            args = ("sample1", profile_file, "MAG001", 0.1)
+            args = ("sample1", profile_file, "MAG001", 0.1, 1.0)
             result = process_mag_files(args)
 
             # median_coverage should be NaN (no positive coverage)
@@ -1130,8 +603,8 @@ class TestEdgeCases(TestQualityControl):
             }
         )
 
-        # Test group summary (should work, now with _mean suffix)
-        group_summary = _aggregate_mag_stats(
+        # Test group summary
+        group_summary = aggregate_mag_stats(
             df_results, "MAG001", ["group"], overall=False
         )
         self.assertIsNotNone(group_summary)
@@ -1141,14 +614,14 @@ class TestEdgeCases(TestQualityControl):
         self.assertIn("average_coverage_mean", group_summary.columns)
 
         # Test overall summary (should work)
-        overall_summary = _aggregate_mag_stats(df_results, "MAG001", [], overall=True)
+        overall_summary = aggregate_mag_stats(df_results, "MAG001", [], overall=True)
         self.assertIsNotNone(overall_summary)
         self.assertEqual(len(overall_summary), 1)
 
         # Test group-time summary (should return None since no 'time' column)
         # This simulates the check: if "time" in df_results.columns
         if "time" in df_results.columns:
-            group_time_summary = _aggregate_mag_stats(
+            group_time_summary = aggregate_mag_stats(
                 df_results, "MAG001", ["group", "time"], overall=False
             )
         else:
@@ -1165,7 +638,7 @@ class TestEdgeCases(TestQualityControl):
                 "subjectID": ["subject1", "subject2"],
                 "group": ["treatment", "control"],
                 "replicate": ["rep1", "rep2"],
-                "breadth_threshold_passed": [True, True],
+                "coverage_threshold_passed": [True, True],
                 "breadth": [0.8, 0.7],
                 "average_coverage": [50.0, 40.0],
                 "median_coverage": [45.0, 35.0],
@@ -1180,11 +653,11 @@ class TestEdgeCases(TestQualityControl):
         # Process through check_timepoints with data_type='single'
         df_after_timepoints = check_timepoints(df_results, "single")
 
-        # Should have two_timepoints_passed matching breadth_threshold_passed
+        # Should have two_timepoints_passed matching coverage_threshold_passed
         self.assertTrue(
             all(
                 df_after_timepoints["two_timepoints_passed"]
-                == df_after_timepoints["breadth_threshold_passed"]
+                == df_after_timepoints["coverage_threshold_passed"]
             )
         )
 
@@ -1195,15 +668,15 @@ class TestEdgeCases(TestQualityControl):
         df_final = count_paired_replicates(df_with_counts)
 
         # Test aggregation (simulating the logic in process_mag)
-        group_summary = _aggregate_mag_stats(
+        group_summary = aggregate_mag_stats(
             df_final, "MAG001", ["group"], overall=False
         )
-        overall_summary = _aggregate_mag_stats(df_final, "MAG001", [], overall=True)
+        overall_summary = aggregate_mag_stats(df_final, "MAG001", [], overall=True)
 
         # Group-time summary should be None (no time column)
         group_time_summary = None
         if "time" in df_final.columns:
-            group_time_summary = _aggregate_mag_stats(
+            group_time_summary = aggregate_mag_stats(
                 df_final, "MAG001", ["group", "time"], overall=False
             )
 
@@ -1212,13 +685,13 @@ class TestEdgeCases(TestQualityControl):
         self.assertIsNotNone(overall_summary)
         self.assertIsNone(group_time_summary)  # Should be None for single data type
 
-        # Verify group summary structure (now with _mean suffix)
+        # Verify group summary structure
         self.assertEqual(len(group_summary), 2)  # treatment and control
         self.assertTrue(all(group_summary["MAG_ID"] == "MAG001"))
         self.assertIn("breadth_mean", group_summary.columns)
         self.assertIn("average_coverage_mean", group_summary.columns)
 
-        # Verify overall summary structure (already has _mean suffix)
+        # Verify overall summary structure
         self.assertEqual(len(overall_summary), 1)
         self.assertEqual(overall_summary.iloc[0]["MAG_ID"], "MAG001")
 
@@ -1230,18 +703,3 @@ if __name__ == "__main__":
     # Run the tests
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
-
-    # Print summary
-    print(f"\nTests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-
-    if result.failures:
-        print("\nFailures:")
-        for test, traceback in result.failures:
-            print(f"  {test}: {traceback}")
-
-    if result.errors:
-        print("\nErrors:")
-        for test, traceback in result.errors:
-            print(f"  {test}: {traceback}")

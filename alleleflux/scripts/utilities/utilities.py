@@ -73,7 +73,9 @@ def build_contig_length_index(fasta_file, mag_mapping_file):
         if record.id in contig_whitelist:
             contig_lengths[record.id] = len(record.seq)
 
-    logger.info(f"Indexed {len(contig_lengths):,} contigs with lengths for coverage weighting.")
+    logger.info(
+        f"Indexed {len(contig_lengths):,} contigs with lengths for coverage weighting."
+    )
     return contig_lengths
 
 
@@ -141,7 +143,11 @@ def extract_mag_id(contig_id, mag_mapping):
 
 
 def load_mag_metadata_file(
-    mag_metadata_file, mag_id, breath_threshold, data_type="longitudinal"
+    mag_metadata_file,
+    mag_id,
+    breath_threshold,
+    coverage_threshold,
+    data_type="longitudinal",
 ):
     """
     Load MAG metadata from a file and process it.
@@ -149,12 +155,16 @@ def load_mag_metadata_file(
     Parameters:
         mag_metadata_file (str): Path to the MAG metadata file (tab-separated values).
         mag_id (str): The MAG identifier to be associated with each sample.
-        breath_threshold (float): The breath threshold value to be associated with each sample.
+        breath_threshold (float): The breadth threshold value to be associated with each sample.
+        coverage_threshold (float): The coverage threshold value to be associated with each sample.
+        data_type (str): Type of data analysis, either "single" or "longitudinal". Default is "longitudinal".
 
     Returns:
         tuple: A tuple containing:
-            - metadata_dict (dict): A dictionary where keys are sample IDs and values are dictionaries with keys 'group' and 'subjectID'.
-            - sample_files_with_mag_id (list): A list of tuples, each containing (sample_id, file_path, mag_id, breath_threshold).
+            - metadata_dict (dict): A dictionary where keys are sample IDs and values are dictionaries
+              with keys 'group', 'subjectID', 'replicate', and optionally 'time' (for longitudinal data).
+            - sample_files_with_mag_id (list): A list of tuples, each containing
+              (sample_id, file_path, mag_id, breath_threshold, coverage_threshold).
 
     Raises:
         ValueError: If the MAG metadata file is missing required columns.
@@ -199,11 +209,18 @@ def load_mag_metadata_file(
             ["group", "subjectID", "replicate"]
         ].to_dict(orient="index")
 
-    # Build sample_files_with_mag_id: list of (sample_id, file_path, mag_id, breath_threshold)
+    # Build sample_files_with_mag_id: list of tuples with thresholds
+    # Always include both breadth and coverage thresholds
     sample_files_with_mag_id = (
         df[["sample_id", "file_path"]]
         .apply(
-            lambda row: (row["sample_id"], row["file_path"], mag_id, breath_threshold),
+            lambda row: (
+                row["sample_id"],
+                row["file_path"],
+                mag_id,
+                breath_threshold,
+                coverage_threshold,
+            ),
             axis=1,
         )
         .tolist()
