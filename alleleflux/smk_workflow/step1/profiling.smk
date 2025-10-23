@@ -17,6 +17,11 @@ rule profile:
         time=config["resources"]["time"]["profile"],
     params:
         outDir=os.path.join(OUTDIR, "profiles"),
+        no_ignore_orphans="--no-ignore-orphans" if not config.get("profiling", {}).get("ignore_orphans", True) else "",
+        no_ignore_overlaps="--no-ignore-overlaps" if not config.get("profiling", {}).get("ignore_overlaps", True) else "",
+        min_base_quality=config.get("profiling", {}).get("min_base_quality", 30),
+        min_mapping_quality=config.get("profiling", {}).get("min_mapping_quality", 2),
+        log_level=config.get("log_level", "INFO"),
     shell:
         """
         alleleflux-profile \
@@ -26,5 +31,10 @@ rule profile:
             --mag_mapping_file {input.mag_mapping} \
             --cpus {threads} \
             --output_dir {params.outDir} \
-            --sampleID {wildcards.sample}
+            --sampleID {wildcards.sample} \
+            {params.no_ignore_orphans} \
+            {params.no_ignore_overlaps} \
+            --min-base-quality {params.min_base_quality} \
+            --min-mapping-quality {params.min_mapping_quality} \
+            --log-level {params.log_level}
         """

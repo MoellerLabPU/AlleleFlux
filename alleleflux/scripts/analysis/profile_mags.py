@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import functools
 import gc
 import logging
 import multiprocessing as mp
@@ -14,8 +15,8 @@ from Bio import SeqIO
 from intervaltree import IntervalTree
 from tqdm import tqdm
 
-from alleleflux.scripts.utilities.utilities import extract_mag_id, load_mag_mapping
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import extract_mag_id, load_mag_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,22 @@ def init_worker(bam_path, fasta_path, mapping=None):
     reference_fasta = pysam.FastaFile(fasta_path)
 
 
-def process_contig(contig_name):
+def process_contig(
+    contig_name,
+    ignore_orphans=True,
+    min_base_quality=30,
+    min_mapping_quality=2,
+    ignore_overlaps=True,
+):
     """
     Processes a given contig by iterating over its pileup columns and collecting base counts at each position.
 
     Args:
         contig_name (str): The name of the contig to process.
+        ignore_orphans (bool): Ignore orphan reads (reads without a properly paired mate). Default: True.
+        min_base_quality (int): Minimum base quality score to include a base. Default: 30.
+        min_mapping_quality (int): Minimum mapping quality score to include a read. Default: 2.
+        ignore_overlaps (bool): Ignore overlapping read segments (avoid double-counting). Default: True.
 
     Returns:
         list: A list of dictionaries, each containing the following keys:
@@ -59,6 +70,7 @@ def process_contig(contig_name):
             - G (int): The count of 'G' bases at this position.
             - T (int): The count of 'T' bases at this position.
             - N (int): The count of 'N' bases at this position.
+            - mapq_scores (str): Comma-separated list of MAPQ scores for all reads covering this position.
     """
 
     global bamfile
@@ -67,13 +79,21 @@ def process_contig(contig_name):
     # Initialize a list to store data for this contig
     contig_data = []
 
+    logger.debug(
+        f"Pileup parameters: ignore_orphans={ignore_orphans}, "
+        f"min_base_quality={min_base_quality}, "
+        f"min_mapping_quality={min_mapping_quality}, "
+        f"ignore_overlaps={ignore_overlaps}"
+    )
+
     # Iterate over the pileup columns (i.e., positions) in this contig
     for pileupcolumn in bamfile.pileup(
         contig=contig_name,
         stepper="samtools",
-        ignore_orphans=True,
-        min_base_quality=30,
-        ignore_overlaps=True,
+        ignore_orphans=ignore_orphans,
+        min_base_quality=min_base_quality,
+        min_mapping_quality=min_mapping_quality,
+        ignore_overlaps=ignore_overlaps,
         max_depth=100000000,
         compute_baq=False,
     ):
@@ -96,6 +116,8 @@ def process_contig(contig_name):
 
         # Initialize base counts for this position
         base_counts = defaultdict(int)
+        # Initialize list to store MAPQ scores for reads covering this position
+        mapq_scores = []
 
         # Loop through each read covering this specific base
         for pileupread in pileupcolumn.pileups:
@@ -109,6 +131,8 @@ def process_contig(contig_name):
                     base = "N"
                 # Increment the base count at this position
                 base_counts[base] += 1
+                # Collect MAPQ score from this read
+                mapq_scores.append(pileupread.alignment.mapping_quality)
 
         # Calculate total coverage at this position
         total_coverage = sum(base_counts.values())
@@ -124,6 +148,9 @@ def process_contig(contig_name):
         T_count = base_counts.get("T", 0)
         N_count = base_counts.get("N", 0)
 
+        # Format MAPQ scores as comma-separated string
+        mapq_str = ",".join(map(str, mapq_scores))
+
         # Append the data to the list
         contig_data.append(
             {
@@ -136,6 +163,7 @@ def process_contig(contig_name):
                 "G": G_count,
                 "T": T_count,
                 "N": N_count,
+                "mapq_scores": mapq_str,
             }
         )
 
@@ -307,7 +335,6 @@ def map_positions_to_genes(positions_df, contig_trees):
 
 
 def main():
-    setup_logging()
     parser = argparse.ArgumentParser(
         description="Profile MAGs using alignment files.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -370,9 +397,59 @@ def main():
         metavar="string",
     )
 
+    parser.add_argument(
+        "--no-ignore-orphans",
+        dest="ignore_orphans",
+        action="store_false",
+        default=True,
+        help="Do not ignore orphan reads (include reads without a properly paired mate). Default behavior is to ignore orphans.",
+    )
+
+    parser.add_argument(
+        "--min-base-quality",
+        dest="min_base_quality",
+        type=int,
+        default=30,
+        metavar="int",
+        help="Minimum base quality score to include a base in pileup. Default: 30.",
+    )
+
+    parser.add_argument(
+        "--min-mapping-quality",
+        dest="min_mapping_quality",
+        type=int,
+        default=2,
+        metavar="int",
+        help="Minimum mapping quality score to include a read in pileup. Default: 2.",
+    )
+
+    parser.add_argument(
+        "--no-ignore-overlaps",
+        dest="ignore_overlaps",
+        action="store_false",
+        default=True,
+        help="Do not ignore overlapping read segments (may result in double-counting). Default behavior is to ignore overlaps.",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set the logging level.",
+    )
     args = parser.parse_args()
 
+    # Setup logging with the specified level
+    setup_logging(level=getattr(logging, args.log_level))
+
     start_time = time.time()
+
+    # Log pileup parameters
+    logger.info(
+        f"Pileup parameters: ignore_orphans={args.ignore_orphans}, "
+        f"min_base_quality={args.min_base_quality}, "
+        f"min_mapping_quality={args.min_mapping_quality}, "
+        f"ignore_overlaps={args.ignore_overlaps}"
+    )
 
     # Open BAM file to get the list of contigs
     if not os.path.exists(args.bam_path + ".bai"):
@@ -390,11 +467,7 @@ def main():
 
     bamfile_main = pysam.AlignmentFile(args.bam_path, "rb")
     contig_list = bamfile_main.references
-    # contig_list = [
-    #     "SLG1122_DASTool_bins_50.fa_k141_183033",
-    #     "SLG1122_DASTool_bins_50.fa_k141_44596",
-    #     "SLG1122_DASTool_bins_67.fa_k141_18120",
-    # ]
+    # contig_list = bamfile_main.references[0:10]
     bamfile_main.close()
 
     num_processes = args.cpus
@@ -425,8 +498,17 @@ def main():
             # Initialize data list for this MAG
             data_list = []
 
+            # Create worker function with pileup parameters
+            worker_func = functools.partial(
+                process_contig,
+                ignore_orphans=args.ignore_orphans,
+                min_base_quality=args.min_base_quality,
+                min_mapping_quality=args.min_mapping_quality,
+                ignore_overlaps=args.ignore_overlaps,
+            )
+
             # Process contigs for this MAG
-            contig_results = pool.imap_unordered(process_contig, contigs)
+            contig_results = pool.imap_unordered(worker_func, contigs)
             for contig_data in contig_results:
                 data_list.extend(contig_data)
 
