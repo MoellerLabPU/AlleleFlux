@@ -513,12 +513,12 @@ frac_s, frac_n, k = _enumerate_ng86_paths("ATG", "CTT", table)
 # Returns: (0.5, 1.5, 2) for a k=2 change with path averaging
 ```
 
-#### `_build_ng86_codon_pair_cache(table_id=11)`
+#### `_build_ng86_codon_pair_cache()`
 
 **Purpose:** Pre-compute fractional S/NS counts for all 4,096 codon pairs (64×64).
 
 **Input:**
-- `table_id` (int): NCBI genetic code table ID (default: 11)
+- None (uses NCBI genetic code table 11 internally)
 
 **Output:**
 - Dictionary mapping `(codon1, codon2)` tuples to `(frac_S, frac_N, k)` tuples
@@ -565,12 +565,12 @@ s_sites, n_sites = _calculate_codon_sites("ATG", table)
 # Returns: (0.0, 3.0)
 ```
 
-#### `_precompute_codon_sites_cache(table_id=11)`
+#### `_precompute_codon_sites_cache()`
 
 **Purpose:** Pre-compute S/N potential sites for all 64 codons to maximize performance.
 
 **Input:**
-- `table_id` (int): NCBI genetic code table ID (default: 11)
+- None (uses NCBI genetic code table 11 internally)
 
 **Output:**
 - Dictionary mapping codon strings to (S, N) tuples
@@ -603,72 +603,89 @@ potential_sites = calculate_potential_sites_for_gene(gene_seq)
 # Returns: {"S": sum of S values, "N": sum of N values}
 ```
 
-#### `_group_sites_into_codon_events(sites_df, ancestral_seqs, derived_profile_df, prodigal_records, ancestral_major_alleles)`
+#### `_group_sites_into_codon_events(sites_df, ancestral_major_alleles, derived_profile_df, prodigal_records, ancestral_seqs)`
 
 **Purpose:** Transform per-site data into per-codon structure for NG86 analysis.
 
 **Input:**
-- `sites_df` (DataFrame): Significant sites
+- `sites_df` (DataFrame): Significant sites with columns mag_id, contig, position, gene_id
+- `ancestral_major_alleles` (dict): Maps (contig, position) to forward-strand ancestral allele
+- `derived_profile_df` (DataFrame): Derived timepoint profile data
+- `prodigal_records` (dict): Gene metadata (start, end, strand)
 - `ancestral_seqs` (dict): Reconstructed ancestral sequences
-- `derived_profile_df` (DataFrame): Derived timepoint profiles
-- `prodigal_records` (dict): Gene metadata
-- `ancestral_major_alleles` (dict): Pre-computed ancestral alleles
 
 **Output:**
-- DataFrame with one row per codon, columns include:
-  - Codon identification: `gene_id`, `codon_start_index`
-  - Position lists: `positions_in_codon` (which of 0,1,2 changed)
-  - Sequences: `codon_before`, `codon_after`
-  - All positional information for tracking
+- Dictionary (not DataFrame) mapping codon_key to codon_data:
+  - codon_key: `(mag_id, gene_id, contig, codon_start_index, strand)`
+  - codon_data: Dict with keys:
+    - `gene_info`: gene metadata dict
+    - `ancestral_seq`: full gene sequence string
+    - `contig`: contig name
+    - `changes`: list of dicts with per-position change info
 
 **Algorithm:**
-1. For each significant site, determine its codon
-2. Group sites by `(gene_id, codon_start_index)`
-3. For each group:
-   - Extract ancestral and derived codons
-   - Record which positions changed
-   - Preserve all relevant metadata
-4. Return codon-level DataFrame
+1. For each significant site, determine its codon using coordinate conversion
+2. Group sites by `(mag_id, gene_id, contig, codon_start_index, strand)` tuple
+3. For each codon group:
+   - Extract ancestral codon from reconstructed sequence
+   - Build derived codon by looking up major alleles in derived profile
+   - Handle strand orientation (complement alleles for reverse strand)
+   - Record which positions changed (0, 1, and/or 2)
+   - Validate alleles (reject ambiguous bases like N, Y, etc.)
+   - Store all changes for this codon in a list
+4. Return dictionary mapping codon_key to codon_data
 
-#### `analyze_codon_substitutions_with_ng86_paths(codon_events_df, prodigal_records)`
+#### `analyze_codon_substitutions_with_ng86_paths(sites_df, ancestral_seqs, prodigal_records, derived_profile_df, ancestral_major_alleles, ng86_cache=None)`
 
 **Purpose:** Apply NG86 path averaging to codon-level events and compute fractional S/NS counts.
 
 **Input:**
-- `codon_events_df` (DataFrame): Codon events from grouping function
-- `prodigal_records` (dict): Gene metadata
+- `sites_df` (DataFrame): Significant sites with columns mag_id, contig, position, gene_id
+- `ancestral_seqs` (dict): Maps gene_id to reconstructed ancestral sequence
+- `prodigal_records` (dict): Maps gene_id to gene metadata (start, end, strand)
+- `derived_profile_df` (DataFrame): Profile data for derived timepoint
+- `ancestral_major_alleles` (dict): Maps (contig, position) to ancestral allele
+- `ng86_cache` (dict, optional): Pre-built NG86 codon-pair cache; if None, uses global cache
 
 **Output:**
-- DataFrame with codon-level results including:
-  - `k`: Number of positions changed
-  - `frac_S`, `frac_N`: Fractional S/NS counts from path averaging
-  - `potential_S_sites_codon`, `potential_N_sites_codon`
+- DataFrame with one row per codon event, containing:
+  - Codon identifiers: `mag_id`, `gene_id`, `contig`, `codon_start_index`, `strand`
+  - Sequences: `codon_before`, `codon_after` (3-base strings)
+  - Alleles: `ancestral_allele`, `derived_allele` (comma-separated if k>1)
   - Translations: `aa_before`, `aa_after`
+  - NG86 metrics: `k` (positions changed), `frac_S`, `frac_NS`, `num_valid_paths`
+  - Potential sites: `potential_S_sites_codon`, `potential_N_sites_codon`
+  - Position tracking: `changed_positions`, contig positions, gene positions
+  - Validity: `is_valid` (False if all paths hit stop codons)
 
 **Algorithm:**
-1. For each codon event:
+1. Call `_group_sites_into_codon_events()` to transform per-site data to per-codon dict
+2. For each codon event:
    - Look up fractional counts from NG86 cache
    - If not cached, compute via `_enumerate_ng86_paths()`
    - Get potential sites from codon sites cache
    - Translate codons to amino acids
-2. Compile comprehensive results per codon
-3. Return enriched DataFrame
+   - Classify mutation type based on amino acid change
+3. Compile comprehensive results per codon
+4. Return enriched DataFrame
 
-**Key Feature:** Handles k=1, 2, and 3 uniformly through cache lookup or dynamic computation.
+**Key Features:**
+- Handles k=1, 2, and 3 uniformly through cache lookup or dynamic computation
+- Automatically excludes pathways through intermediate stop codons
+- Returns fractional counts (not integer per-site counts)
+- One row per codon (not per site)
 
-#### `calculate_global_dnds_for_sites(substitution_results_df, ancestral_seqs, prodigal_records)`
+#### `calculate_global_dnds_for_sites(substitution_results_df)`
 
 **Purpose:** Calculate a single global dN/dS ratio using fractional counts with proper codon deduplication.
 
 **Input:**
-- `substitution_results_df` (DataFrame): Codon-level substitution results with fractional counts
-- `ancestral_seqs` (dict): Reconstructed ancestral sequences
-- `prodigal_records` (dict): Gene metadata
+- `substitution_results_df` (DataFrame): Codon-level substitution results with fractional counts (from `analyze_codon_substitutions_with_ng86_paths`)
 
 **Output:**
 - Tuple of (summary_df, codon_specific_df):
   - `summary_df`: Global dN/dS metrics including k-value distribution
-  - `codon_specific_df`: Per-codon potential S/N values
+  - `codon_specific_df`: Per-codon potential S/N values with all substitution details
 
 **Key Algorithm:**
 1. Use a set to track unique `(gene_id, codon_start_index)` tuples

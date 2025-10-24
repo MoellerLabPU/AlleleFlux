@@ -9,9 +9,6 @@ Updated for NG86 methodology:
 - Helper functions updated to call analyze_codon_substitutions_with_ng86_paths()
 """
 
-import json
-import logging
-import random
 import unittest
 from typing import Dict, List, Tuple
 from unittest import mock
@@ -28,7 +25,6 @@ from alleleflux.scripts.evolution.dnds_from_timepoints import (
     _enumerate_ng86_paths,
     _get_ng86_cache,
     analyze_codon_substitutions_with_ng86_paths,
-    analyze_mutation_effect,
     calculate_global_dnds_for_sites,
     calculate_potential_sites_for_gene,
     get_codon_from_site,
@@ -414,29 +410,6 @@ class TestCoreDndsFunctions(unittest.TestCase):
         # Out of bounds
         codon, pos = get_codon_from_site(99, self.gene_info_fwd, seq_fwd)
         self.assertIsNone(codon)
-
-    def test_analyze_mutation_effect(self):
-        """Test classification of mutations as S or NS."""
-        # Forward strand, non-synonymous (Arg -> Leu)
-        ancestral_seq = "ATGCGTACG"
-        result = analyze_mutation_effect(self.gene_info_fwd, ancestral_seq, 104, "T")
-        self.assertEqual(result["mutation_type"], "NS")
-        self.assertEqual(result["codon_before"], "CGT")
-        self.assertEqual(result["codon_after"], "CTT")
-        self.assertEqual(result["aa_before"], "R")
-        self.assertEqual(result["aa_after"], "L")
-
-        # Reverse strand, synonymous (Leu -> Leu)
-        # This tests that the derived allele is correctly complemented.
-        ancestral_seq_rev = "GTACTAACA"
-        result = analyze_mutation_effect(
-            self.gene_info_rev, ancestral_seq_rev, 203, "G"
-        )
-        self.assertEqual(result["mutation_type"], "S")
-        self.assertEqual(result["codon_before"], "CTA")
-        self.assertEqual(result["codon_after"], "CTC")
-        self.assertEqual(result["aa_before"], "L")
-        self.assertEqual(result["aa_after"], "L")
 
 
 class TestNG86PathAveraging(unittest.TestCase):
@@ -2914,9 +2887,11 @@ class TestNG86ComputedValues(unittest.TestCase):
         self.assertEqual(event["num_valid_paths"], 6)
 
         # Verify coordinate fields
+        # All fields should be aligned in biological 5'→3' order (gene position order)
+        # For negative strand, this means contig positions are in descending order
         self.assertEqual(event["codon_position"], "0,1,2")
         self.assertEqual(event["gene_position"], "0,1,2")
-        self.assertEqual(event["contig_position"], "203,204,205")
+        self.assertEqual(event["contig_position"], "205,204,203")
 
 
 # =============================================================================

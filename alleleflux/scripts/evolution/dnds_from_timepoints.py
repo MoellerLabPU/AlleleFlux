@@ -50,7 +50,6 @@ import argparse
 import itertools
 import logging
 import multiprocessing as mp
-import os
 import random
 from functools import partial
 from pathlib import Path
@@ -59,7 +58,7 @@ import numpy as np
 import pandas as pd
 from Bio import SeqIO
 from Bio.Data import CodonTable
-from Bio.Seq import MutableSeq, Seq
+from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm import tqdm
 
@@ -82,7 +81,7 @@ def _calculate_codon_sites(
     codon: str, table: CodonTable.CodonTable
 ) -> tuple[float, float]:
     """
-    Helper function to calculate S and N sites for a single _precompute_codon_sites_cache.
+    Helper function to calculate S and N sites for a single codon.
 
     For a given codon, this function iterates through all 9 possible single-base
     changes and classifies each as synonymous or non-synonymous. It returns
@@ -835,64 +834,6 @@ def get_codon_from_site(position, gene_info, sequence):
     return codon, pos_in_gene
 
 
-def analyze_mutation_effect(gene_info, ancestral_seq, position, allele_after):
-    """
-    Determines if a mutation is synonymous (S) or non-synonymous (NS).
-
-    It compares the amino acid translated from the ancestral codon to the one
-    translated from the derived (mutated) codon.
-
-    Args:
-        gene_info (dict): Metadata for the gene.
-        ancestral_seq (str): The reconstructed ancestral gene sequence.
-        position (int): The genomic position of the mutation.
-        allele_after (str): The derived major allele (on the forward strand).
-
-    Returns:
-        A dictionary with details about the mutation, or an empty dict if analysis fails.
-    """
-    ancestral_codon_str, pos_in_gene = get_codon_from_site(
-        position, gene_info, ancestral_seq
-    )
-    if ancestral_codon_str is None:
-        return {}
-
-    strand = gene_info["strand"]
-    # Alleles from profiles are from the forward strand. They must be complemented for reverse-strand genes.
-    effective_allele_after = (
-        COMPLEMENT_MAP.get(allele_after.upper())
-        if strand == -1
-        else allele_after.upper()
-    )
-
-    if not effective_allele_after:
-        logger.warning(
-            f"Cannot complement derived allele for gene {gene_info['record'].id}: {allele_after}"
-        )
-        return {}
-
-    # Find the position within the 3-base codon (0, 1, or 2).
-    pos_in_codon = pos_in_gene % 3
-
-    # The "after" codon is the ancestral codon with the derived allele substituted.
-    mutable_codon_after = MutableSeq(ancestral_codon_str)
-    mutable_codon_after[pos_in_codon] = effective_allele_after
-    derived_codon_seq = Seq(mutable_codon_after)
-
-    # Translate both codons to determine the effect.
-    aa_before = Seq(ancestral_codon_str).translate(table=11, cds=False)
-    aa_after = derived_codon_seq.translate(table=11, cds=False)
-    mutation_type = "S" if aa_before == aa_after else "NS"
-
-    return {
-        "codon_before": ancestral_codon_str,
-        "codon_after": str(derived_codon_seq),
-        "aa_before": str(aa_before),
-        "aa_after": str(aa_after),
-        "mutation_type": mutation_type,
-    }
-
-
 def _group_sites_into_codon_events(
     sites_df: pd.DataFrame,
     ancestral_major_alleles: dict,
@@ -1019,10 +960,10 @@ def _group_sites_into_codon_events(
         # This is checking the reference against the reference base from prodigal, not derived.
         original_ref_seq = str(gene_info["record"].seq)
         # Get position within the gene's coordinate system (0-indexed)
-        _, pos_in_gene = get_codon_from_site(position, gene_info, original_ref_seq)
+        _, pos_in_gene_ref = get_codon_from_site(position, gene_info, original_ref_seq)
 
-        if pos_in_gene is not None:
-            prodigal_base_on_strand = original_ref_seq[pos_in_gene]
+        if pos_in_gene_ref is not None:
+            prodigal_base_on_strand = original_ref_seq[pos_in_gene_ref]
             # The ref_base from prodigal needs to be oriented to the forward strand for comparison
             prodigal_ref_base_fwd = (
                 COMPLEMENT_MAP.get(prodigal_base_on_strand.upper())
@@ -1220,12 +1161,9 @@ def analyze_codon_substitutions_with_ng86_paths(
 
         # Build the derived codon by applying all changes
         derived_codon_list = ancestral_codon_list.copy()
-        changed_positions_list = []
-        contig_positions_list = []
-        gene_positions_list = []
-        ancestral_alleles_list = []
-        derived_alleles_list = []
 
+        # Build a unified list and sort by contig_pos to keep fields aligned
+        entries = []
         for change in changes:
             pos_in_codon = change["pos_in_codon"]
             ancestral_allele_fwd = change["ancestral_allele"]
@@ -1234,9 +1172,6 @@ def analyze_codon_substitutions_with_ng86_paths(
             pos_in_gene = change[
                 "pos_in_gene"
             ]  # Already calculated in _group_sites_into_codon_events
-            gene_positions_list.append(pos_in_gene)
-            ancestral_alleles_list.append(ancestral_allele_fwd)
-            derived_alleles_list.append(derived_allele_fwd)
 
             # For reverse strand genes, we need to complement the allele
             # because the sequence is stored as reverse complement
@@ -1251,11 +1186,33 @@ def analyze_codon_substitutions_with_ng86_paths(
             else:
                 effective_allele = derived_allele_fwd.upper()
 
-            derived_codon_list[pos_in_codon] = effective_allele
-            changed_positions_list.append(pos_in_codon)
-            contig_positions_list.append(contig_pos)
+            entries.append(
+                {
+                    "pos_in_codon": pos_in_codon,
+                    "pos_in_gene": pos_in_gene,
+                    "contig_pos": contig_pos,
+                    "ancestral_allele_fwd": ancestral_allele_fwd,
+                    "derived_allele_fwd": derived_allele_fwd,
+                    "effective_allele": effective_allele,
+                }
+            )
+
+        # Sort ONCE by gene position (5'→3' biological order), then derive everything from the same order
+        # This keeps all fields aligned and maintains consistent ordering across forward/reverse strands
+        entries.sort(key=lambda e: e["pos_in_gene"])
+
+        # Apply edits to the codon in the sorted order (order doesn't change outcome, but keeps reporting aligned)
+        for e in entries:
+            derived_codon_list[e["pos_in_codon"]] = e["effective_allele"]
 
         derived_codon_str = "".join(derived_codon_list).upper()
+
+        # Now output aligned, comma-joined fields (all in 5'→3' gene order)
+        contig_positions_list = [e["contig_pos"] for e in entries]
+        gene_positions_list = [e["pos_in_gene"] for e in entries]
+        changed_positions_list = [e["pos_in_codon"] for e in entries]
+        ancestral_alleles_list = [e["ancestral_allele_fwd"] for e in entries]
+        derived_alleles_list = [e["derived_allele_fwd"] for e in entries]
 
         # Validate codons
         if len(derived_codon_str) != 3:
@@ -1332,11 +1289,11 @@ def analyze_codon_substitutions_with_ng86_paths(
             {
                 "mag_id": mag_id,
                 "contig": contig,
-                "contig_position": ",".join(map(str, sorted(contig_positions_list))),
+                "contig_position": ",".join(map(str, contig_positions_list)),
                 "gene_id": gene_id,
-                "gene_position": ",".join(map(str, sorted(gene_positions_list))),
+                "gene_position": ",".join(map(str, gene_positions_list)),
                 "codon_start_index": codon_start_index,
-                "codon_position": ",".join(map(str, sorted(changed_positions_list))),
+                "codon_position": ",".join(map(str, changed_positions_list)),
                 "strand": strand,
                 "ancestral_allele": ",".join(ancestral_alleles_list),
                 "derived_allele": ",".join(derived_alleles_list),
@@ -1521,13 +1478,13 @@ def calculate_global_dnds_for_sites(substitution_results_df):
             k2_count,
             k3_count,
             invalid_count,
-            f"{total_potential_NS:.2f}",
-            f"{total_potential_S:.2f}",
-            f"{observed_NS:.4f}",  # Now fractional
-            f"{observed_S:.4f}",  # Now fractional
-            f"{pNS:.4f}",
-            f"{pS:.4f}",
-            f"{dNdS_ratio:.4f}",
+            total_potential_NS,
+            total_potential_S,
+            observed_NS,  # Now fractional
+            observed_S,  # Now fractional
+            pNS,
+            pS,
+            dNdS_ratio,
         ],
     }
     summary_df = pd.DataFrame(summary_data)
@@ -1819,6 +1776,25 @@ def process_mag(mag_id, args, prodigal_records):
     derived_profile_df["gene_id"] = (
         derived_profile_df["gene_id"].astype(str).str.strip()
     )
+
+    # Check for duplicate (contig, position, gene_id) combinations
+    duplicates = derived_profile_df[
+        derived_profile_df.duplicated(
+            subset=["contig", "position", "gene_id"], keep=False
+        )
+    ]
+
+    if not duplicates.empty:
+        duplicate_count = len(duplicates)
+        unique_duplicates = len(
+            duplicates.drop_duplicates(subset=["contig", "position", "gene_id"])
+        )
+        raise ValueError(
+            f"MAG {mag_id}: Found {duplicate_count} duplicate entries across {unique_duplicates} "
+            f"unique (contig, position, gene_id) combinations in derived profile. "
+            f"First few examples:\n{duplicates[['contig', 'position', 'gene_id']].head(10)}"
+        )
+
     logger.info(f"Analyzing substitutions for {mag_id}...")
 
     # Retrieve NG86 cache once per worker. On Linux (fork), this references the pre-warmed
@@ -1867,6 +1843,7 @@ def main():
     parser.add_argument(
         "--mag_ids",
         nargs="+",
+        required=True,
         help="One or more MAG IDs to process.",
     )
     parser.add_argument(
