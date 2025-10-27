@@ -14,6 +14,7 @@ rule qc:
         outDir=directory(os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}")),
     params:
         breadth_threshold=config["quality_control"]["breadth_threshold"],
+        coverage_threshold=config["quality_control"]["coverage_threshold"],
         data_type=DATA_TYPE,
     threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
@@ -25,6 +26,7 @@ rule qc:
             --rootDir {input.metadata_dir} \
             --fasta {input.fasta} \
             --breadth_threshold {params.breadth_threshold} \
+            --coverage_threshold {params.coverage_threshold} \
             --cpus {threads} \
             --output_dir {output.outDir} \
             --data_type {params.data_type} \

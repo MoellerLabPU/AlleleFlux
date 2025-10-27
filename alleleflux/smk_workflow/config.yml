@@ -20,9 +20,9 @@ input:
 output:
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_profile_new"  # Root directory for all output files
   # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_single"
-  root_dir: "/workdir/sidd/sam_diet_manip/alleleflux_test/normal_mags3"
-  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/test_alleleFlux_python"
-  # root_dir: "/workdir1/sidd/for_sam/new_instrain/test_new_version/for_DAG"
+  root_dir: "/workdir/sidd/sam_diet_manip/alleleflux_test/normal_mags2"
+
+log_level: "INFO"              # Logging level: DEBUG, INFO, WARNING, ERROR
 
 # Analysis Configuration
 # -----------------------
@@ -42,8 +42,8 @@ analysis:
     # For longitudinal data type: use a dictionary with pair and focus keys
     # - timepoint: ["end"] 
     # - timepoint: ["post"]
-    # - timepoint: ["pre", "post"]
-    #   focus: "pre"        # Required if CMH test is enabled
+    - timepoint: ["pre", "post"]
+      focus: "pre"
     - timepoint: ["pre", "end"]
       focus: "end"
     # - timepoint: ["end", "post"]
@@ -57,7 +57,17 @@ analysis:
 quality_control:
   min_sample_num: 4         # Minimum number of samples required for analysis
   breadth_threshold: 0.1    # Minimum coverage breadth across genome
+  coverage_threshold: 1     # Minimum average coverage depth required to pass
   disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
+
+# Profiling Parameters
+# --------------------
+# Parameters for pileup generation during sample profiling
+profiling:
+  ignore_orphans: False          # Whether to ignore orphan reads (reads without proper pairs)
+  min_base_quality: 30           # Minimum base quality score to consider
+  min_mapping_quality: 2         # Minimum mapping quality score to consider
+  ignore_overlaps: True          # Whether to ignore overlapping read segments
 
 # Statistical Parameters
 # ----------------------
@@ -88,7 +98,7 @@ resources:
     profile: 10000   
     quality_control: 100000 # Memory in MB (100 GB) for quality control
     analyze_alleles: 100000 # Memory in MB (100 GB) for allele analysis
-    significance_test: 10000 # Memory in MB for significance testing
+    significance_test: 100000 # Memory in MB for significance testing
     dn_ds: 200000
   
   time:                     # Runtime limits in format "days-HH:MM:SS"

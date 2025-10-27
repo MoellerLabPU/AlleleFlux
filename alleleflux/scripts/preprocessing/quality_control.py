@@ -640,6 +640,9 @@ def main():
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info(f"Using breadth threshold: {args.breadth_threshold}")
+    logger.info(f"Using coverage threshold: {args.coverage_threshold}")
+
     mag_size_dict = calculate_mag_sizes(args.fasta, args.mag_mapping_file)
     # Build contig length index once (re-used by workers)
     contig_length_dict = build_contig_length_index(args.fasta, args.mag_mapping_file)

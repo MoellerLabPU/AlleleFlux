@@ -1,16 +1,15 @@
 rule analyze_alleles:
     input:
-        mag_metadata_file=os.path.join(
+        qc_file=os.path.join(
             OUTDIR,
-            "inputMetadata",
-            "inputMetadata_{timepoints}-{groups}",
-            "{mag}_metadata.tsv",
+            "QC",
+            "QC_{timepoints}-{groups}",
+            "{mag}_QC.tsv",
         ),
         eligibility_table=os.path.join(
             OUTDIR,
             "eligibility_table_{timepoints}-{groups}.tsv",
         ),
-        mag_mapping=config["input"]["mag_mapping_path"],
     output:
         allele_freq=os.path.join(
             OUTDIR,
@@ -49,15 +48,13 @@ rule analyze_alleles:
             "allele_analysis",
             "allele_analysis_{timepoints}-{groups}",
         ),
-        fasta=config["input"]["fasta_path"],
-        breath_threshold=config["quality_control"].get("breadth_threshold", 0.1),
         disable_zero_diff_filtering=(
             "--disable_zero_diff_filtering"
             if config["quality_control"].get("disable_zero_diff_filtering", False)
             else ""
         ),
         # Use the global DATA_TYPE variable
-        data_type=DATA_TYPE,        
+        data_type=DATA_TYPE,
 
     threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
@@ -67,14 +64,11 @@ rule analyze_alleles:
         """
         alleleflux-allele-freq \
             --magID {wildcards.mag} \
-            --mag_metadata_file {input.mag_metadata_file} \
-            --fasta {params.fasta} \
-            --breath_threshold {params.breath_threshold} \
+            --qc_file {input.qc_file} \
             --data_type {params.data_type} \
             --cpus {threads} \
             --output_dir {params.outDir} \
-            {params.disable_zero_diff_filtering} \
-            --mag_mapping_file {input.mag_mapping}
-            """
+            {params.disable_zero_diff_filtering}
+        """
 
 
