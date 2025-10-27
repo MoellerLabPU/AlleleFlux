@@ -52,6 +52,7 @@ rule dnds_from_timepoints:
         p_value_column=config["dnds"]["p_value_column"],
         p_value_threshold=config["statistics"]["p_value_threshold"],  # Use from statistics section
         dn_ds_test_type=DN_DS_TEST_TYPE,
+        log_level=config["log_level"],
     resources:
         time=config["resources"]["time"]["general"],
         mem_mb=config["resources"]["memory"]["dn_ds"],
@@ -130,6 +131,7 @@ rule dnds_from_timepoints:
                 --prodigal_fasta {input.prodigal_fasta} \
                 --outdir {output} \
                 --prefix {wildcards.subject_id} \
-                --cpus {threads} 
+                --cpus {threads} \
+                --log_level {params.log_level}
             """
         )
