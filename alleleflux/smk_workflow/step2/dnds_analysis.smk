@@ -132,6 +132,6 @@ rule dnds_from_timepoints:
                 --outdir {output} \
                 --prefix {wildcards.subject_id} \
                 --cpus {threads} \
-                --log_level {params.log_level}
+                --log-level {params.log_level}
             """
         )
