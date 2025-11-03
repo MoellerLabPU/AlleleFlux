@@ -38,7 +38,7 @@ rule dnds_from_timepoints:
         # Profile directory containing all sample profiles
         profile_dir=os.path.join(OUTDIR, "profiles"),
         # Prodigal gene predictions
-        prodigal_fasta=config["input"]["prodigal_path"]
+        prodigal_fasta=config["input"]["prodigal_path"],
     output:
         directory(
             os.path.join(
@@ -60,33 +60,66 @@ rule dnds_from_timepoints:
     run:
         import os
         import pandas as pd
+        from alleleflux.scripts.utilities.logging_config import setup_logging
+        setup_logging()
+        logger = logging.getLogger(__name__)
         
-        # Determine the eligibility test type string based on the specific test
-        eligibility_test_type = _get_dnds_test_type_str(params.dn_ds_test_type, for_eligibility=True)
+        valid_p_value_columns = ["min_p_value", "q_value"]
+        if params.p_value_column not in valid_p_value_columns:
+            raise ValueError(
+                f"Invalid p_value_column '{params.p_value_column}'. "
+                f"Must be one of: {', '.join(valid_p_value_columns)}"
+            )
+        
+        # Load the p-value summary to find MAGs with at least one significant site
+        sig_sites_df = pd.read_csv(input.significant_sites, sep="\t")
+        if params.p_value_column not in sig_sites_df.columns:
+            raise ValueError(
+                f"P-value column '{params.p_value_column}' not found in {input.significant_sites}. "
+                f"Available columns: {', '.join(sig_sites_df.columns)}"
+            )
 
-        # Get all eligible MAGs for this specific test type
-        eligibility_file = os.path.join(
-            OUTDIR, f"eligibility_table_{wildcards.timepoints}-{wildcards.groups}.tsv"
-        )
-        df = pd.read_csv(eligibility_file, sep="\t")
+        # If group_analyzed is specified, filter the significant sites dataframe by that group first
+        group_analyzed_flag = ""
+        if params.dn_ds_test_type in ["single_sample_tTest", "single_sample_Wilcoxon", "lmm_across_time", "cmh_across_time"]:
+            group = config["dnds"].get("group_analyzed")
+            if not group:
+                raise ValueError(
+                    f"For test type '{params.dn_ds_test_type}', 'group_analyzed' must be specified in the 'dnds' section of the config."
+                )
+            if "group_analyzed" not in sig_sites_df.columns:
+                raise ValueError(
+                    f"A 'group_analyzed' column is expected in {input.significant_sites} for test type "
+                    f"'{params.dn_ds_test_type}', but is not present."
+                )
+            # Conditionally add the --group-analyzed flag
+            group_analyzed_flag = f"--group-analyzed {group}"
+            
+            sig_sites_df = sig_sites_df[sig_sites_df["group_analyzed"] == group]
+            logger.info(f"Filtered significant sites for group '{group}'.")
 
-        if eligibility_test_type in ["two_sample_unpaired", "lmm"]:
-            eligible_mags = df.loc[df["unpaired_test_eligible"] == True, "MAG_ID"].tolist()
-        elif eligibility_test_type in ["two_sample_paired", "cmh"]:
-            eligible_mags = df.loc[df["paired_test_eligible"] == True, "MAG_ID"].tolist()
-        elif eligibility_test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
-            single_cols = [col for col in df.columns if col.startswith("single_sample_eligible_")]
-            if not single_cols:
-                eligible_mags = []
-            else:
-                eligible_mags = df.loc[df[single_cols].any(axis=1), "MAG_ID"].unique().tolist()
-        else:
-            raise ValueError(f"Unknown eligibility type for dN/dS: {eligibility_test_type}")
+        sig_sites_df = sig_sites_df[sig_sites_df[params.p_value_column] <= params.p_value_threshold]
+
+        test_type = params.dn_ds_test_type
+        if params.dn_ds_test_type in ["lmm", "lmm_across_time"]:
+            test_type = "LMM"
+        elif params.dn_ds_test_type in ["cmh", "cmh_across_time"]:
+            test_type = "CMH"
+
+        sig_sites_df = sig_sites_df[sig_sites_df["test_type"] == test_type]
+        eligible_mags = sig_sites_df["mag_id"].unique().tolist()
+        
+        if eligible_mags:
+            logger.info(
+                f"Found {len(eligible_mags)} MAG(s) that are both eligible and have significant sites "
+                f"({params.p_value_column} <= {params.p_value_threshold})."
+            )
+
 
         if not eligible_mags:
             # If no MAGs are eligible, create an empty output directory and touch a sentinel file
             shell(f"mkdir -p {output} && touch {output}/no_eligible_mags")
-            print(f"No eligible MAGs for {wildcards.timepoints}-{wildcards.groups}. Created empty directory.")
+            logger.info(f"No eligible MAGs for {wildcards.timepoints}-{wildcards.groups}. Created empty directory.")
             # Stop further execution of the rule
             return
 
@@ -104,18 +137,6 @@ rule dnds_from_timepoints:
             raise ValueError(f"No sample pair found for subject {wildcards.subject_id}")
         
         ancestral_sample_id, derived_sample_id = subject_pair
-
-        # Conditionally add the --group-analyzed flag
-        group_analyzed_flag = ""
-        if eligibility_test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
-            # Ensure the group_analyzed key is present in the config
-            if "group_analyzed" not in config["dnds"]:
-                raise ValueError(
-                    f"The test type '{params.dn_ds_test_type}' requires 'group_analyzed' to be set in the dnds section of the config."
-                )
-            group = config["dnds"]["group_analyzed"]
-            group_analyzed_flag = f"--group-analyzed {group}"
-
         shell(
             """
             alleleflux-dnds-from-timepoints \
@@ -123,7 +144,7 @@ rule dnds_from_timepoints:
                 --mag_ids {mag_ids_str} \
                 --p_value_column {params.p_value_column} \
                 --p_value_threshold {params.p_value_threshold} \
-                --test-type {params.dn_ds_test_type} \
+                --test-type {test_type} \
                 {group_analyzed_flag} \
                 --ancestral_sample_id {ancestral_sample_id} \
                 --derived_sample_id {derived_sample_id} \
