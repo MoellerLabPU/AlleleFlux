@@ -222,7 +222,11 @@ def process_results_file(
         # Set test_type and group_analyzed based on test_type and sub_test_name
         new_test_type = f"{test_type}_{sub_test_name}"  # Default
         if test_type in ["lmm", "lmm_across_time"]:
-            new_test_type = "LMM"
+            # Special handling for LMM absolute vs regular p-value columns to prevent duplication
+            if test_type == "lmm" and "_abs" in sub_test_name:
+                new_test_type = "LMM_abs"
+            elif test_type == "lmm" or test_type == "lmm_across_time":
+                new_test_type = "LMM"
             if test_type == "lmm_across_time" and "group_analyzed" in df.columns:
                 sub_df["group_analyzed"] = df["group_analyzed"]
         elif test_type in ["cmh", "cmh_across_time"]:
