@@ -5,13 +5,13 @@ Rules for performing dN/dS analysis from timepoints using dnds_from_timepoints.p
 
 def _get_dnds_test_type_str(test_type, for_eligibility=False):
     """Helper function to get the standardized test type string for dN/dS analysis."""
-    if test_type in ["two_sample_unpaired_tTest", "two_sample_unpaired_MannWhitney"]:
+    if test_type in ["two_sample_unpaired_tTest", "two_sample_unpaired_MannWhitney", "two_sample_unpaired_tTest_abs", "two_sample_unpaired_MannWhitney_abs"]:
         return "two_sample_unpaired"
-    elif test_type in ["two_sample_paired_tTest", "two_sample_paired_Wilcoxon"]:
+    elif test_type in ["two_sample_paired_tTest", "two_sample_paired_Wilcoxon", "two_sample_paired_tTest_abs", "two_sample_paired_Wilcoxon_abs"]:
         return "two_sample_paired"
     elif test_type in ["single_sample_tTest", "single_sample_Wilcoxon"]:
         return "single_sample"
-    elif test_type in ["lmm", "lmm_across_time", "cmh", "cmh_across_time"]:
+    elif test_type in ["lmm", "lmm_abs", "lmm_across_time", "cmh", "cmh_across_time"]:
         return test_type
     else:
         raise ValueError(f"Unsupported DN_DS_TEST_TYPE: {test_type}")
