@@ -1,7 +1,9 @@
 
-import logging
+
 import pandas as pd
-from alleleflux.scripts.utilities.logging_config import setup_logging
+# import logging
+# from alleleflux.scripts.utilities.logging_config import setup_logging
+from snakemake.logging import logger
 
 rule significance_score_per_MAG_standard:
     input:
@@ -67,9 +69,6 @@ rule significance_score_per_MAG_cmh:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-
-        setup_logging()
-        logger = logging.getLogger(__name__)
         if params.data_type == "single":
             shell(
             """
@@ -135,8 +134,8 @@ rule combine_MAG_scores:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        setup_logging()
-        logger = logging.getLogger(__name__)
+        # setup_logging()
+        # logger = logging.getLogger(__name__)
 
         dfs = []
         for file in input.scores:
@@ -182,8 +181,8 @@ rule combine_MAG_scores_cmh:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        setup_logging()
-        logger = logging.getLogger(__name__)
+        # setup_logging()
+        # logger = logging.getLogger(__name__)
 
         dfs = []
         for file in input.scores:

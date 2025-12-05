@@ -50,6 +50,12 @@ alleleflux-coverage-allele-stats = "alleleflux.scripts.accessory.coverage_and_al
 alleleflux-list-mags = "alleleflux.scripts.accessory.list_mags:main"
 alleleflux-positions-qc = "alleleflux.scripts.accessory.positions_qc:main"
 
+# Visualization scripts
+alleleflux-prepare-metadata = "alleleflux.scripts.visualization.accessory.prepare_metadata:main"
+alleleflux-terminal-nucleotide = "alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis:main"
+alleleflux-track-alleles = "alleleflux.scripts.visualization.accessory.track_allele_frequencies:main"
+alleleflux-plot-trajectories = "alleleflux.scripts.visualization.plot_allele_trajectory:main"
+
 [tool.setuptools.package-data]
 # Include the runner script AND everything inside the smk_workflow directory
 alleleflux = ["runner.sh", "smk_workflow/**"] 

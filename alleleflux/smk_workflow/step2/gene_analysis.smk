@@ -1,17 +1,15 @@
 import os
-import logging
+# import logging
 import pandas as pd
-
-from alleleflux.scripts.utilities.logging_config import setup_logging
-
-
+from snakemake.logging import logger
+# from alleleflux.scripts.utilities.logging_config import setup_logging
 
 def check_for_gene_ids(pvalue_table_path):
     """
     Check if the p-value table contains any gene IDs in the gene_id column.
     Returns True if gene IDs exist, False otherwise.
     """
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
     
     # Open file based on whether it's gzipped or not
     df = pd.read_csv(pvalue_table_path, sep='\t')
@@ -66,8 +64,8 @@ rule gene_scores:
         time=config["resources"]["time"]["general"],
     run:
         # Ensure logging configured
-        setup_logging()
-        rule_logger = logging.getLogger(__name__)
+        # setup_logging()
+        # rule_logger = logging.getLogger(__name__)
 
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
@@ -140,7 +138,7 @@ rule gene_scores:
             empty_df.to_csv(output.combined, sep='\t', index=False)
             empty_df.to_csv(output.individual, sep='\t', index=False)
             empty_df.to_csv(output.overlapping, sep='\t', index=False)
-            rule_logger.info(f"No gene IDs found in {input.pvalue_table}. Created empty output files.")
+            logger.info(f"No gene IDs found in {input.pvalue_table}. Created empty output files.")
 
 
 rule detect_outlier_genes:
@@ -169,8 +167,8 @@ rule detect_outlier_genes:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        setup_logging()
-        rule_logger = logging.getLogger(__name__)
+        # setup_logging()
+        # rule_logger = logging.getLogger(__name__)
         
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
@@ -234,7 +232,7 @@ rule detect_outlier_genes:
             os.makedirs(os.path.dirname(output[0]), exist_ok=True)
             empty_df = pd.DataFrame(columns=columns)
             empty_df.to_csv(output[0], sep='\t', index=False)
-            rule_logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
+            logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
             shell(
@@ -286,8 +284,8 @@ rule cmh_gene_scores:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        setup_logging()
-        rule_logger = logging.getLogger(__name__)
+        # setup_logging()
+        # rule_logger = logging.getLogger(__name__)
 
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
@@ -312,7 +310,7 @@ rule cmh_gene_scores:
             empty_df.to_csv(output.combined, sep='\t', index=False)
             empty_df.to_csv(output.individual, sep='\t', index=False)
             empty_df.to_csv(output.overlapping, sep='\t', index=False)
-            rule_logger.info(f"No gene IDs found in {input.pvalue_table}. Created empty output files.")
+            logger.info(f"No gene IDs found in {input.pvalue_table}. Created empty output files.")
 
 
 rule detect_cmh_outlier_genes:
@@ -341,8 +339,8 @@ rule detect_cmh_outlier_genes:
     resources:
         time=config["resources"]["time"]["general"],
     run:
-        setup_logging()
-        rule_logger = logging.getLogger(__name__)
+        # setup_logging()
+        # rule_logger = logging.getLogger(__name__)
         
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
@@ -355,7 +353,7 @@ rule detect_cmh_outlier_genes:
             os.makedirs(os.path.dirname(output[0]), exist_ok=True)
             empty_df = pd.DataFrame(columns=columns)
             empty_df.to_csv(output[0], sep='\t', index=False)
-            rule_logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
+            logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
             shell(

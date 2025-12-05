@@ -251,7 +251,7 @@ def process_single_mag(
     --------
     dict : Results summary
     """
-    logger.info(f"Processing MAG: {mag_id} with {len(mag_sites)} sites")
+    # logger.info(f"Processing MAG: {mag_id} with {len(mag_sites)} sites")
 
     # Define dtypes for profile files
     profile_dtypes = {
@@ -464,9 +464,9 @@ def process_single_mag(
     terminal_counts = _split_count(processed_sites["terminal_nucleotide_mean_freq"])
     majority_counts = _split_count(processed_sites["terminal_nucleotide_majority_vote"])
 
-    logger.info(f"MAG {mag_id} complete.")
-    logger.info(f"  Mean frequency method: {terminal_counts}")
-    logger.info(f"  Majority voting method: {majority_counts}")
+    # logger.info(f"MAG {mag_id} complete.")
+    # logger.info(f"  Mean frequency method: {terminal_counts}")
+    # logger.info(f"  Majority voting method: {majority_counts}")
 
     return {
         "mag_id": mag_id,
@@ -491,7 +491,7 @@ def main():
 
     parser.add_argument(
         "--significant_sites",
-        help="Tab-separated file containing significant sites with columns 'mag_id', 'contig', 'position', 'gene_id', and either 'min_p_value' or 'min_q_value'",
+        help="Tab-separated file containing significant sites with columns 'mag_id', 'contig', 'position', 'gene_id', and either 'min_p_value' or 'q_value'",
         type=str,
         required=True,
         metavar="filepath",
@@ -663,7 +663,7 @@ def main():
                 significant_sites["test_type"] == args.test_type
             ].copy()
             logger.info(
-                f"Filtered by test_type '{args.test_type}': {len(significant_sites)}/{initial_count} sites remain"
+                f"Filtered by test_type '{args.test_type}': {len(significant_sites):,}/{initial_count:,} sites remain"
             )
             if significant_sites.empty:
                 raise ValueError(f"No sites found for test_type '{args.test_type}'")
@@ -777,7 +777,7 @@ def main():
         # Log overall statistics
         total_sites = sum(r["sites_processed"] for r in all_results)
         total_mags = len(all_results)
-        logger.info(f"Total: {total_sites} sites across {total_mags} MAG(s)")
+        logger.info(f"Total: {total_sites:,} site(s) across {total_mags} MAG(s)")
         logger.info(
             "Both mean frequency and majority voting methods completed successfully"
         )
