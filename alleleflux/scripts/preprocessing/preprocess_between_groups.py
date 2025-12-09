@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
+import json
 import logging
+import os
 import time
 from multiprocessing import Pool, cpu_count
 
@@ -245,6 +247,71 @@ def filter_sites_parallel(grouped, alpha, filter_type, cpus, data_type="longitud
     return sites_to_remove
 
 
+def calculate_position_eligibility(
+    df: pd.DataFrame, min_sample_num: int
+) -> tuple[int, int, int]:
+    """
+    Calculate position-level eligibility for unpaired and paired statistical tests.
+
+    For each position, determines if there are enough samples to run:
+    - Unpaired tests: Both groups need >= min_sample_num samples
+    - Paired tests: >= min_sample_num shared replicates between groups
+
+    Parameters:
+        df: DataFrame with columns 'contig', 'position', 'group', and optionally 'replicate'
+        min_sample_num: Minimum number of samples/replicates required per position
+
+    Returns:
+        tuple: (total_positions, positions_eligible_unpaired, positions_eligible_paired)
+    """
+    if df.empty or "group" not in df.columns:
+        return 0, 0, 0
+
+    groups = df["group"].unique()
+    if len(groups) != 2:
+        logger.warning(f"Expected 2 groups but found {len(groups)}: {groups}")
+        return 0, 0, 0
+
+    group_1, group_2 = groups
+
+    # Group by position and count samples per group
+    position_grouped = df.groupby(["contig", "position"], dropna=False)
+    total_positions = len(position_grouped)
+
+    positions_eligible_unpaired = 0
+    positions_eligible_paired = 0
+
+    for (contig, position), pos_df in position_grouped:
+        group1_df = pos_df[pos_df["group"] == group_1]
+        group2_df = pos_df[pos_df["group"] == group_2]
+
+        # Unpaired: both groups need enough samples
+        num_samples_g1 = len(group1_df)
+        num_samples_g2 = len(group2_df)
+        if num_samples_g1 >= min_sample_num and num_samples_g2 >= min_sample_num:
+            positions_eligible_unpaired += 1
+
+        # Paired: need enough shared replicates between groups
+        if "replicate" in pos_df.columns:
+            reps_g1 = set(group1_df["replicate"].unique())
+            reps_g2 = set(group2_df["replicate"].unique())
+            shared_reps = reps_g1 & reps_g2
+            if len(shared_reps) >= min_sample_num:
+                positions_eligible_paired += 1
+        else:
+            raise ValueError(
+                "Column 'replicate' is required for calculating paired test eligibility."
+            )
+
+    logger.info(
+        f"Position-level eligibility: {total_positions:,} total positions, "
+        f"{positions_eligible_unpaired:,} eligible for unpaired tests, "
+        f"{positions_eligible_paired:,} eligible for paired tests"
+    )
+
+    return total_positions, positions_eligible_unpaired, positions_eligible_paired
+
+
 def main():
     setup_logging()
 
@@ -291,6 +358,30 @@ def main():
         default=cpu_count(),
         help="Number of processors to use",
     )
+    parser.add_argument(
+        "--mag_id",
+        type=str,
+        required=True,
+        help="MAG ID being processed",
+    )
+    parser.add_argument(
+        "--min_positions",
+        type=int,
+        default=1,
+        help="Minimum number of eligible positions required after filtering for a MAG to be considered eligible",
+    )
+    parser.add_argument(
+        "--min_sample_num",
+        type=int,
+        default=4,
+        help="Minimum number of samples per group (unpaired) or shared replicates (paired) required per position",
+    )
+    parser.add_argument(
+        "--status_dir",
+        type=str,
+        default=None,
+        help="Directory to write preprocessing status file. If not provided, status file is written to the same directory as output.",
+    )
     args = parser.parse_args()
     start_time = time.time()
 
@@ -322,6 +413,52 @@ def main():
     logger.info(
         f"Retained {len(df_filtered):,} rows. Filtered data written to {args.output_fPath}"
     )
+
+    # Calculate position-level eligibility for each test type
+    input_rows = len(df)
+    output_rows = len(df_filtered)
+    mag_id = args.mag_id
+    min_sample_num = args.min_sample_num
+
+    total_positions, positions_eligible_unpaired, positions_eligible_paired = (
+        calculate_position_eligibility(df_filtered, min_sample_num)
+    )
+
+    # Determine eligibility based on position counts
+    eligible_unpaired = positions_eligible_unpaired >= args.min_positions
+    eligible_paired = positions_eligible_paired >= args.min_positions
+
+    status = {
+        "mag_id": mag_id,
+        "preprocess_type": "between_groups",
+        "input_rows": input_rows,
+        "output_rows": output_rows,
+        "min_positions": args.min_positions,
+        "min_sample_num": min_sample_num,
+        "total_positions": total_positions,
+        "positions_eligible_unpaired": positions_eligible_unpaired,
+        "positions_eligible_paired": positions_eligible_paired,
+        "eligible_unpaired": eligible_unpaired,
+        "eligible_paired": eligible_paired,
+        "filter_type": args.filter_type,
+        "p_value_threshold": args.p_value_threshold,
+        "data_type": args.data_type,
+    }
+
+    # Determine status file location
+    if args.status_dir:
+        os.makedirs(args.status_dir, exist_ok=True)
+        status_file = os.path.join(
+            args.status_dir, f"{mag_id}_preprocessing_status.json"
+        )
+    else:
+        output_dir = os.path.dirname(args.output_fPath)
+        status_file = os.path.join(output_dir, f"{mag_id}_preprocessing_status.json")
+
+    with open(status_file, "w") as f:
+        json.dump(status, f, indent=2)
+    logger.info(f"Preprocessing status written to {status_file}")
+
     end_time = time.time()
     logger.info(f"Total time taken: {end_time-start_time:.2f} seconds")
 

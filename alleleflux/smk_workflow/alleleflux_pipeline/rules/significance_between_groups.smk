@@ -9,7 +9,7 @@ def get_between_group_inputs(test_type=None):
         )
         return between_groups_input
 
-    preprocess_enabled = config["statistics"].get("preprocess_two_sample", False)
+    preprocess_enabled = config["statistics"].get("preprocess_between_groups", False)
     if preprocess_enabled:
         if DATA_TYPE == "single":
             between_groups_input = os.path.join(
@@ -83,10 +83,18 @@ rule preprocess_between_groups:
                 else "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
             ),
         ),
+        statusPath=os.path.join(
+            OUTDIR,
+            "significance_tests",
+            "preprocessed_between_groups_{timepoints}-{groups}",
+            "{mag}_preprocessing_status.json",
+        ),
     params:
         p_value_threshold=config["statistics"].get("p_value_threshold", 0.05),
         filter_type=config["statistics"].get("filter_type", "t-test"),
         data_type=DATA_TYPE,
+        min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
+        min_sample_num=config["quality_control"]["min_sample_num"],
     threads: config["resources"]["cpus"]["threads_per_job"]
     resources:
         time=config["resources"]["time"]["general"],
@@ -97,7 +105,10 @@ rule preprocess_between_groups:
             --cpus {threads} --p_value_threshold {params.p_value_threshold} \
             --output_fPath {output.outPath} \
             --filter_type {params.filter_type} \
-            --data_type {params.data_type}
+            --data_type {params.data_type} \
+            --mag_id {wildcards.mag} \
+            --min_positions {params.min_positions} \
+            --min_sample_num {params.min_sample_num}
             """
             
 rule two_sample_unpaired:
@@ -199,7 +210,7 @@ rule cmh_test:
                 "preprocessed_between_groups_{timepoints}-{groups}",
                 "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
             )
-            if config["statistics"].get("preprocess_two_sample", True) and DATA_TYPE == "longitudinal"
+            if config["statistics"].get("preprocess_between_groups", True) and DATA_TYPE == "longitudinal"
             else [],
     
     output:
@@ -218,7 +229,7 @@ rule cmh_test:
         # Conditionally include the preprocessed file argument.
         preprocessed_flag=(
             ("--preprocessed_df")
-            if config["statistics"].get("preprocess_two_sample", True) and DATA_TYPE == "longitudinal"
+            if config["statistics"].get("preprocess_between_groups", True) and DATA_TYPE == "longitudinal"
             else ""
         ),
     threads: config["resources"]["cpus"]["threads_per_job"]

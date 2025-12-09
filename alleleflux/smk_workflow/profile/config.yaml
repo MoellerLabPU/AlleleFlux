@@ -12,7 +12,7 @@ cluster-generic-submit-cmd:
     --parsable
 
 default-resources:
-  - mem_mb=40000
+  - mem_mb=100000
   - time="10:00:00"
 
 restart-times: 0

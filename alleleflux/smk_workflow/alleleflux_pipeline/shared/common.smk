@@ -193,6 +193,83 @@ def get_single_sample_entries(timepoints, groups):
     return sample_entries
 
 
+def get_mags_by_preprocessing_eligibility(timepoints, groups, test_type, group=None):
+    """
+    Read the preprocessing eligibility file for a given timepoint-group combination and 
+    return a list of MAG IDs that have sufficient positions after preprocessing.
+    
+    This function is used AFTER the preprocessing_eligibility checkpoint runs to determine
+    which MAGs should proceed to statistical tests.
+
+    Parameters:
+        timepoints (str): The timepoints label (e.g., "pre_post")
+        groups (str): The groups label (e.g., "fat_control")
+        test_type (str):
+            - "two_sample_unpaired": Return MAGs eligible for unpaired two-sample tests
+            - "two_sample_paired": Return MAGs eligible for paired two-sample tests
+            - "lmm": Return MAGs eligible for LMM analysis
+            - "cmh": Return MAGs eligible for CMH analysis
+            - "single_sample": Return MAGs eligible for single-sample test (requires group param)
+            - "lmm_across_time": Return MAGs eligible for LMM across-time (requires group param)
+            - "cmh_across_time": Return MAGs eligible for CMH across-time (requires group param)
+        group (str, optional): Required for single_sample, lmm_across_time, cmh_across_time tests
+    
+    Returns:
+        list: MAG IDs that are eligible for the specified test type
+    
+    Raises:
+        FileNotFoundError: If the preprocessing eligibility file does not exist
+    """
+    # Determine which eligibility file to read based on test type
+    # Map test types to the actual eligibility columns:
+    #   - two_sample_unpaired, lmm -> two_sample_unpaired_eligible
+    #   - two_sample_paired, cmh -> two_sample_paired_eligible
+    #   - single_sample, lmm_across_time, cmh_across_time -> single_sample_eligible_{group}
+    if test_type in ["two_sample_unpaired", "two_sample_paired", "lmm", "cmh"]:
+        eligibility_file = os.path.join(
+            OUTDIR, "preprocessing_eligibility", 
+            f"preprocessing_eligibility_between_groups_{timepoints}-{groups}.tsv"
+        )
+        # Map LMM to unpaired eligibility, CMH to paired eligibility
+        if test_type in ["two_sample_unpaired", "lmm"]:
+            eligible_column = "two_sample_unpaired_eligible"
+        else:  # two_sample_paired, cmh
+            eligible_column = "two_sample_paired_eligible"
+    elif test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
+        if group is None:
+            raise ValueError(f"group parameter is required for test_type '{test_type}'")
+        eligibility_file = os.path.join(
+            OUTDIR, "preprocessing_eligibility",
+            f"preprocessing_eligibility_within_groups_{timepoints}-{groups}.tsv"
+        )
+        # All within-group tests use single_sample_eligible
+        eligible_column = f"single_sample_eligible_{group}"
+    else:
+        raise ValueError(
+            f"Unknown test type: {test_type}. "
+            "Use 'two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh', "
+            "'single_sample', 'lmm_across_time', or 'cmh_across_time'."
+        )
+    
+    # Error if file doesn't exist - preprocessing must not have run
+    if not os.path.exists(eligibility_file):
+        raise FileNotFoundError(
+            f"Preprocessing eligibility file not found: {eligibility_file}. "
+            f"Ensure preprocessing is enabled and the preprocessing_eligibility checkpoint has run."
+        )
+    
+    df = pd.read_csv(eligibility_file, sep="\t")
+    
+    if eligible_column not in df.columns:
+        logging.warning(
+            f"Column '{eligible_column}' not found in {eligibility_file}. "
+            "Returning empty list."
+        )
+        return []
+    
+    return df.loc[df[eligible_column] == True, "MAG_ID"].tolist()
+
+
 def parse_metadata_for_timepoint_pairs(timepoints_label, groups_label):
     """
     Parse metadata to identify ancestral-derived sample pairs for dN/dS analysis.

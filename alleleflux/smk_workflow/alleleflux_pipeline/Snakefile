@@ -1,0 +1,97 @@
+# Unified Snakefile for AlleleFlux
+# Merges Step 1 and Step 2 using Checkpoints
+
+# 1. Global Configuration
+configfile: "config.yml"
+include: "shared/common.smk"
+
+# Get sample information from metadata file (Required for Step 1 rules)
+# to locate BAM files for profiling.
+samples, sample_to_bam_map = get_sample_info()
+
+# 2. Include All Rule Modules
+# Dynamic target generators (checkpoint-aware functions)
+include: "shared/dynamic_targets.smk"
+
+# Profiling & QC rules (formerly Step 1)
+include: "rules/profiling.smk"
+include: "rules/metadata.smk"
+include: "rules/quality_control.smk"
+include: "rules/eligibility.smk"
+
+# Analysis & Scoring rules (formerly Step 2)
+include: "rules/allele_analysis.smk"
+include: "rules/significance_within_group.smk"
+include: "rules/significance_between_groups.smk"
+include: "rules/preprocessing_eligibility.smk"
+include: "rules/scoring.smk"
+include: "rules/gene_analysis.smk"
+include: "rules/p_value_summary.smk"
+include: "rules/dnds_analysis.smk"
+
+# 3. Dynamic Output Function
+def get_final_pipeline_outputs(wildcards):
+    final_targets = []
+    
+    # Check preprocessing config once
+    preprocess_between = config["statistics"].get("preprocess_between_groups", False)
+    preprocess_within = config["statistics"].get("preprocess_within_groups", False)
+    
+    # Iterate over all configured analysis combinations
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            
+            # 1. Access the QC Eligibility Checkpoint
+            # This forces the upstream DAG (Step 1) to run for this combination
+            # and updates the DAG with the actual output file.
+            checkpoint_output = checkpoints.eligibility_table.get(
+                timepoints=tp, 
+                groups=gr
+            ).output.out_fPath
+            
+            # 2. Generate Allele Analysis Targets (depends only on QC eligibility)
+            # This can run in parallel with preprocessing steps
+            final_targets.extend(generate_allele_analysis_targets(tp, gr))
+            
+            # 3. Trigger preprocessing eligibility checkpoints (if enabled)
+            # These checkpoint calls ensure the preprocessing eligibility files exist
+            # before any downstream functions try to read them.
+            if preprocess_between:
+                checkpoints.preprocessing_eligibility_between_groups.get(
+                    timepoints=tp,
+                    groups=gr
+                )
+            if preprocess_within and DATA_TYPE == "longitudinal":
+                checkpoints.preprocessing_eligibility_within_groups.get(
+                    timepoints=tp,
+                    groups=gr
+                )
+            
+            # 4. Generate Downstream Targets (depend on preprocessing eligibility)
+            # Now that the checkpoints have been evaluated (and files potentially created/updated),
+            # we can generate the targets for Step 2.
+            
+            # Taxa Score Targets
+            if not config["analysis"].get("allele_analysis_only", False):
+                final_targets.extend(generate_taxa_scores_targets(tp, gr))
+            
+            # Outlier Targets
+            if not config["analysis"].get("allele_analysis_only", False):
+                final_targets.extend(generate_outlier_gene_targets(tp, gr))
+                
+            # P-value Summary Targets
+            if not config["analysis"].get("allele_analysis_only", False):
+                final_targets.extend(generate_p_value_summary_targets(tp, gr))
+                
+            # dN/dS Analysis Targets
+            if not config["analysis"].get("allele_analysis_only", False):
+                final_targets.extend(generate_dnds_analysis_targets(tp, gr))
+
+    return final_targets
+
+# 4. Rule All (The Driver)
+localrules: all
+
+rule all:
+    input:
+        get_final_pipeline_outputs

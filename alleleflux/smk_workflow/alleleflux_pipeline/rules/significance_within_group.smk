@@ -7,11 +7,17 @@ rule preprocess_within_groups:
             "{mag}_allele_frequency_changes_mean.tsv.gz",
         ),
     output:
-        os.path.join(
+        outPath=os.path.join(
             OUTDIR,
             "significance_tests",
             "preprocessed_within_groups_{timepoints}-{groups}",
             "{mag}_{group}_allele_frequency_changes_mean_zeros_processed.tsv.gz",
+        ),
+        statusPath=os.path.join(
+            OUTDIR,
+            "significance_tests",
+            "preprocessed_within_groups_{timepoints}-{groups}",
+            "{mag}_{group}_preprocessing_status.json",
         ),
     params:
         max_zero_flag=(
@@ -22,6 +28,8 @@ rule preprocess_within_groups:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "preprocessed_within_groups_{timepoints}-{groups}"
         ),
+        min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
+        min_sample_num=config["quality_control"]["min_sample_num"],
     resources:
         time=config["resources"]["time"]["significance_test"],
     shell:
@@ -31,6 +39,8 @@ rule preprocess_within_groups:
             --mag_id {wildcards.mag} \
             --group {wildcards.group} \
             --output_dir {params.outDir} \
+            --min_positions {params.min_positions} \
+            --min_sample_num {params.min_sample_num} \
             {params.max_zero_flag}
             """
 
@@ -43,7 +53,7 @@ rule single_sample:
                 "preprocessed_within_groups_{timepoints}-{groups}",
                 "{mag}_{group}_allele_frequency_changes_mean_zeros_processed.tsv.gz",
             )
-            if config["statistics"].get("preprocess_two_sample", False)
+            if config["statistics"].get("preprocess_within_groups", False)
             else os.path.join(
                 OUTDIR,
                 "allele_analysis",
@@ -102,7 +112,7 @@ rule lmm_analysis_across_time:
                 "preprocessed_within_groups_{timepoints}-{groups}",
                 "{mag}_{group}_allele_frequency_changes_mean_zeros_processed.tsv.gz"
             )
-            if config["statistics"].get("preprocess_two_sample", False)
+            if config["statistics"].get("preprocess_within_groups", False)
             else []
         ),
     output:
@@ -124,7 +134,7 @@ rule lmm_analysis_across_time:
         ),
         preprocessed_flag=(
             "--preprocessed_df"
-            if config["statistics"].get("preprocess_two_sample", False)
+            if config["statistics"].get("preprocess_within_groups", False)
             else ""
         )
     threads: config["resources"]["cpus"]["threads_per_job"]
@@ -161,7 +171,7 @@ rule cmh_test_across_time:
                 "preprocessed_within_groups_{timepoints}-{groups}",
                 "{mag}_{group}_allele_frequency_changes_mean_zeros_processed.tsv.gz"
             )
-            if config["statistics"].get("preprocess_two_sample", False)
+            if config["statistics"].get("preprocess_within_groups", False)
             else []
         )
     output:
@@ -178,7 +188,7 @@ rule cmh_test_across_time:
         ),
         preprocessed_flag=(
             "--preprocessed_df"
-            if config["statistics"].get("preprocess_two_sample", False)
+            if config["statistics"].get("preprocess_within_groups", False)
             else ""
         )
     threads: config["resources"]["cpus"]["threads_per_job"]

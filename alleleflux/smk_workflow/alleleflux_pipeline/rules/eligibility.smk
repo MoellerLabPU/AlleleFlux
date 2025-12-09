@@ -3,7 +3,7 @@ Step 1 Eligibility Table Rules
 Rules for generating eligibility tables for downstream analysis
 """
 
-rule eligibility_table:
+checkpoint eligibility_table:
     input:
         qc_dir=os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}"),
     output:
