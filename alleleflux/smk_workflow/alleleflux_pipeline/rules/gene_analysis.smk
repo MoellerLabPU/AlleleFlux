@@ -72,6 +72,7 @@ rule gene_scores:
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
     resources:
+        mem_mb=get_mem_mb("gene_scores"),
         time=get_time("gene_scores"),
     run:
         # Ensure logging configured
@@ -176,6 +177,7 @@ rule detect_outlier_genes:
             "{mag}_{test_type}{group_str}_outlier_genes.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("detect_outlier_genes"),
         time=get_time("detect_outlier_genes"),
     run:
         # setup_logging()
@@ -293,6 +295,7 @@ rule cmh_gene_scores:
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
     resources:
+        mem_mb=get_mem_mb("cmh_gene_scores"),
         time=get_time("cmh_gene_scores"),
     run:
         # setup_logging()
@@ -348,6 +351,7 @@ rule detect_cmh_outlier_genes:
             "{mag}_cmh_{focus_tp}_outlier_genes.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("detect_cmh_outlier_genes"),
         time=get_time("detect_cmh_outlier_genes"),
     run:
         # setup_logging()

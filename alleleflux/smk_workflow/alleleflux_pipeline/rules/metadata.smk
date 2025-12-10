@@ -25,6 +25,7 @@ rule generate_metadata:
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
     resources:
+        mem_mb=get_mem_mb("generate_metadata"),
         time=get_time("generate_metadata"),
     shell:
         """

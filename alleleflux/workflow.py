@@ -294,8 +294,8 @@ def build_snakemake_command(
         f"--snakefile {snakefile}",
         f"--configfile {config_path}",
         f"--directory {working_dir}",
-        "--rerun-incomplete",
-        "--show-failed-logs",
+        # "--rerun-incomplete",
+        # "--show-failed-logs",
     ]
 
     # Profile takes precedence - let profile handle all resource scheduling

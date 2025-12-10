@@ -35,6 +35,7 @@ rule significance_score_per_MAG_standard:
         group_by_column="MAG_ID",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
     resources:
+        mem_mb=get_mem_mb("significance_score_per_MAG_standard"),
         time=get_time("significance_score_per_MAG_standard"),
     shell:
         """
@@ -74,6 +75,7 @@ rule significance_score_per_MAG_cmh:
         group_by_column="MAG_ID",
         data_type=DATA_TYPE,
     resources:
+        mem_mb=get_mem_mb("significance_score_per_MAG_cmh"),
         time=get_time("significance_score_per_MAG_cmh"),
     run:
         if params.data_type == "single":
@@ -139,6 +141,7 @@ rule combine_MAG_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("combine_MAG_scores"),
         time=get_time("combine_MAG_scores"),
     run:
         # setup_logging()
@@ -186,6 +189,7 @@ rule combine_MAG_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-MAGs-{focus_tp}.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("combine_MAG_scores_cmh"),
         time=get_time("combine_MAG_scores_cmh"),
     run:
         # setup_logging()
@@ -234,6 +238,7 @@ rule taxa_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("taxa_scores"),
         time=get_time("taxa_scores"),
     shell:
         """
@@ -264,6 +269,7 @@ rule taxa_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-{taxon}-{focus_tp}.tsv",
         ),
     resources:
+        mem_mb=get_mem_mb("taxa_scores_cmh"),
         time=get_time("taxa_scores_cmh"),
     shell:
         """

@@ -37,7 +37,8 @@ rule preprocess_within_groups:
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
         min_sample_num=config["quality_control"]["min_sample_num"],
     resources:
-        time=get_time("statistical_tests"),
+        mem_mb=get_mem_mb("preprocess_within_groups"),
+        time=get_time("preprocess_within_groups"),
     shell:
         """
         alleleflux-preprocess-within-group \
@@ -76,6 +77,7 @@ rule single_sample:
         ),
     threads: get_threads("statistical_tests")
     resources:
+        mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
     shell:
         """

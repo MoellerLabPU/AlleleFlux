@@ -24,6 +24,40 @@ from .workflow import execute_workflow, get_snakefile, get_template_path
 __version__ = version("AlleleFlux")
 
 # =============================================================================
+# Banner Display
+# =============================================================================
+
+# ASCII art banner for AlleleFlux
+BANNER = r"""
+    ___    ____     __     ____                
+   /   |  / / /__  / /__  / __/ / /  ___  __
+  / /| | / / / _ \/ / _ \/ /_  / /  / / / / \/ /
+ / ___ |/ / /  __/ /  __/ __/ / /__/ /_/ />  < 
+/_/  |_/_/_/\___/_/\___/_/   /____/\__,_/_/\_\
+"""
+
+
+def print_banner():
+    """Print the AlleleFlux banner with colors."""
+    # Print banner in cyan
+    click.echo(click.style(BANNER, fg="cyan", bold=True))
+    # Print version line
+    version_line = f"  Version {__version__}  |  Evolution Detection in Metagenomes"
+    click.echo(click.style(version_line, fg="bright_blue"))
+    click.echo(click.style("─" * 60, fg="cyan"))
+    click.echo()
+
+
+class BannerGroup(click.Group):
+    """Custom Click Group that shows banner before help."""
+
+    def format_help(self, ctx, formatter):
+        """Print banner before showing help."""
+        print_banner()
+        super().format_help(ctx, formatter)
+
+
+# =============================================================================
 # Helper Functions for Interactive Prompts
 # =============================================================================
 
@@ -320,9 +354,10 @@ def prompt_time(
     return result.strip()
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(cls=BannerGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, "-v", "--version")
-def cli():
+@click.pass_context
+def cli(ctx):
     """
     AlleleFlux: Identify genomic targets of natural selection in bacterial communities.
 
@@ -337,7 +372,9 @@ def cli():
 
     For more information, see: https://github.com/MoellerLabPU/AlleleFlux
     """
-    pass
+    # Print banner for actual command invocations (help is handled by BannerGroup)
+    if ctx.invoked_subcommand is not None:
+        print_banner()
 
 
 # =============================================================================
@@ -412,9 +449,15 @@ def cli():
     default=False,
     help="Print the snakemake command before execution.",
 )
-@click.pass_context
+@click.option(
+    "--snakemake-args",
+    "snakemake_args_str",
+    type=str,
+    default=None,
+    help="Additional Snakemake arguments (quoted string, e.g., '--forceall --reason').",
+)
+@click.argument("extra_snakemake_args", nargs=-1, type=click.UNPROCESSED)
 def run_workflow(
-    ctx,
     config_file,
     working_dir,
     jobs,
@@ -424,6 +467,8 @@ def run_workflow(
     dry_run,
     unlock,
     verbose,
+    snakemake_args_str,
+    extra_snakemake_args,
 ):
     """
     Run the AlleleFlux workflow.
@@ -442,6 +487,18 @@ def run_workflow(
     are ignored and the profile handles resource scheduling.
 
     \b
+    Passing Additional Snakemake Arguments:
+        Two equivalent methods are available:
+
+        Method 1 - Using '--' (no quotes needed):\n
+            alleleflux run --config config.yml -- --forceall --reason
+
+        Method 2 - Using '--snakemake-args' (quotes required):\n
+            alleleflux run --config config.yml --snakemake-args '--forceall --reason'
+
+        Common Snakemake options: --forceall, --forcerun, --reason, --notemp, --keep-going
+
+    \b
     Examples:
         # Run with a config file (uses all CPU cores by default)\n
         alleleflux run --config config.yml
@@ -455,9 +512,20 @@ def run_workflow(
         # Run with SLURM profile for cluster execution\n
         alleleflux run --config config.yml --profile slurm_profile/
 
-        # Pass additional snakemake arguments\n
+        # Force rerun all jobs\n
         alleleflux run --config config.yml -- --forceall --reason
     """
+    import shlex
+
+    # Combine snakemake args from both methods
+    combined_args = []
+    if snakemake_args_str:
+        combined_args.extend(shlex.split(snakemake_args_str))
+    if extra_snakemake_args:
+        combined_args.extend(list(extra_snakemake_args))
+
+    extra_args = combined_args if combined_args else None
+
     exit_code = execute_workflow(
         config_file=config_file,
         working_dir=working_dir,
@@ -468,7 +536,7 @@ def run_workflow(
         dry_run=dry_run,
         unlock=unlock,
         verbose=verbose,
-        extra_args=ctx.args if ctx.args else None,
+        extra_args=extra_args,
         version=__version__,
     )
     sys.exit(exit_code)
@@ -510,6 +578,111 @@ def show_info():
     except (subprocess.CalledProcessError, FileNotFoundError):
         click.echo("Snakemake:      NOT FOUND (please install snakemake)")
 
+    click.echo("")
+
+
+# =============================================================================
+# TOOLS Command
+# =============================================================================
+
+
+# Define all available tools organized by category
+ALLELEFLUX_TOOLS = {
+    "Analysis": [
+        ("alleleflux-profile", "Profile MAGs from BAM files"),
+        ("alleleflux-allele-freq", "Calculate allele frequencies"),
+        ("alleleflux-scores", "Calculate significance scores"),
+        ("alleleflux-taxa-scores", "Aggregate scores by taxonomic level"),
+        ("alleleflux-gene-scores", "Calculate gene-level scores"),
+        ("alleleflux-outliers", "Detect outlier genes"),
+        ("alleleflux-cmh-scores", "Calculate CMH test scores"),
+    ],
+    "Preprocessing": [
+        ("alleleflux-metadata", "Generate MAG metadata files"),
+        ("alleleflux-qc", "Quality control for MAG profiles"),
+        ("alleleflux-eligibility", "Create eligibility tables"),
+        ("alleleflux-preprocess-between-groups", "Preprocess for between-group tests"),
+        ("alleleflux-preprocess-within-group", "Preprocess for within-group tests"),
+        ("alleleflux-preprocessing-eligibility", "Preprocessing eligibility check"),
+        ("alleleflux-p-value-summary", "Summarize p-values"),
+    ],
+    "Statistics": [
+        ("alleleflux-lmm", "Linear Mixed Models analysis"),
+        ("alleleflux-cmh", "Cochran-Mantel-Haenszel test"),
+        ("alleleflux-single-sample", "Single-sample statistical test"),
+        ("alleleflux-two-sample-paired", "Two-sample paired test"),
+        ("alleleflux-two-sample-unpaired", "Two-sample unpaired test"),
+    ],
+    "Evolution": [
+        ("alleleflux-dnds-from-timepoints", "Calculate dN/dS from timepoints"),
+    ],
+    "Accessory": [
+        ("alleleflux-create-mag-mapping", "Create MAG-to-contig mapping file"),
+        ("alleleflux-add-bam-path", "Add BAM paths to metadata"),
+        ("alleleflux-coverage-allele-stats", "Calculate coverage and allele stats"),
+        ("alleleflux-list-mags", "List MAGs in a directory"),
+        ("alleleflux-positions-qc", "QC for genomic positions"),
+    ],
+    "Visualization": [
+        ("alleleflux-prepare-metadata", "Prepare metadata for visualization"),
+        ("alleleflux-terminal-nucleotide", "Terminal nucleotide analysis"),
+        ("alleleflux-track-alleles", "Track allele frequencies"),
+        ("alleleflux-plot-trajectories", "Plot allele trajectories"),
+    ],
+}
+
+
+@cli.command("tools")
+@click.option(
+    "--category",
+    "-c",
+    type=click.Choice(list(ALLELEFLUX_TOOLS.keys()), case_sensitive=False),
+    default=None,
+    help="Show tools from a specific category only.",
+)
+def list_tools(category):
+    """
+    List all available AlleleFlux command-line tools.
+
+    These are standalone commands that can be used independently
+    or are called by the main workflow. Each tool has its own --help.
+
+    \b
+    Examples:
+        # List all tools\n
+        alleleflux tools
+
+        # List only analysis tools\n
+        alleleflux tools --category Analysis
+
+        # Get help for a specific tool\n
+        alleleflux-profile --help
+    """
+    click.echo("")
+    click.echo(click.style("AlleleFlux Command-Line Tools", fg="cyan", bold=True))
+    click.echo(click.style("=" * 50, fg="cyan"))
+    click.echo("")
+
+    categories = [category] if category else ALLELEFLUX_TOOLS.keys()
+
+    for cat in categories:
+        tools = ALLELEFLUX_TOOLS.get(cat, [])
+        if not tools:
+            continue
+
+        click.echo(click.style(f"  {cat}", fg="bright_blue", bold=True))
+        click.echo(click.style("  " + "-" * (len(cat) + 2), fg="bright_blue"))
+
+        for tool_name, description in tools:
+            click.echo(f"    {click.style(tool_name, fg='green'):40} {description}")
+
+        click.echo("")
+
+    click.echo(
+        click.style("Tip:", fg="yellow")
+        + " Run any tool with --help for usage details."
+    )
+    click.echo(f"     Example: {click.style('alleleflux-profile --help', fg='green')}")
     click.echo("")
 
 
