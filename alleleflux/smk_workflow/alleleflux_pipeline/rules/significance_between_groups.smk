@@ -1,88 +1,45 @@
-def get_between_group_inputs(test_type=None):
-    if test_type == "cmh" and DATA_TYPE == "longitudinal":
-        # For CMH test, use the preprocessed file
-        between_groups_input = os.path.join(
-            OUTDIR,
-            "allele_analysis",
-            "allele_analysis_{timepoints}-{groups}",
-            "{mag}_allele_frequency_longitudinal.tsv.gz"
-        )
-        return between_groups_input
+"""Between-groups significance testing rules.
 
+This module contains rules for statistical tests comparing allele frequencies
+between experimental groups:
+- Two-sample unpaired tests (t-test, Mann-Whitney U)
+- Two-sample paired tests (paired t-test, Wilcoxon signed-rank)
+- Linear Mixed Models (LMM) for handling repeated measures
+- Cochran-Mantel-Haenszel (CMH) tests for stratified analysis
+- Preprocessing rules for filtering positions before testing
+"""
+
+
+def get_between_group_inputs(test_type=None):
+    """Get the appropriate input file path for between-group statistical tests.
+    
+    Uses helper functions from common.smk for centralized path construction.
+    
+    Parameters:
+        test_type: Optional test type. If "cmh" with longitudinal data,
+                   returns the full longitudinal file instead of mean changes.
+    
+    Returns:
+        str: Path to the appropriate input file with Snakemake wildcards.
+    """
+    # CMH test needs full longitudinal data (not mean changes)
+    if test_type == "cmh" and DATA_TYPE == "longitudinal":
+        # For CMH don't use the preprocessed file
+        return get_longitudinal_input_path()
+    
+    # Check if preprocessing is enabled
     preprocess_enabled = config["statistics"].get("preprocess_between_groups", False)
+    
     if preprocess_enabled:
-        if DATA_TYPE == "single":
-            between_groups_input = os.path.join(
-                OUTDIR,
-                "significance_tests",
-                "preprocessed_between_groups_{timepoints}-{groups}",
-                "{mag}_allele_frequency_preprocessed.tsv.gz",
-            )
-        elif DATA_TYPE == "longitudinal":
-            between_groups_input = os.path.join(
-                OUTDIR,
-                "significance_tests",
-                "preprocessed_between_groups_{timepoints}-{groups}",
-                "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz",
-            )
+        return get_preprocessed_between_groups_path()
     else:
-        # Input file depends on data_type and filtering options
-        if DATA_TYPE == "single":
-            if not config["quality_control"].get("disable_zero_diff_filtering", False):
-                # When single data type and filtering is not disabled
-                between_groups_input = os.path.join(
-                    OUTDIR,
-                    "allele_analysis",
-                    "allele_analysis_{timepoints}-{groups}",
-                    "{mag}_allele_frequency_no_constant.tsv.gz",
-                )
-            else:
-                # When single data type and filtering is disabled
-                between_groups_input = os.path.join(
-                    OUTDIR,
-                    "allele_analysis",
-                    "allele_analysis_{timepoints}-{groups}",
-                    "{mag}_allele_frequency_single.tsv.gz",
-                )
-        elif DATA_TYPE == "longitudinal":
-            between_groups_input = os.path.join(
-                OUTDIR,
-                "allele_analysis",
-                "allele_analysis_{timepoints}-{groups}",
-                "{mag}_allele_frequency_changes_mean.tsv.gz",
-            )
-    return between_groups_input
+        return get_allele_analysis_input_path()
 
 rule preprocess_between_groups:
     input:
-        os.path.join(
-            OUTDIR,
-            "allele_analysis",
-            "allele_analysis_{timepoints}-{groups}",
-            (
-                "{mag}_allele_frequency_no_constant.tsv.gz"
-                if (
-                    DATA_TYPE == "single"
-                    and not config["quality_control"].get("disable_zero_diff_filtering", False)
-                )
-                else (
-                    "{mag}_allele_frequency_single.tsv.gz"
-                    if DATA_TYPE == "single"
-                    else "{mag}_allele_frequency_changes_mean.tsv.gz"
-                )
-            ),
-        ),
+        get_allele_analysis_input_path(),
     output:
-        outPath=os.path.join(
-            OUTDIR,
-            "significance_tests",
-            "preprocessed_between_groups_{timepoints}-{groups}",
-            (
-                "{mag}_allele_frequency_preprocessed.tsv.gz"
-                if DATA_TYPE == "single"
-                else "{mag}_allele_frequency_changes_mean_preprocessed.tsv.gz"
-            ),
-        ),
+        outPath=get_preprocessed_between_groups_path(),
         statusPath=os.path.join(
             OUTDIR,
             "significance_tests",

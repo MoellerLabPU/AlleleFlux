@@ -1,6 +1,12 @@
 """
-Step 1 Profiling Rules
-Rules for sample profiling based on BAM files
+Sample profiling rules.
+
+This module contains rules for profiling BAM files to extract allele frequency
+information at each genomic position. The profiling step is the foundation of
+the AlleleFlux pipeline.
+
+Reference files (FASTA, Prodigal, MAG mapping) are wrapped with ancient() to
+prevent unnecessary re-runs when these stable files have updated timestamps.
 """
 
 rule profile:

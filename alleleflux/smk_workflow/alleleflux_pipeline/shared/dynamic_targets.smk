@@ -1,4 +1,20 @@
 
+"""Dynamic target generation functions for Snakemake.
+
+This module provides functions that dynamically generate output targets based on
+MAG eligibility and configuration options. These functions are used in the main
+Snakefile to determine which files should be produced for each timepoint-group
+combination.
+
+Key functions:
+- get_eligible_mags(): Unified helper for getting eligible MAGs for any test type
+- generate_*_targets(): Functions that return lists of output file paths
+
+These functions are checkpoint-aware and are called after the QC eligibility
+checkpoint has been evaluated to ensure the DAG is properly updated.
+"""
+
+
 def get_enabled_test_types():
     enabled = []
     if config["analysis"].get("use_significance_tests", True):
@@ -101,49 +117,27 @@ def generate_p_value_summary_targets(tp, gr):
 def generate_allele_analysis_targets(tp, gr):
     """
     Dynamically generate targets for allele analysis based on eligible MAGs.
+    
+    Uses get_allele_analysis_input_path() helper for centralized path construction.
     """
     targets = []
     # Get eligible MAGs for this timepoint-group combination
     eligible_mags = get_mags_by_eligibility(tp, gr, eligibility_type="all")
-    # Add targets for each eligible MAG
+    
+    # Add targets for each eligible MAG using the centralized path helper
     for mag in eligible_mags:
-        # Different output files based on data_type and filtering options
-        if DATA_TYPE == "single":
-            if not config["quality_control"].get("disable_zero_diff_filtering", False):
-                # When single data type and filtering is not disabled
-                targets.append(
-                    os.path.join(
-                        OUTDIR,
-                        "allele_analysis",
-                        f"allele_analysis_{tp}-{gr}",
-                        f"{mag}_allele_frequency_no_constant.tsv.gz",
-                    )
-                )
-            else:
-                # When single data type and filtering is disabled
-                targets.append(
-                    os.path.join(
-                        OUTDIR,
-                        "allele_analysis",
-                        f"allele_analysis_{tp}-{gr}",
-                        f"{mag}_allele_frequency_single.tsv.gz",
-                    )
-                )
-        else:  # longitudinal
-            targets.append(
-                os.path.join(
-                    OUTDIR,
-                    "allele_analysis",
-                    f"allele_analysis_{tp}-{gr}",
-                    f"{mag}_allele_frequency_changes_mean.tsv.gz",
-                )
+        targets.append(
+            get_allele_analysis_input_path(
+                mag_wildcard=mag, tp_wildcard=tp, gr_wildcard=gr
             )
+        )
     return targets
 
 
 def generate_taxa_scores_targets(tp, gr):
     targets = []
-    tax_levels = ["phylum", "class", "order", "family", "genus", "species"]
+    # Use centralized taxonomy levels constant from common.smk
+    tax_levels = TAXONOMY_LEVELS
     
     # For two-sample tests, group_str is empty.
     if config["analysis"].get("use_significance_tests", True):

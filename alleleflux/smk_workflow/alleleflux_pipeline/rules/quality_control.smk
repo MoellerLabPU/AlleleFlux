@@ -1,6 +1,9 @@
 """
-Step 1 Quality Control Rules
-Rules for quality control of profiled samples
+Quality control rules.
+
+This module performs QC on profiled samples, calculating coverage breadth and
+depth metrics for each MAG. QC results determine sample eligibility for
+downstream statistical analysis based on configurable thresholds.
 """
 
 rule qc:

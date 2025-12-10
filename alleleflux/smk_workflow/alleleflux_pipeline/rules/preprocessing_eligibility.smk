@@ -1,9 +1,14 @@
-"""
-Preprocessing Eligibility Checkpoint Rules
+"""Preprocessing eligibility checkpoint rules.
 
 These checkpoints aggregate status files from preprocessing steps and generate
-eligibility tables that determine which MAGs proceed to downstream statistical tests.
+eligibility tables that determine which MAGs proceed to downstream statistical
+tests based on whether they have sufficient positions remaining after filtering.
+
+Two checkpoints are provided:
+- preprocessing_eligibility_between_groups: For tests comparing groups
+- preprocessing_eligibility_within_groups: For tests within individual groups
 """
+
 
 def get_between_groups_status_files(wildcards):
     """

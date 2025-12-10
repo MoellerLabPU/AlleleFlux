@@ -1,3 +1,11 @@
+"""P-value summary aggregation rules.
+
+This module aggregates p-values from significance tests across all MAGs and
+positions, applying FDR correction (if configured) and generating summary
+tables for downstream analysis including dN/dS calculations.
+"""
+
+
 def get_all_significance_test_results_for_summary(wildcards):
     """
     Get significance results for a specific test type, used as input for p_value_summary.

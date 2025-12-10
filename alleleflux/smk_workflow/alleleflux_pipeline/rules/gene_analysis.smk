@@ -1,3 +1,14 @@
+"""Gene-level scoring and outlier detection rules.
+
+This module contains rules for:
+- Calculating gene-level significance scores from p-value tables
+- Detecting outlier genes based on MAG-level and gene-level score comparisons
+- Handling CMH-specific gene score calculations
+
+Empty output files are created when no gene IDs are present in input data
+to maintain workflow continuity.
+"""
+
 import os
 # import logging
 import pandas as pd

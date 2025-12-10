@@ -1,6 +1,10 @@
 """
-Step 1 Eligibility Table Rules
-Rules for generating eligibility tables for downstream analysis
+QC-based eligibility table checkpoint.
+
+This checkpoint generates eligibility tables based on QC results, determining
+which MAGs have sufficient sample coverage to proceed to downstream analysis.
+The checkpoint mechanism allows Snakemake to dynamically update the DAG based
+on which MAGs pass QC thresholds.
 """
 
 checkpoint eligibility_table:

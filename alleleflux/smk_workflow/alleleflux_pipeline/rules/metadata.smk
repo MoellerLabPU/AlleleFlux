@@ -1,6 +1,9 @@
 """
-Step 1 Metadata Generation Rules
-Rules for generating metadata from profiled samples
+Sample metadata generation rules.
+
+This module generates per-MAG metadata files that organize sample profile paths
+by experimental group and timepoint. These metadata files are used as input for
+QC analysis and downstream statistical tests.
 """
 
 rule generate_metadata:

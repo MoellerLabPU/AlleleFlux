@@ -1,8 +1,17 @@
+"""Common Snakemake utilities and configuration.
+
+This module provides shared configuration, helper functions, and wildcard constraints
+for the AlleleFlux Snakemake pipeline. It handles:
+- Global configuration parsing (data type, output directory, timepoints, groups)
+- MAG eligibility functions for QC and preprocessing stages
+- Sample metadata parsing for longitudinal analysis
+- Wildcard constraints for consistent rule matching
+"""
+
 import os
 import pandas as pd
 from glob import glob
 from collections import defaultdict
-from multiprocessing import Pool
 import logging
 
 # Setup module-level logger for Snakemake shared utilities (no configuration here)
@@ -11,6 +20,22 @@ import logging
 # Load the configuration file
 # configfile: os.path.join(workflow.basedir, "config.yml")
 
+
+# =============================================================================
+# Global Constants
+# =============================================================================
+
+# Taxonomy levels for aggregation (order matters - from broad to specific)
+TAXONOMY_LEVELS = ["phylum", "class", "order", "family", "genus", "species"]
+
+# Statistical test types - centralized for consistency
+BETWEEN_GROUP_TEST_TYPES = ["two_sample_unpaired", "two_sample_paired", "lmm", "cmh"]
+WITHIN_GROUP_TEST_TYPES = ["single_sample", "lmm_across_time", "cmh_across_time"]
+ALL_TEST_TYPES = BETWEEN_GROUP_TEST_TYPES + WITHIN_GROUP_TEST_TYPES
+
+# =============================================================================
+# Global Configuration
+# =============================================================================
 
 # Define the global data_type variable to be used across all Snakemake files
 DATA_TYPE = config["analysis"]["data_type"]
@@ -68,16 +93,21 @@ group_values = sorted({item for gr in config["analysis"]["groups_combinations"] 
 # Build the regex: optionally an underscore and one of the allowed group values.
 group_str_regex = "(_({}))?".format("|".join(group_values))
 
+# =============================================================================
+# Wildcard Constraints
+# =============================================================================
+
 wildcard_constraints:
     groups=f"({'|'.join(groups_labels)})",
     timepoints=f"({'|'.join(timepoints_labels)})",
-    taxon="(domain|phylum|class|order|family|genus|species)",
-    test_type="(two_sample_unpaired|two_sample_paired|single_sample|lmm|lmm_across_time|cmh|cmh_across_time|)",
+    taxon="(" + "|".join(TAXONOMY_LEVELS) + "|domain)",
+    test_type="(" + "|".join(ALL_TEST_TYPES) + "|)",
     sub_test="(MannWhitney|Wilcoxon|tTest|LMM|CMH|)",
     group_str=group_str_regex,
-    # timepoint_str=timepoint_str_regex,
     # Constraint for focus timepoints - all possible values from the timepoint pairs
     focus_tp="|".join(set([tp for tp_pair in valid_focus_timepoints.values() for tp in tp_pair if tp])),
+    # Subject ID constraint - alphanumeric with optional underscores/hyphens
+    subject_id="[a-zA-Z0-9_-]+",
     
 # Function to get sample information from metadata file
 def get_sample_info():
@@ -129,10 +159,23 @@ def get_mags_by_eligibility(timepoints, groups, eligibility_type):
             - "two_sample_paired": only return MAG IDs where paired_test_eligible is True.
             - "lmm": only return MAG IDs where unpaired_test_eligible is True.
             - "all": return MAG IDs that are eligible for any of the tests.
+    
+    Returns:
+        list: MAG IDs that are eligible for the specified test type
+    
+    Raises:
+        FileNotFoundError: If the eligibility file does not exist
     """
     eligibility_file = os.path.join(
         OUTDIR, f"eligibility_table_{timepoints}-{groups}.tsv"
     )
+    
+    if not os.path.exists(eligibility_file):
+        raise FileNotFoundError(
+            f"Eligibility file not found: {eligibility_file}. "
+            f"Ensure the eligibility_table checkpoint has run for {timepoints}-{groups}."
+        )
+    
     df = pd.read_csv(eligibility_file, sep="\t")
 
     if eligibility_type == "two_sample_unpaired" or eligibility_type == "lmm":
@@ -347,3 +390,107 @@ def parse_metadata_for_timepoint_pairs(timepoints_label, groups_label):
             )
     
     return sample_pairs
+
+
+# =============================================================================
+# Input Path Helper Functions
+# =============================================================================
+# These helpers centralize the logic for determining input file paths based on
+# data type and configuration options, reducing duplication across rule files.
+
+def get_allele_analysis_input_path(mag_wildcard="{mag}", tp_wildcard="{timepoints}", gr_wildcard="{groups}"):
+    """
+    Get the appropriate allele analysis input file path based on data type and config.
+    
+    This helper centralizes the logic for selecting the correct allele frequency file:
+    - For single data type: uses filtered or unfiltered single file
+    - For longitudinal: uses mean allele frequency changes
+    
+    Parameters:
+        mag_wildcard: MAG ID wildcard string (default: "{mag}")
+        tp_wildcard: Timepoints wildcard string (default: "{timepoints}")
+        gr_wildcard: Groups wildcard string (default: "{groups}")
+    
+    Returns:
+        str: Path to the appropriate input file
+    """
+    base_dir = os.path.join(
+        OUTDIR,
+        "allele_analysis",
+        f"allele_analysis_{tp_wildcard}-{gr_wildcard}"
+    )
+    
+    if DATA_TYPE == "single":
+        if not config["quality_control"].get("disable_zero_diff_filtering", False):
+            return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_no_constant.tsv.gz")
+        else:
+            return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_single.tsv.gz")
+    else:  # longitudinal
+        return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_changes_mean.tsv.gz")
+
+
+def get_longitudinal_input_path(mag_wildcard="{mag}", tp_wildcard="{timepoints}", gr_wildcard="{groups}"):
+    """
+    Get the longitudinal allele frequency file path (full longitudinal data, not mean).
+    
+    Parameters:
+        mag_wildcard: MAG ID wildcard string (default: "{mag}")
+        tp_wildcard: Timepoints wildcard string (default: "{timepoints}")
+        gr_wildcard: Groups wildcard string (default: "{groups}")
+    
+    Returns:
+        str: Path to the longitudinal input file
+    """
+    return os.path.join(
+        OUTDIR,
+        "allele_analysis",
+        f"allele_analysis_{tp_wildcard}-{gr_wildcard}",
+        f"{mag_wildcard}_allele_frequency_longitudinal.tsv.gz"
+    )
+
+
+def get_preprocessed_between_groups_path(mag_wildcard="{mag}", tp_wildcard="{timepoints}", gr_wildcard="{groups}"):
+    """
+    Get the preprocessed between-groups file path based on data type.
+    
+    Parameters:
+        mag_wildcard: MAG ID wildcard string (default: "{mag}")
+        tp_wildcard: Timepoints wildcard string (default: "{timepoints}")
+        gr_wildcard: Groups wildcard string (default: "{groups}")
+    
+    Returns:
+        str: Path to the preprocessed file
+    """
+    base_dir = os.path.join(
+        OUTDIR,
+        "significance_tests",
+        f"preprocessed_between_groups_{tp_wildcard}-{gr_wildcard}"
+    )
+    
+    if DATA_TYPE == "single":
+        return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_preprocessed.tsv.gz")
+    else:  # longitudinal
+        return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_changes_mean_preprocessed.tsv.gz")
+
+
+def get_preprocessed_within_groups_path(mag_wildcard="{mag}", group_wildcard="{group}", 
+                                        tp_wildcard="{timepoints}", gr_wildcard="{groups}"):
+    """
+    Get the preprocessed within-groups file path.
+    
+    Parameters:
+        mag_wildcard: MAG ID wildcard string (default: "{mag}")
+        group_wildcard: Group wildcard string (default: "{group}")
+        tp_wildcard: Timepoints wildcard string (default: "{timepoints}")
+        gr_wildcard: Groups wildcard string (default: "{groups}")
+    
+    Returns:
+        str: Path to the preprocessed within-groups file
+    """
+    return os.path.join(
+        OUTDIR,
+        "significance_tests",
+        f"preprocessed_within_groups_{tp_wildcard}-{gr_wildcard}",
+        f"{mag_wildcard}_{group_wildcard}_allele_frequency_changes_mean_zeros_processed.tsv.gz"
+    )
+

@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 
 [project.scripts]
-alleleflux = "alleleflux.main:main"
+alleleflux = "alleleflux.cli:main"
 
 # Analysis scripts
 alleleflux-profile = "alleleflux.scripts.analysis.profile_mags:main"

@@ -1,4 +1,11 @@
+"""MAG-level and taxa-level scoring rules.
 
+This module contains rules for:
+- Calculating per-MAG significance scores from p-value tables
+- Combining scores across MAGs for each timepoint-group combination
+- Aggregating scores at different taxonomic levels (phylum to species)
+- Special handling for CMH test scores with focus timepoint filtering
+"""
 
 import pandas as pd
 # import logging
