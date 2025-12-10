@@ -58,9 +58,9 @@ rule dnds_from_timepoints:
         dn_ds_test_type=DN_DS_TEST_TYPE,
         log_level=config["log_level"],
     resources:
-        time=config["resources"]["time"]["general"],
-        mem_mb=config["resources"]["memory"]["dn_ds"],
-    threads: config["resources"]["cpus"]["threads_per_job"]
+        time=get_time("dnds_from_timepoints"),
+        mem_mb=get_mem_mb("dnds_from_timepoints"),
+    threads: get_threads("dnds_from_timepoints")
     run:
         import os
         import pandas as pd

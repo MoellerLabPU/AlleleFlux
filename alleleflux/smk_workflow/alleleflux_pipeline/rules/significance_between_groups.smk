@@ -52,9 +52,9 @@ rule preprocess_between_groups:
         data_type=DATA_TYPE,
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
         min_sample_num=config["quality_control"]["min_sample_num"],
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-preprocess-between-groups \
@@ -84,9 +84,9 @@ rule two_sample_unpaired:
             OUTDIR, "significance_tests", "two_sample_unpaired_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-two-sample-unpaired \
@@ -114,9 +114,9 @@ rule two_sample_paired:
             OUTDIR, "significance_tests", "two_sample_paired_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-two-sample-paired \
@@ -144,9 +144,9 @@ rule lmm_analysis:
             OUTDIR, "significance_tests", "lmm_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-lmm \
@@ -189,10 +189,10 @@ rule cmh_test:
             if config["statistics"].get("preprocess_between_groups", True) and DATA_TYPE == "longitudinal"
             else ""
         ),
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
-        mem_mb=config["resources"]["memory"]["significance_test"],
+        time=get_time("statistical_tests"),
+        mem_mb=get_mem_mb("statistical_tests"),
     shell:
         """
         alleleflux-cmh \

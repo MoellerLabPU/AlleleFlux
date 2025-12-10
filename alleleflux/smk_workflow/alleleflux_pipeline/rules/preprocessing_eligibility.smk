@@ -91,7 +91,7 @@ checkpoint preprocessing_eligibility_between_groups:
         ),
         min_positions=config["statistics"].get("min_positions_after_preprocess", 0),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("preprocessing_eligibility_between_groups"),
     shell:
         """
         alleleflux-preprocessing-eligibility \
@@ -128,7 +128,7 @@ checkpoint preprocessing_eligibility_within_groups:
         # Extract group names from the groups wildcard (e.g., "fat_control" -> ["fat", "control"])
         groups=lambda wildcards: wildcards.groups.split("_"),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("preprocessing_eligibility_within_groups"),
     shell:
         """
         alleleflux-preprocessing-eligibility \

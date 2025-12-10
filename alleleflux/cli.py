@@ -241,6 +241,85 @@ def prompt_choice(message: str, choices: list) -> str:
     return result
 
 
+def prompt_memory(
+    message: str, default: str = "8G", show_default_used: bool = True
+) -> str:
+    """
+    Prompt for a memory value with unit validation (e.g., "8G", "100GB", "8192M").
+
+    Args:
+        message: The prompt message to display.
+        default: Default memory string.
+        show_default_used: If True, print message when default is used.
+
+    Returns:
+        The validated memory string.
+
+    Raises:
+        KeyboardInterrupt: If user cancels the prompt.
+    """
+    import re
+
+    def validate(text):
+        if not text.strip():
+            return True  # Empty is OK, will use default
+        text = text.strip().upper()
+        if re.match(r"^\d+(?:\.\d+)?\s*(G|GB|M|MB)?$", text):
+            return True
+        return "Please use format like '8G', '100GB', or '8192M'."
+
+    result = questionary.text(message, default=default, validate=validate).ask()
+    if result is None:
+        raise KeyboardInterrupt
+
+    if not result.strip():
+        if show_default_used:
+            click.echo(f"  → Using default: {default}")
+        return default
+
+    return result.strip()
+
+
+def prompt_time(
+    message: str, default: str = "24:00:00", show_default_used: bool = True
+) -> str:
+    """
+    Prompt for a time value in HH:MM:SS format.
+
+    Args:
+        message: The prompt message to display.
+        default: Default time string.
+        show_default_used: If True, print message when default is used.
+
+    Returns:
+        The validated time string.
+
+    Raises:
+        KeyboardInterrupt: If user cancels the prompt.
+    """
+    import re
+
+    def validate(text):
+        if not text.strip():
+            return True  # Empty is OK, will use default
+        text = text.strip()
+        # Accept HH:MM:SS or D-HH:MM:SS (SLURM format)
+        if re.match(r"^(\d+-)?(\d{1,2}:)?\d{1,2}:\d{2}$", text):
+            return True
+        return "Please use format like '24:00:00' or '1-00:00:00'."
+
+    result = questionary.text(message, default=default, validate=validate).ask()
+    if result is None:
+        raise KeyboardInterrupt
+
+    if not result.strip():
+        if show_default_used:
+            click.echo(f"  → Using default: {default}")
+        return default
+
+    return result.strip()
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, "-v", "--version")
 def cli():
@@ -291,7 +370,21 @@ def cli():
     "--jobs",
     type=int,
     default=None,
-    help="Number of parallel jobs (default: use all available cores for local, or let profile decide).",
+    help="Max concurrent jobs (default: no limit, Snakemake schedules based on --threads). Only for local execution (ignored with --profile).",
+)
+@click.option(
+    "-t",
+    "--threads",
+    type=int,
+    default=None,
+    help="Total threads available. Defaults to all CPU cores. Only for local execution (ignored with --profile).",
+)
+@click.option(
+    "-m",
+    "--memory",
+    type=str,
+    default=None,
+    help="Total memory available (default: no limit). Formats: '64G', '128GB', '65536M'. Only for local execution (ignored with --profile).",
 )
 @click.option(
     "-p",
@@ -321,7 +414,16 @@ def cli():
 )
 @click.pass_context
 def run_workflow(
-    ctx, config_file, working_dir, jobs, profile, dry_run, unlock, verbose
+    ctx,
+    config_file,
+    working_dir,
+    jobs,
+    threads,
+    memory,
+    profile,
+    dry_run,
+    unlock,
+    verbose,
 ):
     """
     Run the AlleleFlux workflow.
@@ -331,9 +433,21 @@ def run_workflow(
     allele frequency analysis, statistical testing, and scoring.
 
     \b
+    Resource Options (local execution only):
+        --jobs/-j:    Max concurrent jobs (default: no limit)
+        --threads/-t: Total threads available (default: all CPU cores)
+        --memory/-m:  Total memory available (default: no limit)
+
+    When using --profile for cluster execution (SLURM/PBS), these options
+    are ignored and the profile handles resource scheduling.
+
+    \b
     Examples:
-        # Run with a config file\n
+        # Run with a config file (uses all CPU cores by default)\n
         alleleflux run --config config.yml
+
+        # Run with limited resources\n
+        alleleflux run --config config.yml --threads 16 --memory 64G
 
         # Dry run to see what would be executed\n
         alleleflux run --config config.yml --dry-run
@@ -348,6 +462,8 @@ def run_workflow(
         config_file=config_file,
         working_dir=working_dir,
         jobs=jobs,
+        threads=threads,
+        memory=memory,
         profile=profile,
         dry_run=dry_run,
         unlock=unlock,
@@ -430,7 +546,11 @@ def init_config(use_template, output):
 
     # --- Interactive Prompts ---
     try:
-        # Run name (asked first)
+        # Output config file path (asked first)
+        click.echo("📄 Configuration Output:")
+        output = prompt_text("Where should the config file be saved?", default=output)
+
+        # Run name
         run_name = prompt_text(
             "Run name (identifier for this analysis):", default="alleleflux_analysis"
         )
@@ -605,6 +725,21 @@ def init_config(use_template, output):
             "Minimum average coverage depth:", default=1.0, min_value=0.0
         )
 
+        # Resource configuration
+        click.echo("\n💻 Resource Configuration (press Enter to use defaults):")
+        click.echo("These settings control resource usage for local or cluster runs.")
+        threads_per_job = prompt_integer(
+            "Threads per job (CPUs allocated to each parallel task):",
+            default=16,
+            min_value=1,
+        )
+        mem_per_job = prompt_memory(
+            "Memory per job (e.g., '8G', '16GB', '32768M'):", default="8G"
+        )
+        time_limit = prompt_time(
+            "Time limit per job (HH:MM:SS format):", default="24:00:00"
+        )
+
     except KeyboardInterrupt:
         click.echo("\nConfiguration cancelled.")
         return
@@ -629,6 +764,11 @@ def init_config(use_template, output):
     config_template["quality_control"]["min_sample_num"] = min_sample_num
     config_template["quality_control"]["breadth_threshold"] = breadth_threshold
     config_template["quality_control"]["coverage_threshold"] = coverage_threshold
+
+    # Resources
+    config_template["resources"]["threads_per_job"] = threads_per_job
+    config_template["resources"]["mem_per_job"] = mem_per_job
+    config_template["resources"]["time"] = time_limit
 
     # Set timepoints and groups
     config_template["analysis"]["timepoints_combinations"] = timepoints_combinations

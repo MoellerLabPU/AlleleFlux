@@ -84,19 +84,39 @@ dnds:
 
 # Compute Resources
 # -----------------
-# Resources allocated to each workflow step
+# Resources allocated per job. Adjust based on your system:
+# - Local execution: Use conservative values that fit your workstation
+# - Cluster (SLURM): These are passed to sbatch; profile can override
 resources:
-  cpus:
-    threads_per_job: 16           # Threads for parallel jobs
+  threads_per_job: 16             # Threads per job (not total threads)
+  mem_per_job: "8G"               # Memory per job. Formats: "8G", "100G", "102400M"
+                                  # Local: Keep low to avoid OOM (Snakemake auto-limits jobs)
+                                  # Cluster: Can increase; SLURM allocates per-node
+  time: "24:00:00"                # Wall time limit (HH:MM:SS)
 
-  memory:                         # Memory in MB
-    profile: 10000                # ~10 GB for profiling
-    quality_control: 100000       # ~100 GB for quality control
-    analyze_alleles: 100000       # ~100 GB for allele analysis
-    significance_test: 100000     # ~100 GB for significance testing
-    dn_ds: 200000                 # ~200 GB for dN/dS analysis
-
-  time:                           # Runtime limits (HH:MM:SS format)
-    profile: "08:00:00"           # 8 hours for profiling
-    significance_test: "08:00:00" # 8 hours for significance tests
-    general: "24:00:00"           # 24 hours for general tasks
+# Advanced: Per-rule resource overrides (power users only)
+# ---------------------------------------------------------
+# Uncomment and customize to override resources for specific rules.
+# Rule names must match exactly. Unspecified resources use defaults above.
+# Most users should NOT need this section.
+#
+# resources_override:
+#   profile:                       # Rule: profile (sample profiling)
+#     threads_per_job: 8
+#     mem_per_job: "16G"
+#     time: "08:00:00"
+#   qc:                            # Rule: qc (quality control)
+#     mem_per_job: "100G"
+#   allele_analysis:               # Rule: allele_analysis
+#     mem_per_job: "32G"
+#   statistical_tests:             # All statistical test rules:
+#                                  # two_sample_unpaired, two_sample_paired, lmm_analysis,
+#                                  # cmh_test, single_sample, lmm_analysis_across_time,
+#                                  # cmh_test_across_time
+#     threads_per_job: 4
+#     mem_per_job: "64G"
+#     time: "12:00:00"
+#   dnds_from_timepoints:          # Rule: dnds_from_timepoints
+#     threads_per_job: 1
+#     mem_per_job: "200G"
+#     time: "48:00:00"

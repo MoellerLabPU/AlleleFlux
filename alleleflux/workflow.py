@@ -10,6 +10,8 @@ separation of concerns.
 
 import logging
 import multiprocessing
+import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -23,6 +25,55 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
+# =============================================================================
+# Memory Utilities
+# =============================================================================
+
+
+def parse_mem(mem_value: str) -> int:
+    """
+    Parse memory string like "8G", "100GB", "8192M" to MB.
+    Uses binary units (1 GB = 1024 MB).
+
+    Args:
+        mem_value: Memory specification string or int (MB).
+
+    Returns:
+        Memory in MB as integer.
+
+    Raises:
+        ValueError: If format is invalid.
+
+    Examples:
+        >>> parse_mem("8G")      # 8 gigabytes
+        8192
+        >>> parse_mem("100GB")   # 100 gigabytes
+        102400
+        >>> parse_mem("8192M")   # 8192 megabytes
+        8192
+        >>> parse_mem("8192")    # Assumes MB
+        8192
+    """
+    if isinstance(mem_value, (int, float)):
+        return int(mem_value)
+
+    mem_str = str(mem_value).strip().upper()
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*(G|GB|M|MB)?$", mem_str)
+
+    if not match:
+        raise ValueError(
+            f"Invalid memory format: '{mem_value}'. "
+            "Use format like '8G', '64GB', or '8192M'."
+        )
+
+    value = float(match.group(1))
+    unit = match.group(2) or "M"
+
+    if unit in ("G", "GB"):
+        return int(value * 1024)
+    return int(value)
+
+
 # =============================================================================
 # Path Helpers
 # =============================================================================
@@ -215,6 +266,8 @@ def build_snakemake_command(
     config_path: Path,
     working_dir: str,
     jobs: Optional[int] = None,
+    threads: Optional[int] = None,
+    memory_mb: Optional[int] = None,
     profile: Optional[str] = None,
     dry_run: bool = False,
     extra_args: Optional[List[str]] = None,
@@ -226,7 +279,9 @@ def build_snakemake_command(
         snakefile: Path to the Snakefile.
         config_path: Path to the configuration file.
         working_dir: Working directory for the workflow.
-        jobs: Number of parallel jobs (None = auto-detect).
+        jobs: Maximum concurrent jobs (local only, ignored with profile).
+        threads: Total threads available (local only, ignored with profile).
+        memory_mb: Total memory in MB (local only, ignored with profile).
         profile: Path to Snakemake profile for cluster execution.
         dry_run: If True, add --dry-run flag.
         extra_args: Additional arguments to pass to snakemake.
@@ -243,16 +298,21 @@ def build_snakemake_command(
         "--show-failed-logs",
     ]
 
-    # Add jobs/cores
-    if jobs is not None:
-        cmd_parts.append(f"--jobs {jobs}")
-    elif profile is None:
-        # Local execution without profile: use all cores
-        cmd_parts.append(f"--cores {multiprocessing.cpu_count()}")
-
-    # Add profile for cluster execution
+    # Profile takes precedence - let profile handle all resource scheduling
     if profile:
         cmd_parts.append(f"--profile {profile}")
+    else:
+        # Local execution: apply thread, job, and memory constraints
+        if threads is not None:
+            cmd_parts.append(f"--cores {threads}")
+        else:
+            cmd_parts.append(f"--cores {multiprocessing.cpu_count()}")
+
+        if jobs is not None:
+            cmd_parts.append(f"--jobs {jobs}")
+
+        if memory_mb is not None and memory_mb > 0:
+            cmd_parts.append(f"--resources mem_mb={memory_mb}")
 
     # Add dry run flag
     if dry_run:
@@ -269,6 +329,8 @@ def execute_workflow(
     config_file: str,
     working_dir: str = ".",
     jobs: Optional[int] = None,
+    threads: Optional[int] = None,
+    memory: Optional[str] = None,
     profile: Optional[str] = None,
     dry_run: bool = False,
     unlock: bool = False,
@@ -285,7 +347,11 @@ def execute_workflow(
     Args:
         config_file: Path to the configuration file.
         working_dir: Working directory for the workflow.
-        jobs: Number of parallel jobs.
+        jobs: Max concurrent jobs. Local only (ignored with --profile).
+        threads: Total threads available. Local only (ignored with --profile).
+            Defaults to all CPU cores if not specified.
+        memory: Total memory available, e.g. "64G". Local only (ignored with --profile).
+            Formats: "8G", "64GB", "8192M".
         profile: Path to Snakemake profile for cluster execution.
         dry_run: If True, perform a dry run without executing jobs.
         unlock: If True, unlock the working directory and exit.
@@ -313,6 +379,16 @@ def execute_workflow(
     output_dir = Path(config.get("output", {}).get("root_dir", working_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Parse memory if provided
+    memory_mb = None
+    if memory:
+        try:
+            memory_mb = parse_mem(memory)
+        except ValueError as e:
+            logger.error(f"Invalid --memory value: {e}")
+            logger.error("Use format like '8G', '64GB', or '8192M'.")
+            return 1
+
     # Create log file with timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     logfile = output_dir / f"alleleflux_{timestamp}.log"
@@ -323,6 +399,8 @@ def execute_workflow(
         config_path=config_path,
         working_dir=working_dir,
         jobs=jobs,
+        threads=threads,
+        memory_mb=memory_mb,
         profile=profile,
         dry_run=dry_run,
         extra_args=extra_args,

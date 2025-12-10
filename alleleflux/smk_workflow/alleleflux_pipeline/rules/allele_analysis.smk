@@ -61,10 +61,10 @@ rule analyze_alleles:
         # Use the global DATA_TYPE variable
         data_type=DATA_TYPE,
 
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("allele_analysis")
     resources:
-        mem_mb=config["resources"]["memory"]["analyze_alleles"],
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("allele_analysis"),
+        time=get_time("allele_analysis"),
     shell:
         """
         alleleflux-allele-freq \

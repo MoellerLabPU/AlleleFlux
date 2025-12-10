@@ -37,7 +37,7 @@ rule preprocess_within_groups:
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
         min_sample_num=config["quality_control"]["min_sample_num"],
     resources:
-        time=config["resources"]["time"]["significance_test"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-preprocess-within-group \
@@ -74,9 +74,9 @@ rule single_sample:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "single_sample_{timepoints}-{groups}"
         ),
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
+        time=get_time("statistical_tests"),
     shell:
         """
         alleleflux-single-sample \
@@ -128,10 +128,10 @@ rule lmm_analysis_across_time:
             if config["statistics"].get("preprocess_within_groups", False)
             else ""
         )
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
-        mem_mb=config["resources"]["memory"]["significance_test"] # LMM can be memory intensive
+        time=get_time("statistical_tests"),
+        mem_mb=get_mem_mb("statistical_tests")
     shell:
         """
         alleleflux-lmm \
@@ -172,10 +172,10 @@ rule cmh_test_across_time:
             if config["statistics"].get("preprocess_within_groups", False)
             else ""
         )
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("statistical_tests")
     resources:
-        time=config["resources"]["time"]["significance_test"],
-        mem_mb=config["resources"]["memory"]["significance_test"],
+        time=get_time("statistical_tests"),
+        mem_mb=get_mem_mb("statistical_tests"),
     shell:
         """
         alleleflux-cmh \

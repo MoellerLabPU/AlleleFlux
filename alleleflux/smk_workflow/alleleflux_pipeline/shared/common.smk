@@ -3,6 +3,7 @@
 This module provides shared configuration, helper functions, and wildcard constraints
 for the AlleleFlux Snakemake pipeline. It handles:
 - Global configuration parsing (data type, output directory, timepoints, groups)
+- Resource management (memory parsing, per-rule overrides)
 - MAG eligibility functions for QC and preprocessing stages
 - Sample metadata parsing for longitudinal analysis
 - Wildcard constraints for consistent rule matching
@@ -19,6 +20,113 @@ import logging
 
 # Load the configuration file
 # configfile: os.path.join(workflow.basedir, "config.yml")
+
+
+# =============================================================================
+# Resource Management
+# =============================================================================
+
+def parse_mem(mem_value):
+    """
+    Convert memory string to MB for Snakemake resources.
+    
+    Supports formats: "8G", "8GB", "8192M", "8192MB", "8192" (assumes MB)
+    Case-insensitive. Uses binary units (1 GB = 1024 MB).
+    
+    Args:
+        mem_value: Memory value as string (e.g., "8G") or int (MB)
+    
+    Returns:
+        int: Memory in MB
+    
+    Examples:
+        >>> parse_mem("8G")
+        8192
+        >>> parse_mem("100GB")
+        102400
+        >>> parse_mem("8192M")
+        8192
+        >>> parse_mem(8192)
+        8192
+    """
+    if isinstance(mem_value, (int, float)):
+        return int(mem_value)
+    
+    mem_str = str(mem_value).strip().upper()
+    
+    # Remove 'B' suffix if present (e.g., "8GB" -> "8G")
+    if mem_str.endswith("B"):
+        mem_str = mem_str[:-1]
+    
+    if mem_str.endswith("G"):
+        return int(float(mem_str[:-1]) * 1024)
+    elif mem_str.endswith("M"):
+        return int(float(mem_str[:-1]))
+    elif mem_str.endswith("K"):
+        return max(1, int(float(mem_str[:-1]) / 1024))
+    else:
+        # Assume MB if no unit
+        return int(float(mem_str))
+
+
+def get_resource(rule_name, resource_type, default=None):
+    """
+    Get resource value for a rule, checking for per-rule override first.
+    
+    This enables the 'escape hatch' pattern where power users can override
+    resources for specific rules via the resources_override config section,
+    while most users just use the flat defaults.
+    
+    Args:
+        rule_name: Name of the Snakemake rule (e.g., "profile", "qc", "statistical_tests")
+        resource_type: Type of resource ("threads_per_job", "mem_per_job", "time")
+        default: Default value if not specified anywhere (uses config default if None)
+    
+    Returns:
+        Resource value (parsed if memory)
+    
+    Example:
+        # In a rule:
+        resources:
+            mem_mb=get_resource("profile", "mem_per_job"),
+            time=get_resource("profile", "time")
+    """
+    # Check for per-rule override first
+    overrides = config.get("resources_override", {}).get(rule_name, {})
+    if resource_type in overrides:
+        value = overrides[resource_type]
+    elif default is not None:
+        value = default
+    else:
+        # Get from main resources section
+        value = config.get("resources", {}).get(resource_type)
+    
+    # Parse memory values to MB
+    if resource_type == "mem_per_job" and value is not None:
+        return parse_mem(value)
+    
+    return value
+
+
+def get_threads(rule_name=None):
+    """Get threads_per_job, optionally checking for rule-specific override."""
+    if rule_name:
+        return get_resource(rule_name, "threads_per_job")
+    return config.get("resources", {}).get("threads_per_job", 1)
+
+
+def get_mem_mb(rule_name=None):
+    """Get memory in MB, optionally checking for rule-specific override."""
+    if rule_name:
+        return get_resource(rule_name, "mem_per_job")
+    return parse_mem(config.get("resources", {}).get("mem_per_job", "8G"))
+
+
+def get_time(rule_name=None):
+    """Get wall time, optionally checking for rule-specific override."""
+    if rule_name:
+        return get_resource(rule_name, "time")
+    return config.get("resources", {}).get("time", "24:00:00")
 
 
 # =============================================================================

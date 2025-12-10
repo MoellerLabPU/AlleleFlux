@@ -19,10 +19,10 @@ rule qc:
         breadth_threshold=config["quality_control"]["breadth_threshold"],
         coverage_threshold=config["quality_control"]["coverage_threshold"],
         data_type=DATA_TYPE,
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("qc")
     resources:
-        time=config["resources"]["time"]["general"],
-        mem_mb=config["resources"]["memory"]["quality_control"],
+        time=get_time("qc"),
+        mem_mb=get_mem_mb("qc"),
     shell:
         """
         alleleflux-qc \

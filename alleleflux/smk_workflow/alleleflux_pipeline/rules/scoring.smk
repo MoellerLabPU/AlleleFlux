@@ -35,7 +35,7 @@ rule significance_score_per_MAG_standard:
         group_by_column="MAG_ID",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("significance_score_per_MAG_standard"),
     shell:
         """
         alleleflux-scores \
@@ -74,7 +74,7 @@ rule significance_score_per_MAG_cmh:
         group_by_column="MAG_ID",
         data_type=DATA_TYPE,
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("significance_score_per_MAG_cmh"),
     run:
         if params.data_type == "single":
             shell(
@@ -139,7 +139,7 @@ rule combine_MAG_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("combine_MAG_scores"),
     run:
         # setup_logging()
         # logger = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ rule combine_MAG_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-MAGs-{focus_tp}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("combine_MAG_scores_cmh"),
     run:
         # setup_logging()
         # logger = logging.getLogger(__name__)
@@ -234,7 +234,7 @@ rule taxa_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("taxa_scores"),
     shell:
         """
         alleleflux-taxa-scores \
@@ -264,7 +264,7 @@ rule taxa_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-{taxon}-{focus_tp}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("taxa_scores_cmh"),
     shell:
         """
         alleleflux-taxa-scores \

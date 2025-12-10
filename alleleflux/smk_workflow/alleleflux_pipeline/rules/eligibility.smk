@@ -16,7 +16,7 @@ checkpoint eligibility_table:
         min_sample_num=config["quality_control"]["min_sample_num"],
         data_type=DATA_TYPE,
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("eligibility_table"),
     shell:
         """
         alleleflux-eligibility \
