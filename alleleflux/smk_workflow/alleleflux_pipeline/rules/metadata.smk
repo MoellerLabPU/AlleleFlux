@@ -1,6 +1,9 @@
 """
-Step 1 Metadata Generation Rules
-Rules for generating metadata from profiled samples
+Sample metadata generation rules.
+
+This module generates per-MAG metadata files that organize sample profile paths
+by experimental group and timepoint. These metadata files are used as input for
+QC analysis and downstream statistical tests.
 """
 
 rule generate_metadata:
@@ -22,7 +25,8 @@ rule generate_metadata:
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("generate_metadata"),
+        time=get_time("generate_metadata"),
     shell:
         """
         alleleflux-metadata \

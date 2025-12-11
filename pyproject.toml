@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 
 [project.scripts]
-alleleflux = "alleleflux.main:main"
+alleleflux = "alleleflux.cli:main"
 
 # Analysis scripts
 alleleflux-profile = "alleleflux.scripts.analysis.profile_mags:main"
@@ -31,6 +31,7 @@ alleleflux-qc = "alleleflux.scripts.preprocessing.quality_control:main"
 alleleflux-eligibility = "alleleflux.scripts.preprocessing.eligibility_table:main"
 alleleflux-preprocess-between-groups = "alleleflux.scripts.preprocessing.preprocess_between_groups:main"
 alleleflux-preprocess-within-group = "alleleflux.scripts.preprocessing.preprocess_within_group:main"
+alleleflux-preprocessing-eligibility = "alleleflux.scripts.preprocessing.preprocessing_eligibility:main"
 alleleflux-p-value-summary = "alleleflux.scripts.preprocessing.p_value_summary:main"
 
 # Statistics scripts
@@ -49,6 +50,7 @@ alleleflux-add-bam-path = "alleleflux.scripts.accessory.add_bam_path_to_metadata
 alleleflux-coverage-allele-stats = "alleleflux.scripts.accessory.coverage_and_allele_stats:main"
 alleleflux-list-mags = "alleleflux.scripts.accessory.list_mags:main"
 alleleflux-positions-qc = "alleleflux.scripts.accessory.positions_qc:main"
+alleleflux-copy-profiles = "alleleflux.scripts.accessory.copy_mag_profiles:main"
 
 # Visualization scripts
 alleleflux-prepare-metadata = "alleleflux.scripts.visualization.accessory.prepare_metadata:main"

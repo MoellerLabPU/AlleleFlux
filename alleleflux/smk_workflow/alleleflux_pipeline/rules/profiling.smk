@@ -1,6 +1,12 @@
 """
-Step 1 Profiling Rules
-Rules for sample profiling based on BAM files
+Sample profiling rules.
+
+This module contains rules for profiling BAM files to extract allele frequency
+information at each genomic position. The profiling step is the foundation of
+the AlleleFlux pipeline.
+
+Reference files (FASTA, Prodigal, MAG mapping) are wrapped with ancient() to
+prevent unnecessary re-runs when these stable files have updated timestamps.
 """
 
 rule profile:
@@ -11,10 +17,10 @@ rule profile:
         mag_mapping=config["input"]["mag_mapping_path"],
     output:
         sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("profile")
     resources:
-        mem_mb=config["resources"]["memory"]["profile"],
-        time=config["resources"]["time"]["profile"],
+        mem_mb=get_mem_mb("profile"),
+        time=get_time("profile"),
     params:
         outDir=os.path.join(OUTDIR, "profiles"),
         no_ignore_orphans="--no-ignore-orphans" if not config.get("profiling", {}).get("ignore_orphans", True) else "",

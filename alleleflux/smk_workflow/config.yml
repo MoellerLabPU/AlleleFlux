@@ -73,10 +73,12 @@ profiling:
 # ----------------------
 statistics:
   filter_type: "t-test"         # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
-  preprocess_two_sample: True   # Whether to preprocess data for two-sample tests
+  preprocess_between_groups: True   # Whether to preprocess data for between-groups tests (two-sample, LMM, CMH)
+  preprocess_within_groups: True    # Whether to preprocess data for within-group tests (single-sample, LMM across time, CMH across time)
   max_zero_count: 4             # Maximum number of zero values allowed in single-sample test
   p_value_threshold: 0.05       # P-value threshold for significance
   fdr_group_by_mag_id: False    # Whether to apply FDR correction separately for each MAG ID
+  min_positions_after_preprocess: 1  # Minimum positions after preprocessing for a MAG to be eligible (0 = any positions)
 
 
 # dN/dS Analysis Parameters

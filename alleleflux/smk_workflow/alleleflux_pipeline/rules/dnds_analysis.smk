@@ -1,7 +1,11 @@
+"""dN/dS (nonsynonymous to synonymous substitution ratio) analysis rules.
+
+This module performs dN/dS analysis for longitudinal data by comparing
+ancestral and derived samples from the same subject. It identifies
+evolutionary patterns by calculating substitution rates at significant
+allele frequency change positions.
 """
-dN/dS Analysis Rules
-Rules for performing dN/dS analysis from timepoints using dnds_from_timepoints.py
-"""
+
 
 def _get_dnds_test_type_str(test_type, for_eligibility=False):
     """Helper function to get the standardized test type string for dN/dS analysis."""
@@ -54,9 +58,9 @@ rule dnds_from_timepoints:
         dn_ds_test_type=DN_DS_TEST_TYPE,
         log_level=config["log_level"],
     resources:
-        time=config["resources"]["time"]["general"],
-        mem_mb=config["resources"]["memory"]["dn_ds"],
-    threads: config["resources"]["cpus"]["threads_per_job"]
+        time=get_time("dnds_from_timepoints"),
+        mem_mb=get_mem_mb("dnds_from_timepoints"),
+    threads: get_threads("dnds_from_timepoints")
     run:
         import os
         import pandas as pd

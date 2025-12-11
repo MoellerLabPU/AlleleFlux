@@ -107,7 +107,12 @@ def create_config(args):
     config_data.setdefault("analysis", {}).setdefault("use_significance_tests", True)
     config_data.setdefault("analysis", {}).setdefault("use_cmh", True)
     config_data.setdefault("analysis", {}).setdefault("allele_analysis_only", False)
-    config_data.setdefault("statistics", {}).setdefault("preprocess_two_sample", True)
+    config_data.setdefault("statistics", {}).setdefault(
+        "preprocess_between_groups", True
+    )
+    config_data.setdefault("statistics", {}).setdefault(
+        "preprocess_within_groups", True
+    )
     config_data.setdefault("quality_control", {}).setdefault(
         "disable_zero_diff_filtering", False
     )
@@ -122,8 +127,10 @@ def create_config(args):
         config_data["analysis"]["allele_analysis_only"] = True
     if args.disable_zero_diff_filtering:
         config_data["quality_control"]["disable_zero_diff_filtering"] = True
-    if args.disable_preprocess_two_sample:
-        config_data["statistics"]["preprocess_two_sample"] = False
+    if args.disable_preprocess_between_groups:
+        config_data["statistics"]["preprocess_between_groups"] = False
+    if args.disable_preprocess_within_groups:
+        config_data["statistics"]["preprocess_within_groups"] = False
 
     # Simplified logic for a single timepoint/group combination
     if args.timepoints:
@@ -308,10 +315,16 @@ def main():
         help="Keep sites with zero difference (default: filter them).",
     )
     qc_group.add_argument(
-        "--disable-preprocess-two-sample",
+        "--disable-preprocess-between-groups",
         action="store_true",
         default=False,
-        help="Disable preprocessing for two-sample tests.",
+        help="Disable preprocessing for between-groups tests (two-sample, LMM, CMH).",
+    )
+    qc_group.add_argument(
+        "--disable-preprocess-within-groups",
+        action="store_true",
+        default=False,
+        help="Disable preprocessing for within-group tests (single-sample, LMM across time, CMH across time).",
     )
     # Tiered Resource Allocation Defaults
     resource_group.add_argument(

@@ -1,3 +1,14 @@
+"""Gene-level scoring and outlier detection rules.
+
+This module contains rules for:
+- Calculating gene-level significance scores from p-value tables
+- Detecting outlier genes based on MAG-level and gene-level score comparisons
+- Handling CMH-specific gene score calculations
+
+Empty output files are created when no gene IDs are present in input data
+to maintain workflow continuity.
+"""
+
 import os
 # import logging
 import pandas as pd
@@ -61,7 +72,8 @@ rule gene_scores:
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("gene_scores"),
+        time=get_time("gene_scores"),
     run:
         # Ensure logging configured
         # setup_logging()
@@ -165,7 +177,8 @@ rule detect_outlier_genes:
             "{mag}_{test_type}{group_str}_outlier_genes.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("detect_outlier_genes"),
+        time=get_time("detect_outlier_genes"),
     run:
         # setup_logging()
         # rule_logger = logging.getLogger(__name__)
@@ -282,7 +295,8 @@ rule cmh_gene_scores:
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("cmh_gene_scores"),
+        time=get_time("cmh_gene_scores"),
     run:
         # setup_logging()
         # rule_logger = logging.getLogger(__name__)
@@ -337,7 +351,8 @@ rule detect_cmh_outlier_genes:
             "{mag}_cmh_{focus_tp}_outlier_genes.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("detect_cmh_outlier_genes"),
+        time=get_time("detect_cmh_outlier_genes"),
     run:
         # setup_logging()
         # rule_logger = logging.getLogger(__name__)

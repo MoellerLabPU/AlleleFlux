@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import os
 
@@ -12,7 +13,16 @@ NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 logger = logging.getLogger(__name__)
 
 
-def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
+def preprocess_data(
+    df,
+    max_zero_count,
+    output_dir,
+    mag_id,
+    group,
+    min_positions=1,
+    min_sample_num=4,
+    status_dir=None,
+):
     """
     Preprocess data by removing positions where more than max_zero_count replicates
     have _diff_mean value zero for all nucleotides.
@@ -29,15 +39,23 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
         MAG identifier
     group : str
         Group identifier
+    min_positions : int
+        Minimum number of eligible positions required after filtering for eligibility
+    min_sample_num : int
+        Minimum number of samples per position required for the position to be considered eligible
+    status_dir : str or None
+        Directory to write status file. If None, uses output_dir.
 
     Returns:
     --------
-    pandas.DataFrame
-        Processed dataframe with positions removed based on zero count threshold
+    dict
+        Status dictionary with row counts and eligibility flag
     """
     logger.info(
         f"Preprocessing: Removing positions where more than {max_zero_count} replicates have _diff_mean value zero for all nucleotides."
     )
+
+    input_rows = len(df)
 
     # List the columns we want to check.
     diff_mean_cols = [f"{nuc}_diff_mean" for nuc in NUCLEOTIDES]
@@ -62,6 +80,25 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
     # Cleanup temporary column
     df = df.drop(columns=["all_zeros"])
 
+    output_rows = len(df)
+
+    # Calculate position-level eligibility: count positions with >= min_sample_num samples
+    total_positions = 0
+    positions_eligible = 0
+    if output_rows > 0:
+        position_grouped = df.groupby(["contig", "position"], dropna=False)
+        total_positions = len(position_grouped)
+        for (contig, position), pos_df in position_grouped:
+            num_samples = len(pos_df)
+            if num_samples >= min_sample_num:
+                positions_eligible += 1
+        logger.info(
+            f"Position-level eligibility: {total_positions:,} total positions, "
+            f"{positions_eligible:,} have >= {min_sample_num} samples"
+        )
+
+    eligible = positions_eligible >= min_positions
+
     df.to_csv(
         os.path.join(
             output_dir,
@@ -71,6 +108,38 @@ def preprocess_data(df, max_zero_count, output_dir, mag_id, group):
         sep="\t",
         compression="gzip",
     )
+
+    # Write preprocessing status file
+    status = {
+        "mag_id": mag_id,
+        "preprocess_type": "within_groups",
+        "group": group,
+        "input_rows": input_rows,
+        "output_rows": output_rows,
+        "min_positions": min_positions,
+        "min_sample_num": min_sample_num,
+        "total_positions": total_positions,
+        "positions_eligible": positions_eligible,
+        "eligible": eligible,
+        "max_zero_count": max_zero_count,
+    }
+
+    # Determine status file location
+    if status_dir:
+        os.makedirs(status_dir, exist_ok=True)
+        status_file = os.path.join(
+            status_dir, f"{mag_id}_{group}_preprocessing_status.json"
+        )
+    else:
+        status_file = os.path.join(
+            output_dir, f"{mag_id}_{group}_preprocessing_status.json"
+        )
+
+    with open(status_file, "w") as f:
+        json.dump(status, f, indent=2)
+    logger.info(f"Preprocessing status written to {status_file}")
+
+    return status
 
 
 def main():
@@ -110,6 +179,24 @@ def main():
         type=str,
         required=True,
     )
+    parser.add_argument(
+        "--min_positions",
+        type=int,
+        default=1,
+        help="Minimum number of eligible positions required after filtering for a MAG to be considered eligible",
+    )
+    parser.add_argument(
+        "--min_sample_num",
+        type=int,
+        default=4,
+        help="Minimum number of samples per position required for the position to be considered eligible",
+    )
+    parser.add_argument(
+        "--status_dir",
+        type=str,
+        default=None,
+        help="Directory to write preprocessing status file. If not provided, status file is written to the same directory as output.",
+    )
 
     args = parser.parse_args()
 
@@ -129,6 +216,9 @@ def main():
         output_dir=args.output_dir,
         mag_id=args.mag_id,
         group=args.group,
+        min_positions=args.min_positions,
+        min_sample_num=args.min_sample_num,
+        status_dir=args.status_dir,
     )
 
 

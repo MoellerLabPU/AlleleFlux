@@ -1,4 +1,11 @@
+"""MAG-level and taxa-level scoring rules.
 
+This module contains rules for:
+- Calculating per-MAG significance scores from p-value tables
+- Combining scores across MAGs for each timepoint-group combination
+- Aggregating scores at different taxonomic levels (phylum to species)
+- Special handling for CMH test scores with focus timepoint filtering
+"""
 
 import pandas as pd
 # import logging
@@ -28,7 +35,8 @@ rule significance_score_per_MAG_standard:
         group_by_column="MAG_ID",
         pValue_threshold=config["statistics"].get("p_value_threshold", 0.05),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("significance_score_per_MAG_standard"),
+        time=get_time("significance_score_per_MAG_standard"),
     shell:
         """
         alleleflux-scores \
@@ -67,7 +75,8 @@ rule significance_score_per_MAG_cmh:
         group_by_column="MAG_ID",
         data_type=DATA_TYPE,
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("significance_score_per_MAG_cmh"),
+        time=get_time("significance_score_per_MAG_cmh"),
     run:
         if params.data_type == "single":
             shell(
@@ -102,22 +111,20 @@ rule combine_MAG_scores:
             os.path.join(
                 OUTDIR,
                 "scores",
-                    "intermediate",
-                    "MAG_scores_{timepoints}-{groups}",
-                    "{mag}_score_{test_type}{group_str}.tsv",
-                ),
-                timepoints=wc.timepoints,
-                groups=wc.groups,
-                test_type=wc.test_type,
-                group_str=wc.group_str,
-                mag=(
-                    get_mags_by_eligibility(
-                        wc.timepoints, wc.groups, eligibility_type=wc.test_type
-                    )
+                "intermediate",
+                "MAG_scores_{timepoints}-{groups}",
+                "{mag}_score_{test_type}{group_str}.tsv",
+            ),
+            timepoints=wc.timepoints,
+            groups=wc.groups,
+            test_type=wc.test_type,
+            group_str=wc.group_str,
+            mag=(
+                get_eligible_mags(wc.timepoints, wc.groups, wc.test_type)
                 if wc.test_type not in {"single_sample", "lmm_across_time", "cmh_across_time"}
                 else [
                     mag
-                    for mag, grp in get_single_sample_entries(wc.timepoints, wc.groups)
+                    for mag, grp in get_eligible_mags(wc.timepoints, wc.groups, wc.test_type)
                     if f"_{grp}" == wc.group_str
                 ]
             ),
@@ -132,7 +139,8 @@ rule combine_MAG_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-MAGs.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("combine_MAG_scores"),
+        time=get_time("combine_MAG_scores"),
     run:
         # setup_logging()
         # logger = logging.getLogger(__name__)
@@ -166,7 +174,7 @@ rule combine_MAG_scores_cmh:
             ),
             timepoints=wc.timepoints,
             groups=wc.groups,
-            mag=get_mags_by_eligibility(wc.timepoints, wc.groups, eligibility_type="cmh"),
+            mag=get_eligible_mags(wc.timepoints, wc.groups, "cmh"),
             focus_tp=[wc.focus_tp],
         ),
     output:
@@ -179,7 +187,8 @@ rule combine_MAG_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-MAGs-{focus_tp}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("combine_MAG_scores_cmh"),
+        time=get_time("combine_MAG_scores_cmh"),
     run:
         # setup_logging()
         # logger = logging.getLogger(__name__)
@@ -227,7 +236,8 @@ rule taxa_scores:
             "scores_{test_type}-{timepoints}-{groups}{group_str}-{taxon}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("taxa_scores"),
+        time=get_time("taxa_scores"),
     shell:
         """
         alleleflux-taxa-scores \
@@ -257,7 +267,8 @@ rule taxa_scores_cmh:
             "scores_cmh-{timepoints}-{groups}-{taxon}-{focus_tp}.tsv",
         ),
     resources:
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("taxa_scores_cmh"),
+        time=get_time("taxa_scores_cmh"),
     shell:
         """
         alleleflux-taxa-scores \

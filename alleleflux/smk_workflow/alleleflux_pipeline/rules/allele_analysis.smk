@@ -1,3 +1,10 @@
+"""Allele frequency analysis rules.
+
+This module contains rules for analyzing allele frequencies from MAG profiles.
+It generates allele frequency tables and optionally filters positions with zero
+frequency differences (constant positions) across samples.
+"""
+
 rule analyze_alleles:
     input:
         qc_file=os.path.join(
@@ -21,7 +28,8 @@ rule analyze_alleles:
                 else "{mag}_allele_frequency_changes_mean.tsv.gz"
             )
         ),
-
+        # Simplified conditional: disable_zero_diff_filtering check is sufficient
+        # since DATA_TYPE is already evaluated at module load time
         allele_freq_no_zero_diff=os.path.join(
             OUTDIR,
             "allele_analysis",
@@ -31,10 +39,7 @@ rule analyze_alleles:
                 if DATA_TYPE == "single"
                 else "{mag}_allele_frequency_changes_no_zero-diff.tsv.gz"
             )
-        ) if (
-            (DATA_TYPE == "longitudinal" and not config["quality_control"].get("disable_zero_diff_filtering", False))
-            or (DATA_TYPE == "single" and not config["quality_control"].get("disable_zero_diff_filtering", False))
-        ) else [],
+        ) if not config["quality_control"].get("disable_zero_diff_filtering", False) else [],
 
         longitudinal_output=os.path.join(
             OUTDIR,
@@ -56,10 +61,10 @@ rule analyze_alleles:
         # Use the global DATA_TYPE variable
         data_type=DATA_TYPE,
 
-    threads: config["resources"]["cpus"]["threads_per_job"]
+    threads: get_threads("allele_analysis")
     resources:
-        mem_mb=config["resources"]["memory"]["analyze_alleles"],
-        time=config["resources"]["time"]["general"],
+        mem_mb=get_mem_mb("allele_analysis"),
+        time=get_time("allele_analysis"),
     shell:
         """
         alleleflux-allele-freq \

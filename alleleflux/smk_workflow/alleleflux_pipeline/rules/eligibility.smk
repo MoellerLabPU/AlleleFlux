@@ -1,9 +1,13 @@
 """
-Step 1 Eligibility Table Rules
-Rules for generating eligibility tables for downstream analysis
+QC-based eligibility table checkpoint.
+
+This checkpoint generates eligibility tables based on QC results, determining
+which MAGs have sufficient sample coverage to proceed to downstream analysis.
+The checkpoint mechanism allows Snakemake to dynamically update the DAG based
+on which MAGs pass QC thresholds.
 """
 
-rule eligibility_table:
+checkpoint eligibility_table:
     input:
         qc_dir=os.path.join(OUTDIR, "QC", "QC_{timepoints}-{groups}"),
     output:
@@ -12,7 +16,7 @@ rule eligibility_table:
         min_sample_num=config["quality_control"]["min_sample_num"],
         data_type=DATA_TYPE,
     resources:
-        time=config["resources"]["time"]["general"],
+        time=get_time("eligibility_table"),
     shell:
         """
         alleleflux-eligibility \
