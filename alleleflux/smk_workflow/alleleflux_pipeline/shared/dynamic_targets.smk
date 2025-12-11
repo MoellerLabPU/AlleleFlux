@@ -26,7 +26,7 @@ def get_enabled_test_types():
     return enabled
 
 
-def get_eligible_mags(tp, gr, test_type, group=None):
+def get_eligible_mags(tp, gr, test_type):
     """
     Unified helper function to get eligible MAGs for any test type.
     
@@ -42,14 +42,10 @@ def get_eligible_mags(tp, gr, test_type, group=None):
         test_type: Type of statistical test. Options:
             - "two_sample_unpaired", "two_sample_paired", "lmm", "cmh": Between-group tests
             - "single_sample", "lmm_across_time", "cmh_across_time": Within-group tests
-        group: Group name for within-group tests.
-            - If specified: Returns list of MAG IDs for that group
-            - If None: Returns list of (MAG_ID, group) tuples for all eligible MAG-group pairs
     
     Returns:
         - For between-group tests: List of MAG IDs
-        - For within-group tests with group specified: List of MAG IDs  
-        - For within-group tests without group: List of (MAG_ID, group) tuples
+        - For within-group tests: List of (MAG_ID, group) tuples
     """
     # Determine which preprocessing config to check
     if test_type in ["two_sample_unpaired", "two_sample_paired", "lmm", "cmh"]:
@@ -59,13 +55,13 @@ def get_eligible_mags(tp, gr, test_type, group=None):
             # The checkpoint is triggered in get_final_pipeline_outputs before this function is called
             return get_mags_by_preprocessing_eligibility(tp, gr, test_type)
         else:
-            return get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
+            return _get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
     
     elif test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
         preprocess_enabled = config["statistics"].get("preprocess_within_groups", False)
         
         # First get all QC-eligible entries
-        sample_entries = get_single_sample_entries(tp, gr)
+        sample_entries = _get_single_sample_entries(tp, gr)
         
         if not preprocess_enabled:
             return sample_entries
@@ -119,10 +115,13 @@ def generate_allele_analysis_targets(tp, gr):
     Dynamically generate targets for allele analysis based on eligible MAGs.
     
     Uses get_allele_analysis_input_path() helper for centralized path construction.
+    
+    NOTE: Uses _get_mags_by_eligibility (QC-only) because allele analysis runs
+    BEFORE preprocessing, so preprocessing eligibility is not yet available.
     """
     targets = []
-    # Get eligible MAGs for this timepoint-group combination
-    eligible_mags = get_mags_by_eligibility(tp, gr, eligibility_type="all")
+    # Get eligible MAGs for this timepoint-group combination (QC eligibility only)
+    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type="all")
     
     # Add targets for each eligible MAG using the centralized path helper
     for mag in eligible_mags:

@@ -23,10 +23,11 @@ def get_between_groups_status_files(wildcards):
     
     # Get MAGs eligible for between-group tests (unpaired OR paired)
     # We exclude single_sample-only MAGs since this is for between-groups preprocessing
+    # NOTE: Uses _get_mags_by_eligibility (QC-only) since this determines which MAGs to preprocess
     eligible_mags = set(
-        get_mags_by_eligibility(wildcards.timepoints, wildcards.groups, eligibility_type="two_sample_unpaired")
+        _get_mags_by_eligibility(wildcards.timepoints, wildcards.groups, eligibility_type="two_sample_unpaired")
     ) | set(
-        get_mags_by_eligibility(wildcards.timepoints, wildcards.groups, eligibility_type="two_sample_paired")
+        _get_mags_by_eligibility(wildcards.timepoints, wildcards.groups, eligibility_type="two_sample_paired")
     )
     
     status_files = []
@@ -52,7 +53,8 @@ def get_within_groups_status_files(wildcards):
         groups=wildcards.groups
     ).output.out_fPath
     
-    sample_entries = get_single_sample_entries(wildcards.timepoints, wildcards.groups)
+    # NOTE: Uses _get_single_sample_entries (QC-only) since this determines which MAGs to preprocess
+    sample_entries = _get_single_sample_entries(wildcards.timepoints, wildcards.groups)
     
     status_files = []
     for mag, group in sample_entries:
@@ -89,7 +91,7 @@ checkpoint preprocessing_eligibility_between_groups:
             "significance_tests",
             "preprocessed_between_groups_{timepoints}-{groups}"
         ),
-        min_positions=config["statistics"].get("min_positions_after_preprocess", 0),
+        min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
     resources:
         mem_mb=get_mem_mb("preprocessing_eligibility_between_groups"),
         time=get_time("preprocessing_eligibility_between_groups"),

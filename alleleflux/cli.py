@@ -444,12 +444,6 @@ def cli(ctx):
     help="Unlock the working directory (removes stale locks).",
 )
 @click.option(
-    "--verbose",
-    is_flag=True,
-    default=False,
-    help="Print the snakemake command before execution.",
-)
-@click.option(
     "--snakemake-args",
     "snakemake_args_str",
     type=str,
@@ -466,7 +460,6 @@ def run_workflow(
     profile,
     dry_run,
     unlock,
-    verbose,
     snakemake_args_str,
     extra_snakemake_args,
 ):
@@ -535,7 +528,6 @@ def run_workflow(
         profile=profile,
         dry_run=dry_run,
         unlock=unlock,
-        verbose=verbose,
         extra_args=extra_args,
         version=__version__,
     )

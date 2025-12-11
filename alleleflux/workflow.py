@@ -191,7 +191,7 @@ def validate_config(config_path: Path) -> dict:
 # =============================================================================
 
 
-def run_snakemake(cmd: str, logfile: Path = None, verbose: bool = False) -> int:
+def run_snakemake(cmd: str, logfile: Path = None) -> int:
     """
     Run snakemake command with real-time output streaming.
 
@@ -203,13 +203,11 @@ def run_snakemake(cmd: str, logfile: Path = None, verbose: bool = False) -> int:
     Args:
         cmd: The snakemake command string to execute.
         logfile: Optional path to write command output to a log file.
-        verbose: If True, print the command before execution.
 
     Returns:
         Exit code from snakemake (0 = success, 130 = interrupted).
     """
-    if verbose:
-        logger.info(f"Executing: {cmd}")
+    logger.info(f"Executing: {cmd}")
 
     # Open log file if specified
     log_handle = open(logfile, "w") if logfile else None
@@ -334,7 +332,6 @@ def execute_workflow(
     profile: Optional[str] = None,
     dry_run: bool = False,
     unlock: bool = False,
-    verbose: bool = False,
     extra_args: Optional[List[str]] = None,
     version: str = "unknown",
 ) -> int:
@@ -355,7 +352,6 @@ def execute_workflow(
         profile: Path to Snakemake profile for cluster execution.
         dry_run: If True, perform a dry run without executing jobs.
         unlock: If True, unlock the working directory and exit.
-        verbose: If True, print the snakemake command before execution.
         extra_args: Additional arguments to pass to snakemake.
         version: AlleleFlux version string for logging.
 
@@ -373,11 +369,10 @@ def execute_workflow(
     if unlock:
         logger.info("Unlocking working directory...")
         unlock_cmd = f"snakemake --snakefile {snakefile} --unlock"
-        return run_snakemake(unlock_cmd, verbose=verbose)
+        return run_snakemake(unlock_cmd)
 
     # Get output directory from config for logging
     output_dir = Path(config.get("output", {}).get("root_dir", working_dir))
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Parse memory if provided
     memory_mb = None
@@ -389,9 +384,12 @@ def execute_workflow(
             logger.error("Use format like '8G', '64GB', or '8192M'.")
             return 1
 
-    # Create log file with timestamp
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logfile = output_dir / f"alleleflux_{timestamp}.log"
+    # Only create output directory and logfile if not doing a dry run
+    logfile = None
+    if not dry_run:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        logfile = output_dir / f"alleleflux_{timestamp}.log"
 
     # Build snakemake command
     cmd = build_snakemake_command(
@@ -416,19 +414,23 @@ def execute_workflow(
     logger.info(f"Working directory: {working_dir}")
     if profile:
         logger.info(f"Profile: {profile}")
-    logger.info(f"Log file: {logfile}")
     if dry_run:
         logger.warning("DRY RUN MODE - No jobs will be executed")
+    else:
+        logger.info(f"Log file: {logfile}")
     logger.info("=" * 60)
 
-    # Write command to log
-    with open(logfile, "w") as f:
-        f.write(f"AlleleFlux run started at {timestamp}\n")
-        f.write(f"Snakemake command: {cmd}\n\n")
+    # Write command to log (skip if dry run)
+    if logfile:
+        with open(logfile, "w") as f:
+            f.write(
+                f"AlleleFlux run started at {datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}\n"
+            )
+            f.write(f"Snakemake command: {cmd}\n\n")
 
     # Run snakemake
     try:
-        exit_code = run_snakemake(cmd, logfile=logfile, verbose=verbose)
+        exit_code = run_snakemake(cmd, logfile=logfile)
     except KeyboardInterrupt:
         # This catches any keyboard interrupt not caught in run_snakemake
         logger.warning("\nWorkflow interrupted by user.")
@@ -438,8 +440,9 @@ def execute_workflow(
     if exit_code == 0:
         logger.info("=" * 60)
         logger.info("AlleleFlux workflow completed successfully!")
-        logger.info(f"Output directory: {output_dir}")
-        logger.info(f"Log file: {logfile}")
+        if not dry_run:
+            logger.info(f"Output directory: {output_dir}")
+            logger.info(f"Log file: {logfile}")
         logger.info("=" * 60)
     elif exit_code == 130:
         # Already logged in run_snakemake, just return
@@ -447,7 +450,8 @@ def execute_workflow(
     else:
         logger.error("=" * 60)
         logger.error(f"AlleleFlux workflow failed with exit code {exit_code}")
-        logger.error(f"Check log file for details: {logfile}")
+        if logfile:
+            logger.error(f"Check log file for details: {logfile}")
         logger.error("=" * 60)
 
     return exit_code

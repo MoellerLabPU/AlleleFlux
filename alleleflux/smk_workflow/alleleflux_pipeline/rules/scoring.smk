@@ -111,22 +111,20 @@ rule combine_MAG_scores:
             os.path.join(
                 OUTDIR,
                 "scores",
-                    "intermediate",
-                    "MAG_scores_{timepoints}-{groups}",
-                    "{mag}_score_{test_type}{group_str}.tsv",
-                ),
-                timepoints=wc.timepoints,
-                groups=wc.groups,
-                test_type=wc.test_type,
-                group_str=wc.group_str,
-                mag=(
-                    get_mags_by_eligibility(
-                        wc.timepoints, wc.groups, eligibility_type=wc.test_type
-                    )
+                "intermediate",
+                "MAG_scores_{timepoints}-{groups}",
+                "{mag}_score_{test_type}{group_str}.tsv",
+            ),
+            timepoints=wc.timepoints,
+            groups=wc.groups,
+            test_type=wc.test_type,
+            group_str=wc.group_str,
+            mag=(
+                get_eligible_mags(wc.timepoints, wc.groups, wc.test_type)
                 if wc.test_type not in {"single_sample", "lmm_across_time", "cmh_across_time"}
                 else [
                     mag
-                    for mag, grp in get_single_sample_entries(wc.timepoints, wc.groups)
+                    for mag, grp in get_eligible_mags(wc.timepoints, wc.groups, wc.test_type)
                     if f"_{grp}" == wc.group_str
                 ]
             ),
@@ -176,7 +174,7 @@ rule combine_MAG_scores_cmh:
             ),
             timepoints=wc.timepoints,
             groups=wc.groups,
-            mag=get_mags_by_eligibility(wc.timepoints, wc.groups, eligibility_type="cmh"),
+            mag=get_eligible_mags(wc.timepoints, wc.groups, "cmh"),
             focus_tp=[wc.focus_tp],
         ),
     output:

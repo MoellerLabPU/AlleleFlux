@@ -80,7 +80,7 @@ statistics:
 # Configuration for evolutionary rate analysis
 dnds:
   p_value_column: "q_value"       # Column for filtering: "min_p_value" or "q_value"
-  dn_ds_test_type: "two_sample_unpaired_tTest"  # Test type for filtering results
+  dn_ds_test_type: "two_sample_paired_tTest"  # Test type for filtering results
 
 # Compute Resources
 # -----------------

@@ -50,6 +50,7 @@ alleleflux-add-bam-path = "alleleflux.scripts.accessory.add_bam_path_to_metadata
 alleleflux-coverage-allele-stats = "alleleflux.scripts.accessory.coverage_and_allele_stats:main"
 alleleflux-list-mags = "alleleflux.scripts.accessory.list_mags:main"
 alleleflux-positions-qc = "alleleflux.scripts.accessory.positions_qc:main"
+alleleflux-copy-profiles = "alleleflux.scripts.accessory.copy_mag_profiles:main"
 
 # Visualization scripts
 alleleflux-prepare-metadata = "alleleflux.scripts.visualization.accessory.prepare_metadata:main"

@@ -255,9 +255,18 @@ def get_sample_info():
     
     return sample_ids, sample_to_bam_map
 
-def get_mags_by_eligibility(timepoints, groups, eligibility_type):
+def _get_mags_by_eligibility(timepoints, groups, eligibility_type):
     """
-    Read the eligibility file for a given timepoint-group combination and return a list of MAG IDs.
+    INTERNAL: Read the eligibility file for a given timepoint-group combination and return a list of MAG IDs.
+    
+    WARNING: This function only checks QC eligibility, NOT preprocessing eligibility.
+    For rule inputs that need to respect preprocessing eligibility, use get_eligible_mags()
+    from dynamic_targets.smk instead.
+    
+    This function should only be called:
+    - Within get_eligible_mags() as a fallback when preprocessing is disabled
+    - In preprocessing_eligibility.smk to get initial QC-eligible MAGs
+    - In generate_allele_analysis_targets() which runs before preprocessing
 
     Parameters:
         timepoints (str): The timepoints label
@@ -313,11 +322,15 @@ def get_mags_by_eligibility(timepoints, groups, eligibility_type):
 
 
 
-def get_single_sample_entries(timepoints, groups):
+def _get_single_sample_entries(timepoints, groups):
     """
-    Reads the eligibility file and returns a list of tuples (MAG_ID, group)
+    INTERNAL: Reads the eligibility file and returns a list of tuples (MAG_ID, group)
     for each column matching 'single_sample_eligible_*' that evaluates to True.
     This allows a MAG to be eligible for multiple single-sample tests.
+    
+    WARNING: This function only checks QC eligibility, NOT preprocessing eligibility.
+    For rule inputs that need to respect preprocessing eligibility, use get_eligible_mags()
+    from dynamic_targets.smk with test_type='single_sample' instead.
     """
     eligibility_file = os.path.join(
         OUTDIR, f"eligibility_table_{timepoints}-{groups}.tsv"
