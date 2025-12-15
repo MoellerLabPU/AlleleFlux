@@ -881,7 +881,7 @@ major = get_major_allele(row, "G")  # Returns "T" (clear winner)
 - `group_analyzed`: Group name if multiple groups were analyzed
 
 **Example:**
-```tsv
+```text
 mag_id	contig	position	gene_id	test_type	min_p_value	q_value
 MAG_001	contig_1	1020	gene_12345	two_sample_paired_tTest	0.001	0.02
 MAG_001	contig_1	1021	gene_12345	two_sample_paired_tTest	0.003	0.04
@@ -908,7 +908,7 @@ MAG_001	contig_2	5500	gene_67890	two_sample_paired_tTest	0.0001	0.005
 - `coverage`: Total coverage at the position
 
 **Example:**
-```tsv
+```text
 contig	position	ref_base	gene_id	A	T	G	C	coverage
 contig_1	1020	G	gene_12345	5	2	150	3	160
 contig_1	1021	T	gene_12345	3	148	4	5	160
@@ -926,7 +926,7 @@ contig_1	1021	T	gene_12345	3	148	4	5	160
 ```
 
 **Example:**
-```fasta
+```text
 >gene_12345 # 1000 # 1500 # 1 # 00 # ATG # TAA
 ATGAAACGTAAAGCTTAG...
 >gene_67890 # 2000 # 2400 # -1 # 00 # ATG # TAG
@@ -1047,7 +1047,7 @@ For each MAG analyzed, the script creates a subdirectory and generates multiple 
 - Potential sites: `potential_S_sites_codon`, `potential_N_sites_codon`
 
 **Example:**
-```tsv
+```text
 mag_id	contig	position	gene_id	codon_before	codon_after	aa_before	aa_after	k	frac_S	frac_N	potential_S_sites_codon	potential_N_sites_codon
 MAG_001	contig_1	1020	gene_12345	GTA	ATA	V	I	1	0.0	1.0	0.67	2.33
 MAG_001	contig_1	1021,1023	gene_12345	GTA	ACA	V	T	2	0.5	1.5	0.67	2.33
@@ -1080,7 +1080,7 @@ MAG_001	contig_2	5500,5501,5502	gene_67890	ATG	TTC	M	F	3	0.83	2.17	0.00	3.00
 - `dN_dS_ratio`: Gene-level dN/dS ratio
 
 **Example:**
-```tsv
+```text
 mag_id	gene_id	s_count	ns_count	potential_S_sites	potential_N_sites	dN	dS	dN_dS_ratio
 MAG_001	gene_12345	5.5	2.3	45.67	123.33	0.0186	0.1204	0.1546
 MAG_001	gene_67890	0.83	8.17	23.00	89.00	0.0918	0.0361	2.5432
@@ -1110,7 +1110,7 @@ MAG_001	gene_67890	0.83	8.17	23.00	89.00	0.0918	0.0361	2.5432
 - `dN_dS_ratio`: MAG-level dN/dS ratio
 
 **Example:**
-```tsv
+```text
 mag_id	total_s_count	total_ns_count	potential_S_sites	potential_N_sites	dN	dS	dN_dS_ratio
 MAG_001	45.67	67.83	1234.50	3890.67	0.0174	0.0370	0.4705
 ```
@@ -1127,7 +1127,7 @@ MAG_001	45.67	67.83	1234.50	3890.67	0.0174	0.0370	0.4705
 **Content:** Single global dN/dS calculation with k-value distribution statistics
 
 **Format:**
-```tsv
+```text
 Metric	Value
 Total Potential Non-Synonymous Sites (n)	125.67
 Total Potential Synonymous Sites (s)	34.33
@@ -1167,7 +1167,7 @@ Total codon events	12
 - Codon potential: `potential_S_sites_codon`, `potential_N_sites_codon`
 
 **Example:**
-```tsv
+```text
 contig	position	gene_id	codon_before	codon_after	k	frac_S	frac_N	potential_S_sites_codon	potential_N_sites_codon
 contig_1	1020	gene_12345	GTA	ATA	1	0.0	1.0	0.67	2.33
 contig_1	1021,1023	gene_12345	GTA	ACA	2	0.5	1.5	0.67	2.33
@@ -1189,7 +1189,7 @@ contig_2	5500,5501,5502	gene_67890	ATG	TTC	3	0.83	2.17	0.00	3.00
 **Content:** Reconstructed ancestral sequences for all analyzed genes
 
 **Example:**
-```fasta
+```text
 >ancestral_gene_12345 # 1000 # 1500 # 1 # 00 # ATG # TAA
 ATGAAACGTAAAGCTTAGGCATTACCGGTAAGTCATAA
 >ancestral_gene_67890 # 2000 # 2400 # -1 # 00 # ATG # TAG
@@ -1293,7 +1293,7 @@ If a codon event shows `frac_S = 1.5` and `frac_N = 0.5`:
   - Multiple sweeps at nearby positions
 
 - Check k-value distribution in global summary:
-  ```tsv
+  ```text
   Number of codon events (k=1)	150
   Number of codon events (k=2)	12
   Number of codon events (k=3)	2
@@ -1746,9 +1746,9 @@ with mp.Pool(processes=num_cpus) as pool:
 
 ### AlleleFlux Documentation
 
-- [Getting Started](../getting_started/overview.rst)
-- [Input Preparation](../usage/input_preparation.rst)
-- [Interpreting Results](../usage/interpreting_results.rst)
+- [Getting Started](../getting_started/overview.md)
+- [Input Preparation](../usage/input_preparation.md)
+- [Interpreting Results](../usage/interpreting_results.md)
 
 ---
 
