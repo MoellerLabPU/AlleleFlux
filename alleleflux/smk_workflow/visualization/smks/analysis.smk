@@ -53,8 +53,12 @@ checkpoint terminal_analysis:
         p_col = config["analysis_params"].get("p_value_column", "q_value"),
         p_val = config["analysis_params"].get("p_value_threshold", 0.05),
         test = config["analysis_params"].get("test_type", "two_sample_paired_tTest"),
-        group_analyzed_arg = f"--group_analyzed {config['analysis_params']['group_analyzed']}" if config["analysis_params"].get("group_analyzed") else ""
-    threads: config["cpus"]["threads_per_job"]
+        group_analyzed_arg = f"--group_analyzed {config['analysis_params']['group_analyzed']}" if config["analysis_params"].get("group_analyzed") else "",
+        # Optional: initial timepoint for frequency change method
+        initial_tp_arg = f"--initial_timepoint {config['analysis_params']['initial_timepoint']}" if config["analysis_params"].get("initial_timepoint") else ""
+    threads: config["resources"]["threads_per_job"]
+    resources:
+        mem_mb = lambda wildcards, attempt: attempt * int(config["resources"].get("mem_per_job", "8G").rstrip("GgMm")) * (1024 if config["resources"].get("mem_per_job", "8G").upper().endswith("G") else 1)
     shell:
         """
         alleleflux-terminal-nucleotide \
@@ -68,6 +72,7 @@ checkpoint terminal_analysis:
             --p_value_threshold {params.p_val} \
             --test-type {params.test} \
             {params.group_analyzed_arg} \
+            {params.initial_tp_arg} \
             --cpus {threads} \
             --log-level INFO
         """
@@ -87,7 +92,9 @@ rule track_allele_frequencies:
         mag_id = "{mag_id}",
         anchor_col = config["tracking_params"]["anchor_column"],
         min_cov = config["tracking_params"]["min_cov_per_site"]
-    threads: config["cpus"]["threads_per_job"]
+    threads: config["resources"]["threads_per_job"]
+    resources:
+        mem_mb = lambda wildcards, attempt: attempt * int(config["resources"].get("mem_per_job", "8G").rstrip("GgMm")) * (1024 if config["resources"].get("mem_per_job", "8G").upper().endswith("G") else 1)
     shell:
         """
         alleleflux-track-alleles \

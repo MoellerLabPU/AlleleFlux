@@ -11,6 +11,7 @@ authors = [
     {name = "Andrew Moeller", email = "andrew.moeller@princeton.edu"}
 ]
 readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
 requires-python = ">=3.7"
 
 [project.scripts]
@@ -60,7 +61,7 @@ alleleflux-plot-trajectories = "alleleflux.scripts.visualization.plot_allele_tra
 
 [tool.setuptools.package-data]
 # Include the runner script AND everything inside the smk_workflow directory
-alleleflux = ["runner.sh", "smk_workflow/**"] 
+alleleflux = ["smk_workflow/**"] 
 
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"
@@ -69,3 +70,6 @@ alleleflux = ["runner.sh", "smk_workflow/**"]
 [tool.isort]
 profile = "black"
 line_length = 88 
+
+[tool.esbonio.sphinx]
+buildCommand = ["sphinx-build", "-M", "html", "docs/source", "${defaultBuildDir}"]

@@ -467,7 +467,11 @@ def main():
         help="Column in the anchor-file to use as the anchor allele.",
         type=str,
         default="terminal_nucleotide_mean_freq",
-        choices=["terminal_nucleotide_mean_freq", "terminal_nucleotide_majority_vote"],
+        choices=[
+            "terminal_nucleotide_mean_freq",
+            "terminal_nucleotide_majority_vote",
+            "terminal_nucleotide_freq_change",
+        ],
     )
     parser.add_argument(
         "--cpus",
