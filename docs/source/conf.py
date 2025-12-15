@@ -19,8 +19,13 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
     "myst_parser",
-    "nbsphinx",
 ]
+
+# Source suffix configuration for both RST and MyST Markdown
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
 
 # Templates
 templates_path = ["_templates"]
