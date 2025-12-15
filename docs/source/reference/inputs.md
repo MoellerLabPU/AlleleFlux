@@ -171,4 +171,4 @@ Use absolute paths for `bam_path`:
 sed -i "s|^|$(pwd)/|" metadata.tsv
 ```
 
-See also: {doc}`../usage/input_preparation`, {doc}`configuration`
+See also: [Input Preparation](../usage/input_preparation.md), [Configuration Reference](configuration.md)

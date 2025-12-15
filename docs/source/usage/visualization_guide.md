@@ -430,6 +430,6 @@ alleleflux-plot-trajectories \
 
 ## See Also
 
-- {doc}`../reference/cli_reference` - Complete CLI documentation
-- {doc}`../reference/outputs` - Output file specifications
-- {doc}`../examples/tutorial` - Full workflow tutorial
+- [CLI Reference](../reference/cli_reference.md) - Complete CLI documentation
+- [Output Files Reference](../reference/outputs.md) - Output file specifications
+- [Tutorial](../examples/tutorial.md) - Full workflow tutorial

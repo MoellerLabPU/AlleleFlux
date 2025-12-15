@@ -302,4 +302,4 @@ resources:
 - **min_base_quality**: Keep at `30` for Illumina; lower to `20` for older data
 - **Resource allocation**: Adjust `threads_per_job` and `mem_per_job` based on MAG sizes
 
-For worked examples, see {doc}`../examples/use_cases`.
+For worked examples, see [Use Cases](../examples/use_cases.md).

@@ -6,7 +6,7 @@ Get started with AlleleFlux in minutes.
 
 Ensure you have:
 
-- AlleleFlux installed (see {doc}`installation`)
+- AlleleFlux installed (see [Installation](installation.md))
 
 - Input files prepared:
 
@@ -44,7 +44,7 @@ analysis:
   use_cmh: true
 ```
 
-See {doc}`../reference/configuration` for all options.
+See [Configuration Reference](../reference/configuration.md) for all options.
 
 ## Run the Pipeline
 
@@ -75,7 +75,7 @@ Key output files:
 - `outliers/*/outlier_genes_*.tsv` - Genes under selection
 - `significance_tests/cmh/*.tsv.gz` - Position-level p-values
 
-See {doc}`../reference/outputs` for complete specifications.
+See [Output Files Reference](../reference/outputs.md) for complete specifications.
 
 ## Individual CLI Tools
 
@@ -95,11 +95,11 @@ alleleflux-qc --rootDir profiles/ --fasta reference.fa \
     --breadth_threshold 0.1 --output_dir qc/
 ```
 
-For complete CLI reference, see {doc}`../reference/cli_reference`.
+For complete CLI reference, see [CLI Reference](../reference/cli_reference.md).
 
 ## Next Steps
 
-- {doc}`../usage/running_workflow` - Detailed workflow guide
-- {doc}`../usage/visualization_guide` - Plot allele trajectories
-- {doc}`../examples/tutorial` - Full tutorial with example data
-- {doc}`../usage/interpreting_results` - Understanding your results
+- [Running the Workflow](../usage/running_workflow.md) - Detailed workflow guide
+- [Visualization Guide](../usage/visualization_guide.md) - Plot allele trajectories
+- [Tutorial](../examples/tutorial.md) - Full tutorial with example data
+- [Interpreting Results](../usage/interpreting_results.md) - Understanding your results

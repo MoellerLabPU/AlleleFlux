@@ -89,7 +89,7 @@ analysis:
 
 ## Customizing the Workflow
 
-You can customize the workflow by editing the `config.yml` file (see {doc}`input_preparation` for details). Key configuration options include:
+You can customize the workflow by editing the `config.yml` file (see [Input Preparation](input_preparation.md) for details). Key configuration options include:
 
 ```yaml
 # Data type: "single" for a single timepoint or "longitudinal" for multiple timepoints

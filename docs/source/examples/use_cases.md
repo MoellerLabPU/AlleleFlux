@@ -73,7 +73,7 @@ Real-world applications of AlleleFlux for metagenomic evolution studies.
 
 ## Configuration Examples
 
-See {doc}`../usage/input_preparation` and {doc}`../reference/configuration` for detailed configuration guides.
+See [Input Preparation](../usage/input_preparation.md) and [Configuration Reference](../reference/configuration.md) for detailed configuration guides.
 
 **Longitudinal study** (antibiotic treatment):
 
@@ -102,4 +102,4 @@ quality_control:
   min_sample_num: 4
 ```
 
-For complete worked examples, see {doc}`tutorial` and {doc}`../usage/interpreting_results`.
+For complete worked examples, see [Tutorial](tutorial.md) and [Interpreting Results](../usage/interpreting_results.md).

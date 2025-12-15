@@ -21,38 +21,38 @@ These scores enable direct comparisons of evolutionary dynamics across different
 :caption: Getting Started
 :maxdepth: 1
 
-getting_started/overview
-getting_started/installation
-getting_started/quickstart
+getting_started/overview.md
+getting_started/installation.md
+getting_started/quickstart.md
 ```
 
 ```{toctree}
 :caption: Usage Guide
 :maxdepth: 1
 
-usage/input_preparation
-usage/running_workflow
-usage/visualization_guide
-usage/interpreting_results
-usage/dnds_analysis
+usage/input_preparation.md
+usage/running_workflow.md
+usage/visualization_guide.md
+usage/interpreting_results.md
+usage/dnds_analysis.md
 ```
 
 ```{toctree}
 :caption: Examples
 :maxdepth: 1
 
-examples/tutorial
-examples/use_cases
+examples/tutorial.md
+examples/use_cases.md
 ```
 
 ```{toctree}
 :caption: Reference
 :maxdepth: 1
 
-reference/cli_reference
-reference/configuration
-reference/inputs
-reference/outputs
+reference/cli_reference.md
+reference/configuration.md
+reference/inputs.md
+reference/outputs.md
 ```
 
 # Indices and tables

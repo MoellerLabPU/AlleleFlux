@@ -56,7 +56,7 @@ Input Files              Profile & QC           Statistical Analysis
 4. **Scoring**: Calculate parallelism/divergence scores and identify outlier genes
 5. **Visualization**: Generate allele trajectory plots and summary statistics
 
-For detailed workflow documentation, see {doc}`../usage/running_workflow`.
+For detailed workflow documentation, see [Running the Workflow](../usage/running_workflow.md).
 
 ## Use Cases
 
@@ -67,4 +67,4 @@ AlleleFlux is designed for:
 - Comparative analysis of adaptation across treatments
 - Identifying genes under selection in metagenomic data
 
-For example workflows, see {doc}`../examples/tutorial` and {doc}`../usage/interpreting_results`.
+For example workflows, see [Tutorial](../examples/tutorial.md) and [Interpreting Results](../usage/interpreting_results.md).

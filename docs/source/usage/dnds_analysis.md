@@ -366,9 +366,9 @@ gzip -cd *_codon_events_ng86.tsv.gz | awk '$9 != "" {print $9, $10}' | head
 
 **Related AlleleFlux Documentation:**
 
-- {doc}`../usage/interpreting_results` – Allele frequency interpretation
-- {doc}`../reference/outputs` – Output file specifications
-- {doc}`../reference/cli_reference` – Command-line options
+- [Interpreting Results](interpreting_results.md) – Allele frequency interpretation
+- [Output Files Reference](../reference/outputs.md) – Output file specifications
+- [CLI Reference](../reference/cli_reference.md) – Command-line options
 
 **External Tools:**
 

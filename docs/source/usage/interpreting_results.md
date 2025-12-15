@@ -144,4 +144,4 @@ Check consistency across statistical approaches (two-sample, LMM, CMH). Genes si
 \- Verify `prodigal_path` in configuration
 \- Check gene FASTA headers match contig naming
 
-For visualization of results, see {doc}`visualization_guide`.
+For visualization of results, see [Visualization Guide](visualization_guide.md).

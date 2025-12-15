@@ -67,7 +67,7 @@ analysis:
   use_cmh: true
 ```
 
-See {doc}`../reference/configuration` for all options.
+See [Configuration Reference](../reference/configuration.md) for all options.
 
 ## Preparation Utilities
 
@@ -97,6 +97,6 @@ For detailed options: `alleleflux-create-mag-mapping --help`
 
 Once inputs are prepared:
 
-1. Create configuration file: {doc}`../reference/configuration`
-2. Run the pipeline: {doc}`running_workflow`
-3. Examine example data: {doc}`../examples/example_data/README`
+1. Create configuration file: [Configuration Reference](../reference/configuration.md)
+2. Run the pipeline: [Running the Workflow](running_workflow.md)
+3. Examine example data: [Example Data](../examples/example_data/README.md)

@@ -4,7 +4,7 @@ This walkthrough uses the bundled example dataset in `docs/source/examples/examp
 
 ## Prerequisites
 
-- AlleleFlux installed and on `$PATH` (see {doc}`../getting_started/installation`).
+- AlleleFlux installed and on `$PATH` (see [Installation](../getting_started/installation.md)).
 - Working from the repo root (`AlleleFlux/`) so relative paths resolve.
 
 ## Step 1: Start from the template config

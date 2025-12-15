@@ -49,8 +49,8 @@ AlleleFlux provides 30+ command-line tools organized by function:
 - **Visualization**: `alleleflux-prepare-metadata`, `alleleflux-terminal-nucleotide`, `alleleflux-track-alleles`, `alleleflux-plot-trajectories`
 - **Utilities**: `alleleflux-create-mag-mapping`, `alleleflux-add-bam-path`
 
-For a complete reference, see {doc}`../reference/cli_reference`.
+For a complete reference, see [CLI Reference](../reference/cli_reference.md).
 
 ## Next Steps
 
-Proceed to {doc}`quickstart` to run your first analysis, or read the {doc}`overview` for a conceptual introduction.
+Proceed to [Quickstart](quickstart.md) to run your first analysis, or read the [Overview](overview.md) for a conceptual introduction.

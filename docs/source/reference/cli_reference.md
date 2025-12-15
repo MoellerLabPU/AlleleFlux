@@ -10,44 +10,19 @@ AlleleFlux ships a main `alleleflux` entrypoint plus console scripts that power 
 alleleflux run --config config.yml [options] [-- <extra snakemake args>]
 ```
 
-```{eval-rst}
-.. list-table::
-   :widths: 28 18 54
-   :header-rows: 1
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-c, --config` | (required) | Path to the AlleleFlux configuration YAML. |
+| `-w, --working-dir` | `.` | Working directory for Snakemake execution. |
+| `-j, --jobs` | None | Max concurrent jobs (local only; ignored when `--profile` is set). |
+| `-t, --threads` | None | Total threads available for local runs. |
+| `-m, --memory` | None | Total memory for local runs (e.g., `64G`). |
+| `-p, --profile` | None | Snakemake profile directory for cluster/HPC execution. |
+| `-n, --dry-run` | False | Plan the DAG without running jobs. |
+| `--unlock` | False | Unlock a previously crashed working directory. |
+| `--snakemake-args` | None | Quoted string of extra Snakemake flags (alternative to `--`). |
 
-   * - Option
-     - Default
-     - Description
-   * - ``-c, --config``
-     - (required)
-     - Path to the AlleleFlux configuration YAML.
-   * - ``-w, --working-dir``
-     - ``.``
-     - Working directory for Snakemake execution.
-   * - ``-j, --jobs``
-     - None
-     - Max concurrent jobs (local only; ignored when ``--profile`` is set).
-   * - ``-t, --threads``
-     - None
-     - Total threads available for local runs.
-   * - ``-m, --memory``
-     - None
-     - Total memory for local runs (e.g., ``64G``).
-   * - ``-p, --profile``
-     - None
-     - Snakemake profile directory for cluster/HPC execution.
-   * - ``-n, --dry-run``
-     - False
-     - Plan the DAG without running jobs.
-   * - ``--unlock``
-     - False
-     - Unlock a previously crashed working directory.
-   * - ``--snakemake-args``
-     - None
-     - Quoted string of extra Snakemake flags (alternative to ``--``).
-```
-
-Pass additional Snakemake flags either after `--` or via `--snakemake-args` (e.g., `alleleflux run -c config.yml -- --forceall --reason`). See {doc}`../usage/running_workflow` for scheduling details.
+Pass additional Snakemake flags either after `--` or via `--snakemake-args` (e.g., `alleleflux run -c config.yml -- --forceall --reason`). See [Running the Workflow](../usage/running_workflow.md) for scheduling details.
 
 ### `alleleflux init` — create a config
 
@@ -100,7 +75,7 @@ These are invoked automatically by the workflow but can be run manually for test
 
 ### Evolution
 
-- `alleleflux-dnds-from-timepoints` — dN/dS from significant sites (see {doc}`../usage/dnds_analysis`).
+- `alleleflux-dnds-from-timepoints` — dN/dS from significant sites (see [dN/dS Analysis Guide](../usage/dnds_analysis.md)).
 
 ### Accessory
 
@@ -124,4 +99,4 @@ These are invoked automatically by the workflow but can be run manually for test
 alleleflux-<tool> --help
 ```
 
-For configuration details, see {doc}`configuration`. For how to run the workflow end to end, see {doc}`../usage/running_workflow`.
+For configuration details, see [Configuration Reference](configuration.md). For how to run the workflow end to end, see [Running the Workflow](../usage/running_workflow.md).
