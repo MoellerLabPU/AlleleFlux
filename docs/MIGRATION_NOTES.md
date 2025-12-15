@@ -8,7 +8,9 @@ This document describes the migration of AlleleFlux documentation from reStructu
 
 1. **Documentation Format**: All `.rst` files in `docs/source/` were converted to MyST Markdown (`.md`)
 2. **Sphinx Configuration**: Updated `conf.py` to recognize both `.rst` and `.md` source files
-3. **Dependencies**: `myst-parser` is now a required docs dependency (already was present)
+3. **Theme**: Migrated from `sphinx_rtd_theme` to **Furo** for a modern, clean appearance
+4. **Extensions**: Added `sphinx-copybutton` for code block copy functionality
+5. **Tables**: Converted all RST `list-table` directives to native Markdown tables
 
 ### Files Converted
 
@@ -25,7 +27,7 @@ The following `*_old.md` files are retained but not included in the toctree:
 - `inputs_old.md`
 - `outputs_old.md`
 
-These files contain `{eval-rst}` blocks for RST list-tables, which still work but could be converted to native Markdown tables in a future cleanup.
+These contain legacy content and can be removed if no longer needed.
 
 ## Building Documentation Locally
 
@@ -65,14 +67,14 @@ The docs will be served at `http://127.0.0.1:8000`.
 
 MyST uses fenced code blocks for directives:
 
-```markdown
+````markdown
 ```{toctree}
 :maxdepth: 2
 
 getting_started/overview
 getting_started/installation
 ```
-```
+````
 
 ### Admonitions
 
@@ -86,6 +88,16 @@ This is a note.
 :::{warning}
 This is a warning.
 :::
+```
+
+### Tables
+
+Use standard Markdown tables:
+
+```markdown
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Value 1  | Value 2  | Value 3  |
 ```
 
 ### Cross-References
@@ -107,11 +119,8 @@ def example():
 
 ## Known Limitations
 
-1. **Legacy RST Tables**: Some files contain `{eval-rst}` blocks with RST list-tables. These render correctly but could be converted to native Markdown tables.
-
-2. **Lexer Names**: Some code blocks use non-standard lexer names. Use `text` for TSV/CSV data instead of `tsv`.
-
-3. **Build Warnings**: 5 warnings remain about legacy files not in toctree (expected, not errors).
+1. **Build Warnings**: 5 warnings remain about legacy files not in toctree (expected, not errors)
+2. **Definition Lists**: Require the `deflist` MyST extension (already enabled)
 
 ## Conversion Tool Used
 
@@ -128,7 +137,7 @@ rst2myst convert docs/source/**/*.rst docs/source/index.rst
 # 1. Create migration branch
 git checkout -b docs-myst-migration
 
-# 2. Update conf.py with source_suffix mapping
+# 2. Update conf.py with source_suffix mapping and Furo theme
 # (Added source_suffix = {".rst": "restructuredtext", ".md": "markdown"})
 
 # 3. Install conversion tool
@@ -145,13 +154,50 @@ rm docs/source/index.rst docs/source/getting_started/*.rst \
 # 6. Fix post-conversion issues
 # - Replace ```tsv and ```fasta with ```text
 # - Update .rst cross-references to .md
+# - Convert {eval-rst} list-tables to Markdown tables
 
-# 7. Verify build
+# 7. Install Furo theme and dependencies
+pip install furo sphinx-copybutton
+
+# 8. Verify build
 cd docs && sphinx-build -b html source build/html
+```
+
+## Theme Configuration (Furo)
+
+The Furo theme is configured in `conf.py`:
+
+```python
+html_theme = "furo"
+html_theme_options = {
+    "light_css_variables": {
+        "color-brand-primary": "#2980B9",
+        "color-brand-content": "#2980B9",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#56B4E9",
+        "color-brand-content": "#56B4E9",
+    },
+    "sidebar_hide_name": False,
+    "navigation_with_keys": True,
+}
+```
+
+## Dependencies
+
+Current docs dependencies (`docs/requirements.txt`):
+
+```
+sphinx>=7.0.0
+furo>=2024.1.0
+sphinx-autodoc-typehints>=1.23.0
+myst-parser>=2.0.0
+sphinx-autobuild
+sphinx-copybutton
 ```
 
 ## Future Improvements
 
-1. Convert remaining `{eval-rst}` blocks to native MyST Markdown tables
-2. Consider adding `myst_parser` extensions like `substitution`, `tasklist` if needed
-3. Remove legacy `*_old.md` files after confirming they're not needed
+1. Remove legacy `*_old.md` files after confirming they're not needed
+2. Add more MyST extensions if needed (e.g., `substitution`, `tasklist`)
+3. Consider adding custom CSS for additional styling
