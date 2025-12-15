@@ -22,30 +22,19 @@ Unique identifier for this analysis.
 run_name: my_study_2024
 ```
 
-\---
+---
 
 ### input
 
 Paths to required input files.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Parameter
-     - Description
-   * - ``fasta_path``
-     - Path to the combined reference FASTA file containing all MAG contigs. Header format should be ``<MAG_ID>.fa_<contig_ID>``.
-   * - ``prodigal_path``
-     - Path to Prodigal gene predictions (nucleotide FASTA). Gene IDs must match contig IDs in the reference FASTA.
-   * - ``metadata_path``
-     - Path to sample metadata TSV file. Must contain columns: ``sample_id``, ``bam_path``, ``subjectID``, ``group``, ``replicate``. For longitudinal data, also include ``time``.
-   * - ``gtdb_path``
-     - Path to GTDB-Tk taxonomy file (``gtdbtk.bac120.summary.tsv``). Used for taxonomic aggregation of scores.
-   * - ``mag_mapping_path``
-     - Path to contig-to-MAG mapping file (TSV with ``contig_name`` and ``mag_id`` columns).
-```
+| Parameter | Description |
+|-----------|-------------|
+| `fasta_path` | Path to the combined reference FASTA file containing all MAG contigs. Header format should be `<MAG_ID>.fa_<contig_ID>`. |
+| `prodigal_path` | Path to Prodigal gene predictions (nucleotide FASTA). Gene IDs must match contig IDs in the reference FASTA. |
+| `metadata_path` | Path to sample metadata TSV file. Must contain columns: `sample_id`, `bam_path`, `subjectID`, `group`, `replicate`. For longitudinal data, also include `time`. |
+| `gtdb_path` | Path to GTDB-Tk taxonomy file (`gtdbtk.bac120.summary.tsv`). Used for taxonomic aggregation of scores. |
+| `mag_mapping_path` | Path to contig-to-MAG mapping file (TSV with `contig_name` and `mag_id` columns). |
 
 **Example:**
 
@@ -58,22 +47,15 @@ input:
   mag_mapping_path: /path/to/mag_mapping.tsv
 ```
 
-\---
+---
 
 ### output
 
 Output directory configuration.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Parameter
-     - Description
-   * - ``root_dir``
-     - Root directory for all output files. Subdirectories will be created for each analysis step.
-```
+| Parameter | Description |
+|-----------|-------------|
+| `root_dir` | Root directory for all output files. Subdirectories will be created for each analysis step. |
 
 **Example:**
 
@@ -82,42 +64,21 @@ output:
   root_dir: ./alleleflux_output
 ```
 
-\---
+---
 
 ### analysis
 
 Core analysis settings.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 15 60
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``data_type``
-     - ``longitudinal``
-     - Type of analysis: ``single`` (one timepoint) or ``longitudinal`` (multiple timepoints).
-   * - ``allele_analysis_only``
-     - ``false``
-     - If true, only run allele frequency analysis without statistical tests.
-   * - ``use_lmm``
-     - ``true``
-     - Enable Linear Mixed Models (LMM) analysis for longitudinal data.
-   * - ``use_significance_tests``
-     - ``true``
-     - Enable two-sample and single-sample statistical tests.
-   * - ``use_cmh``
-     - ``true``
-     - Enable Cochran-Mantel-Haenszel (CMH) tests.
-   * - ``timepoints_combinations``
-     - Required
-     - List of timepoint combinations to analyze (see below).
-   * - ``groups_combinations``
-     - Required
-     - List of group pairs to compare (see below).
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). |
+| `allele_analysis_only` | `false` | If true, only run allele frequency analysis without statistical tests. |
+| `use_lmm` | `true` | Enable Linear Mixed Models (LMM) analysis for longitudinal data. |
+| `use_significance_tests` | `true` | Enable two-sample and single-sample statistical tests. |
+| `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel (CMH) tests. |
+| `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
+| `groups_combinations` | Required | List of group pairs to compare (see below). |
 
 **Timepoints Configuration:**
 
@@ -153,33 +114,18 @@ analysis:
     - [high_fat, standard]
 ```
 
-\---
+---
 
 ### quality_control
 
 Parameters for filtering samples and positions.
 
-```{eval-rst}
-.. list-table::
-   :widths: 30 15 55
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``min_sample_num``
-     - ``4``
-     - Minimum number of samples per group required for statistical tests. MAGs with fewer valid samples are marked as ineligible.
-   * - ``breadth_threshold``
-     - ``0.1``
-     - Minimum breadth of coverage (fraction of genome with ≥1x coverage). Range: 0.0-1.0.
-   * - ``coverage_threshold``
-     - ``1.0``
-     - Minimum average coverage depth required. Samples below this are excluded.
-   * - ``disable_zero_diff_filtering``
-     - ``false``
-     - If true, keep positions where allele frequencies do not change. By default, constant positions are filtered out.
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `min_sample_num` | `4` | Minimum number of samples per group required for statistical tests. MAGs with fewer valid samples are marked as ineligible. |
+| `breadth_threshold` | `0.1` | Minimum breadth of coverage (fraction of genome with ≥1x coverage). Range: 0.0-1.0. |
+| `coverage_threshold` | `1.0` | Minimum average coverage depth required. Samples below this are excluded. |
+| `disable_zero_diff_filtering` | `false` | If true, keep positions where allele frequencies do not change. By default, constant positions are filtered out. |
 
 **Example:**
 
@@ -191,33 +137,18 @@ quality_control:
   disable_zero_diff_filtering: false
 ```
 
-\---
+---
 
 ### profiling
 
 Parameters for BAM file processing during profiling.
 
-```{eval-rst}
-.. list-table::
-   :widths: 30 15 55
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``ignore_orphans``
-     - ``true``
-     - Ignore orphan reads (unpaired reads). Set to ``false`` to include unpaired reads.
-   * - ``min_base_quality``
-     - ``30``
-     - Minimum Phred base quality score to include a base in the pileup.
-   * - ``min_mapping_quality``
-     - ``2``
-     - Minimum mapping quality (MAPQ) score to include a read.
-   * - ``ignore_overlaps``
-     - ``true``
-     - Ignore overlapping segments of read pairs to avoid double-counting.
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ignore_orphans` | `true` | Ignore orphan reads (unpaired reads). Set to `false` to include unpaired reads. |
+| `min_base_quality` | `30` | Minimum Phred base quality score to include a base in the pileup. |
+| `min_mapping_quality` | `2` | Minimum mapping quality (MAPQ) score to include a read. |
+| `ignore_overlaps` | `true` | Ignore overlapping segments of read pairs to avoid double-counting. |
 
 **Example:**
 
@@ -233,42 +164,21 @@ profiling:
 Higher `min_base_quality` values (e.g., 30) reduce sequencing errors but may also reduce coverage. For high-quality data, the default of 30 is recommended.
 :::
 
-\---
+---
 
 ### statistics
 
 Parameters for statistical testing.
 
-```{eval-rst}
-.. list-table::
-   :widths: 35 15 50
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``filter_type``
-     - ``t-test``
-     - Type of initial filter for preprocessing positions.
-   * - ``preprocess_between_groups``
-     - ``true``
-     - Enable preprocessing for between-group comparisons.
-   * - ``preprocess_within_groups``
-     - ``true``
-     - Enable preprocessing for within-group comparisons.
-   * - ``max_zero_count``
-     - ``4``
-     - Maximum number of zero-frequency samples allowed per position in preprocessing.
-   * - ``p_value_threshold``
-     - ``0.05``
-     - Significance threshold (alpha) for statistical tests.
-   * - ``fdr_group_by_mag_id``
-     - ``false``
-     - If true, apply FDR correction within each MAG. If false, apply across all positions.
-   * - ``min_positions_after_preprocess``
-     - ``1``
-     - Minimum number of positions required after preprocessing to proceed with analysis.
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `filter_type` | `t-test` | Type of initial filter for preprocessing positions. |
+| `preprocess_between_groups` | `true` | Enable preprocessing for between-group comparisons. |
+| `preprocess_within_groups` | `true` | Enable preprocessing for within-group comparisons. |
+| `max_zero_count` | `4` | Maximum number of zero-frequency samples allowed per position in preprocessing. |
+| `p_value_threshold` | `0.05` | Significance threshold (alpha) for statistical tests. |
+| `fdr_group_by_mag_id` | `false` | If true, apply FDR correction within each MAG. If false, apply across all positions. |
+| `min_positions_after_preprocess` | `1` | Minimum number of positions required after preprocessing to proceed with analysis. |
 
 **Example:**
 
@@ -283,27 +193,16 @@ statistics:
   min_positions_after_preprocess: 1
 ```
 
-\---
+---
 
 ### dnds
 
 Parameters for dN/dS (synonymous/non-synonymous) ratio calculations.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 25 50
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``p_value_column``
-     - ``q_value``
-     - Column name to use for significance in dN/dS calculations.
-   * - ``dn_ds_test_type``
-     - ``two_sample_unpaired_tTest``
-     - Type of statistical test to use for dN/dS analysis.
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `p_value_column` | `q_value` | Column name to use for significance in dN/dS calculations. |
+| `dn_ds_test_type` | `two_sample_unpaired_tTest` | Type of statistical test to use for dN/dS analysis. |
 
 **Example:**
 
@@ -313,30 +212,17 @@ dnds:
   dn_ds_test_type: two_sample_unpaired_tTest
 ```
 
-\---
+---
 
 ### resources
 
 Computational resource allocation for cluster execution.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 20 55
-   :header-rows: 1
-
-   * - Parameter
-     - Default
-     - Description
-   * - ``threads_per_job``
-     - ``16``
-     - Number of CPU threads allocated to each job.
-   * - ``mem_per_job``
-     - ``8G``
-     - Memory allocation per job. Formats: ``8G``, ``16GB``, ``8192M``.
-   * - ``time``
-     - ``24:00:00``
-     - Maximum wall time per job in HH:MM:SS format.
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `threads_per_job` | `16` | Number of CPU threads allocated to each job. |
+| `mem_per_job` | `8G` | Memory allocation per job. Formats: `8G`, `16GB`, `8192M`. |
+| `time` | `24:00:00` | Maximum wall time per job in HH:MM:SS format. |
 
 **Example:**
 
@@ -347,7 +233,7 @@ resources:
   time: '24:00:00'
 ```
 
-\---
+---
 
 ## Complete Configuration Example
 

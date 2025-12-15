@@ -5,25 +5,16 @@ This guide covers dN/dS ratio analysis in AlleleFlux using the Nei-Gojobori (198
 ## Overview
 
 The **dN/dS ratio** (ω) measures evolutionary selection by comparing:
-\- **dN**: Rate of non-synonymous substitutions (change amino acid)
-\- **dS**: Rate of synonymous substitutions (silent mutations)
+- **dN**: Rate of non-synonymous substitutions (change amino acid)
+- **dS**: Rate of synonymous substitutions (silent mutations)
 
 **Interpretation:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 80
-   :header-rows: 1
-
-   * - dN/dS
-     - Selection Mode
-   * - < 1
-     - **Purifying selection** – deleterious mutations removed
-   * - ≈ 1
-     - **Neutral evolution** – no selective pressure
-   * - > 1
-     - **Positive selection** – advantageous mutations favored
-```
+| dN/dS | Selection Mode |
+|-------|----------------|
+| < 1 | **Purifying selection** – deleterious mutations removed |
+| ≈ 1 | **Neutral evolution** – no selective pressure |
+| > 1 | **Positive selection** – advantageous mutations favored |
 
 ## Methodology
 
@@ -34,17 +25,19 @@ AlleleFlux implements the **NG86 method** to calculate dN/dS ratios from statist
 #### Key Features
 
 1. **Potential Sites Calculation**
-   \- For each codon, determine how many possible single-nucleotide changes are synonymous vs. non-synonymous
-   \- Results in fractional S and N values (e.g., ATG: S=1.0, N=8.0)
+   - For each codon, determine how many possible single-nucleotide changes are synonymous vs. non-synonymous
+   - Results in fractional S and N values (e.g., ATG: S=1.0, N=8.0)
+
 2. **Path Averaging for Multi-Position Changes**
-   \- When multiple positions change in a codon (k=2 or k=3), enumerate all possible mutational pathways
-   \- Average S/NS classifications across paths
-   \- Exclude pathways through intermediate stop codons
-   \- Example: AAA→TTG has 6 pathways (3!), each potentially classifying mutations differently
+   - When multiple positions change in a codon (k=2 or k=3), enumerate all possible mutational pathways
+   - Average S/NS classifications across paths
+   - Exclude pathways through intermediate stop codons
+   - Example: AAA→TTG has 6 pathways (3!), each potentially classifying mutations differently
+
 3. **Codon-Level Analysis**
-   \- Pre-computed cache for all 64 codons (potential sites)
-   \- Pre-computed cache for all 4,096 codon pairs (path-averaged counts)
-   \- O(1) lookups during analysis for efficiency
+   - Pre-computed cache for all 64 codons (potential sites)
+   - Pre-computed cache for all 4,096 codon pairs (path-averaged counts)
+   - O(1) lookups during analysis for efficiency
 
 **Formula:**
 
@@ -73,10 +66,11 @@ Statistical tests → p_value_summary.py → significant sites
 ```
 
 **Required inputs:**
-1\. Significant sites file from `alleleflux-p-value-summary`
-2\. Profile files for ancestral/derived timepoints
-3\. Prodigal gene predictions
-4\. Reference FASTA
+
+1. Significant sites file from `alleleflux-p-value-summary`
+2. Profile files for ancestral/derived timepoints
+3. Prodigal gene predictions
+4. Reference FASTA
 
 ## Usage
 
@@ -96,30 +90,16 @@ alleleflux-dnds-from-timepoints \
 
 ### Key Parameters
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Parameter
-     - Description
-   * - ``--input``
-     - Significant sites TSV from ``p_value_summary``
-   * - ``--mag_id``
-     - MAG identifier to analyze
-   * - ``--p_value_column``
-     - ``q_value`` (FDR-corrected) or ``min_p_value`` (default: ``q_value``)
-   * - ``--p_value_threshold``
-     - Significance cutoff (default: 0.05)
-   * - ``--test_type``
-     - Filter by test (e.g., ``two_sample_paired_tTest``)
-   * - ``--group_analyzed``
-     - Filter by group
-   * - ``--ancestral_timepoint``
-     - Earlier timepoint for sequence reconstruction
-   * - ``--derived_timepoint``
-     - Later timepoint for comparison
-```
+| Parameter | Description |
+|-----------|-------------|
+| `--input` | Significant sites TSV from `p_value_summary` |
+| `--mag_id` | MAG identifier to analyze |
+| `--p_value_column` | `q_value` (FDR-corrected) or `min_p_value` (default: `q_value`) |
+| `--p_value_threshold` | Significance cutoff (default: 0.05) |
+| `--test_type` | Filter by test (e.g., `two_sample_paired_tTest`) |
+| `--group_analyzed` | Filter by group |
+| `--ancestral_timepoint` | Earlier timepoint for sequence reconstruction |
+| `--derived_timepoint` | Later timepoint for comparison |
 
 ### Advanced Examples
 
@@ -165,42 +145,17 @@ done
 
 Codon-level substitution details with path-averaged counts.
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``gene_id``
-     - str
-     - Gene identifier
-   * - ``codon_number``
-     - int
-     - Position in gene (1-based)
-   * - ``codon_before``
-     - str
-     - Ancestral codon
-   * - ``codon_after``
-     - str
-     - Derived codon
-   * - ``aa_before``, ``aa_after``
-     - str
-     - Amino acids
-   * - ``k``
-     - int
-     - Number of changed positions (1, 2, or 3)
-   * - ``fractional_S``
-     - float
-     - Path-averaged synonymous count
-   * - ``fractional_NS``
-     - float
-     - Path-averaged non-synonymous count
-   * - ``potential_S``, ``potential_N``
-     - float
-     - Expected S/N sites for this codon
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `gene_id` | str | Gene identifier |
+| `codon_number` | int | Position in gene (1-based) |
+| `codon_before` | str | Ancestral codon |
+| `codon_after` | str | Derived codon |
+| `aa_before`, `aa_after` | str | Amino acids |
+| `k` | int | Number of changed positions (1, 2, or 3) |
+| `fractional_S` | float | Path-averaged synonymous count |
+| `fractional_NS` | float | Path-averaged non-synonymous count |
+| `potential_S`, `potential_N` | float | Expected S/N sites for this codon |
 
 ### Gene Summary File
 
@@ -208,28 +163,15 @@ Codon-level substitution details with path-averaged counts.
 
 Gene-level dN/dS ratios.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``gene_id``
-     - Gene identifier
-   * - ``dN_dS``
-     - dN/dS ratio
-   * - ``pS``, ``pN``
-     - Proportional synonymous/non-synonymous rates
-   * - ``observed_S``, ``observed_N``
-     - Total path-averaged counts
-   * - ``potential_S``, ``potential_N``
-     - Total expected S/N sites
-   * - ``num_codons_changed``
-     - Count of changed codons
-   * - ``num_significant_sites``
-     - Count of significant positions in gene
-```
+| Column | Description |
+|--------|-------------|
+| `gene_id` | Gene identifier |
+| `dN_dS` | dN/dS ratio |
+| `pS`, `pN` | Proportional synonymous/non-synonymous rates |
+| `observed_S`, `observed_N` | Total path-averaged counts |
+| `potential_S`, `potential_N` | Total expected S/N sites |
+| `num_codons_changed` | Count of changed codons |
+| `num_significant_sites` | Count of significant positions in gene |
 
 ### MAG Summary File
 
@@ -237,22 +179,12 @@ Gene-level dN/dS ratios.
 
 MAG-level dN/dS summary.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``mag_id``
-     - MAG identifier
-   * - ``dN_dS``
-     - Overall MAG dN/dS
-   * - ``num_genes``
-     - Total genes analyzed
-   * - ``num_codons_changed``
-     - Total changed codons across MAG
-```
+| Column | Description |
+|--------|-------------|
+| `mag_id` | MAG identifier |
+| `dN_dS` | Overall MAG dN/dS |
+| `num_genes` | Total genes analyzed |
+| `num_codons_changed` | Total changed codons across MAG |
 
 ### Global Summary File
 
@@ -266,30 +198,13 @@ Contains aggregate `dN_dS`, total sites analyzed, and overall statistics.
 
 ### Understanding dN/dS Values
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 30 50
-   :header-rows: 1
-
-   * - dN/dS Range
-     - Interpretation
-     - Example Genes
-   * - 0 - 0.3
-     - Strong purifying selection
-     - Essential housekeeping genes
-   * - 0.3 - 0.7
-     - Moderate constraint
-     - Metabolic enzymes
-   * - 0.7 - 1.3
-     - Neutral/weak selection
-     - Structural proteins
-   * - 1.3 - 3.0
-     - Positive selection
-     - Antibiotic resistance genes
-   * - > 3.0
-     - Strong positive selection
-     - Host-pathogen interaction genes
-```
+| dN/dS Range | Interpretation | Example Genes |
+|-------------|----------------|---------------|
+| 0 - 0.3 | Strong purifying selection | Essential housekeeping genes |
+| 0.3 - 0.7 | Moderate constraint | Metabolic enzymes |
+| 0.7 - 1.3 | Neutral/weak selection | Structural proteins |
+| 1.3 - 3.0 | Positive selection | Antibiotic resistance genes |
+| > 3.0 | Strong positive selection | Host-pathogen interaction genes |
 
 **NaN values:** Occur when no synonymous substitutions observed (pS = 0). Common in short genes or low-divergence comparisons.
 
@@ -302,9 +217,9 @@ The **k** value indicates how many positions changed in a codon:
 - **k=3**: Three positions changed (e.g., ATG→CAA) – 3! = 6 pathways averaged
 
 Higher k-values may indicate:
-\- Longer time between samples
-\- Stronger selection pressure
-\- Less reliable dN/dS estimates (fewer intermediate observations)
+- Longer time between samples
+- Stronger selection pressure
+- Less reliable dN/dS estimates (fewer intermediate observations)
 
 ### Biological Interpretation
 
@@ -315,7 +230,7 @@ Higher k-values may indicate:
 3. **Immune evasion**: Surface protein diversification
 4. **Novel environment**: Rapid adaptation to colonization
 
-**Low dN/dS (\<0.5) scenarios:**
+**Low dN/dS (<0.5) scenarios:**
 
 1. **Core metabolism**: Essential enzymes under constraint
 2. **Structural genes**: Protein folding requirements
@@ -415,11 +330,9 @@ awk '{pathway=$5; dnds=$3; sum[pathway]+=dnds; count[pathway]++}
 ## Troubleshooting
 
 **Error: "Required columns not found"**
-
 : Check significant sites file has columns: `mag_id`, `contig`, `position`, `gene_id`, `q_value` or `min_p_value`
 
 **Warning: "Reference base mismatch"**
-
 : Profile data reference doesn't match FASTA. Verify consistent reference used throughout workflow.
 
 **Many NaN dN/dS values**

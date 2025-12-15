@@ -19,6 +19,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
     "myst_parser",
+    "sphinx_copybutton",
 ]
 
 # Source suffix configuration for both RST and MyST Markdown
@@ -32,10 +33,24 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 # HTML output options
-html_theme = "sphinx_rtd_theme"
+html_theme = "furo"
 html_static_path = ["_static"]
 html_title = "AlleleFlux Documentation"
 html_favicon = None  # You can add a favicon later if needed
+
+# Furo theme options
+html_theme_options = {
+    "light_css_variables": {
+        "color-brand-primary": "#2980B9",
+        "color-brand-content": "#2980B9",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#56B4E9",
+        "color-brand-content": "#56B4E9",
+    },
+    "sidebar_hide_name": False,
+    "navigation_with_keys": True,
+}
 
 # Autodoc settings
 autodoc_member_order = "bysource"

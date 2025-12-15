@@ -6,7 +6,7 @@ AlleleFlux provides a complete visualization workflow for exploring allele frequ
 The visualization workflow requires completing the main AlleleFlux pipeline first to generate significant sites. Alternatively, you can use the provided example data to learn the workflow.
 :::
 
-\---
+---
 
 ## Visualization Workflow Overview
 
@@ -21,7 +21,7 @@ The visualization pipeline consists of four sequential steps:
 
 Each step produces output files that serve as input to the next step.
 
-\---
+---
 
 ## Step 1: Prepare Metadata
 
@@ -33,33 +33,14 @@ This step standardizes your metadata and adds profile file paths, creating a uni
 
 **Original Metadata File** (TSV):
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Required
-     - Description
-   * - ``sample_id``
-     - Yes
-     - Unique sample identifier
-   * - ``group``
-     - Yes
-     - Experimental group (e.g., "treatment", "control")
-   * - ``time``
-     - Yes
-     - Timepoint identifier (e.g., "pre", "post", "day1")
-   * - ``subjectID``
-     - Yes
-     - Biological replicate/subject ID for pairing samples
-   * - ``day``
-     - No
-     - Numeric day for continuous time axis
-   * - ``replicate``
-     - No
-     - Replicate identifier within group
-```
+| Column | Required | Description |
+|--------|----------|-------------|
+| `sample_id` | Yes | Unique sample identifier |
+| `group` | Yes | Experimental group (e.g., "treatment", "control") |
+| `time` | Yes | Timepoint identifier (e.g., "pre", "post", "day1") |
+| `subjectID` | Yes | Biological replicate/subject ID for pairing samples |
+| `day` | No | Numeric day for continuous time axis |
+| `replicate` | No | Replicate identifier within group |
 
 **Profile Directory Structure:**
 
@@ -86,33 +67,14 @@ alleleflux-prepare-metadata \
 
 **Key Arguments:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 20 55
-   :header-rows: 1
-
-   * - Argument
-     - Default
-     - Description
-   * - ``--metadata-in``
-     - Required
-     - Input metadata file
-   * - ``--metadata-out``
-     - Required
-     - Output standardized metadata (appends if exists)
-   * - ``--base-profile-dir``
-     - Required
-     - Base directory containing sample profile subdirectories
-   * - ``--sample-col``
-     - ``sample_id``
-     - Column name for sample IDs in input
-   * - ``--group-col``
-     - ``group``
-     - Column name for experimental groups
-   * - ``--time-col``
-     - ``time``
-     - Column name for timepoints
-```
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--metadata-in` | Required | Input metadata file |
+| `--metadata-out` | Required | Output standardized metadata (appends if exists) |
+| `--base-profile-dir` | Required | Base directory containing sample profile subdirectories |
+| `--sample-col` | `sample_id` | Column name for sample IDs in input |
+| `--group-col` | `group` | Column name for experimental groups |
+| `--time-col` | `time` | Column name for timepoints |
 
 ### Output
 
@@ -126,11 +88,11 @@ sample3      control     pre     subj2        /path/to/profiles/sample3
 sample4      control     post    subj2        /path/to/profiles/sample4
 ```
 
-\---
+---
 
 ## Step 2: Terminal Nucleotide Analysis
 
-**Command:** `alleleflux-terminal-nuc-analysis`
+**Command:** `alleleflux-terminal-nucleotide`
 
 This step identifies the "terminal" (endpoint) nucleotide at each significant genomic site. Two methods are used:
 
@@ -141,33 +103,14 @@ This step identifies the "terminal" (endpoint) nucleotide at each significant ge
 
 **Significant Sites File** (TSV):
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Required
-     - Description
-   * - ``mag_id``
-     - Yes
-     - MAG identifier
-   * - ``contig``
-     - Yes
-     - Contig identifier
-   * - ``position``
-     - Yes
-     - 0-based genomic position
-   * - ``gene_id``
-     - Yes
-     - Gene identifier
-   * - ``min_p_value``
-     - Yes*
-     - Minimum p-value (used for filtering)
-   * - ``q_value``
-     - Yes*
-     - FDR-adjusted p-value (used for filtering)
-```
+| Column | Required | Description |
+|--------|----------|-------------|
+| `mag_id` | Yes | MAG identifier |
+| `contig` | Yes | Contig identifier |
+| `position` | Yes | 0-based genomic position |
+| `gene_id` | Yes | Gene identifier |
+| `min_p_value` | Yes* | Minimum p-value (used for filtering) |
+| `q_value` | Yes* | FDR-adjusted p-value (used for filtering) |
 
 At least one of `min_p_value` or `q_value` required, depending on `--p_value_column` setting.
 
@@ -182,7 +125,7 @@ MAG_001     MAG_001.fa_contig1      145         MAG_001.fa_contig1_gene1    two_
 ### Usage
 
 ```bash
-alleleflux-terminal-nuc-analysis \
+alleleflux-terminal-nucleotide \
     --significant_sites p_value_summary.tsv \
     --profile_dir profiles/ \
     --metadata visualization_metadata.tsv \
@@ -196,70 +139,35 @@ alleleflux-terminal-nuc-analysis \
 
 **Key Arguments:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 20 55
-   :header-rows: 1
-
-   * - Argument
-     - Default
-     - Description
-   * - ``--significant_sites``
-     - Required
-     - Path to significant sites table
-   * - ``--profile_dir``
-     - Required
-     - Directory containing sample profile subdirectories
-   * - ``--metadata``
-     - Required
-     - Standardized metadata file from Step 1
-   * - ``--group``
-     - Required
-     - Target group for terminal nucleotide calculation
-   * - ``--timepoint``
-     - Required
-     - Target timepoint (typically endpoint)
-   * - ``--output``
-     - Required
-     - Output directory
-   * - ``--p_value_column``
-     - ``q_value``
-     - Column for filtering: ``min_p_value`` or ``q_value``
-   * - ``--p_value_threshold``
-     - 0.05
-     - Maximum p-value to include site
-```
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--significant_sites` | Required | Path to significant sites table |
+| `--profile_dir` | Required | Directory containing sample profile subdirectories |
+| `--metadata` | Required | Standardized metadata file from Step 1 |
+| `--group` | Required | Target group for terminal nucleotide calculation |
+| `--timepoint` | Required | Target timepoint (typically endpoint) |
+| `--output` | Required | Output directory |
+| `--p_value_column` | `q_value` | Column for filtering: `min_p_value` or `q_value` |
+| `--p_value_threshold` | 0.05 | Maximum p-value to include site |
 
 ### Output Files
 
 **Per-MAG Terminal Nucleotides** (`{output}/{mag_id}/{mag_id}_terminal_nucleotides.tsv`):
 
-```{eval-rst}
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``contig``
-     - Contig identifier
-   * - ``position``
-     - Genomic position
-   * - ``gene_id``
-     - Gene identifier
-   * - ``terminal_nucleotide_mean_freq``
-     - Terminal allele (mean frequency method)
-   * - ``terminal_nucleotide_majority_vote``
-     - Terminal allele (majority vote method)
-   * - ``min_p_value``, ``q_value``
-     - Original significance values
-```
+| Column | Description |
+|--------|-------------|
+| `contig` | Contig identifier |
+| `position` | Genomic position |
+| `gene_id` | Gene identifier |
+| `terminal_nucleotide_mean_freq` | Terminal allele (mean frequency method) |
+| `terminal_nucleotide_majority_vote` | Terminal allele (majority vote method) |
+| `min_p_value`, `q_value` | Original significance values |
 
 **Full Frequency Data** (`{mag_id}_frequencies.tsv`): Complete allele frequencies for all samples at each site.
 
 **Summary File** (`terminal_nucleotide_analysis_summary.tsv`): Aggregated results across all MAGs.
 
-\---
+---
 
 ## Step 3: Track Alleles
 
@@ -287,33 +195,14 @@ alleleflux-track-alleles \
 
 **Key Arguments:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 25 50
-   :header-rows: 1
-
-   * - Argument
-     - Default
-     - Description
-   * - ``--mag-id``
-     - Required
-     - MAG identifier to process
-   * - ``--anchor-file``
-     - Required
-     - Terminal nucleotides file from Step 2
-   * - ``--metadata``
-     - Required
-     - Enhanced metadata with ``file_path`` column
-   * - ``--output-dir``
-     - Required
-     - Output directory
-   * - ``--anchor-column``
-     - ``terminal_nucleotide_mean_freq``
-     - Which anchor method to use
-   * - ``--min-cov-per-site``
-     - 0
-     - Minimum coverage required (sites below excluded)
-```
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--mag-id` | Required | MAG identifier to process |
+| `--anchor-file` | Required | Terminal nucleotides file from Step 2 |
+| `--metadata` | Required | Enhanced metadata with `file_path` column |
+| `--output-dir` | Required | Output directory |
+| `--anchor-column` | `terminal_nucleotide_mean_freq` | Which anchor method to use |
+| `--min-cov-per-site` | 0 | Minimum coverage required (sites below excluded) |
 
 ### Output Files
 
@@ -338,7 +227,7 @@ contig1   120         gene1      A                sample1      0.45         trea
 contig1   120         gene1      A                sample2      0.88         control     pre     subj2
 ```
 
-\---
+---
 
 ## Step 4: Plot Allele Trajectories
 
@@ -356,24 +245,13 @@ This step generates visualization plots showing allele frequency trajectories. M
 
 Required columns:
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``contig``, ``position``, ``anchor_allele``
-     - Site identification
-   * - ``frequency``
-     - Allele frequency value (0-1)
-   * - ``group``
-     - Experimental group
-   * - ``subjectID``
-     - Subject/replicate identifier
-   * - ``time`` or ``day``
-     - Temporal information for x-axis
-```
+| Column | Description |
+|--------|-------------|
+| `contig`, `position`, `anchor_allele` | Site identification |
+| `frequency` | Allele frequency value (0-1) |
+| `group` | Experimental group |
+| `subjectID` | Subject/replicate identifier |
+| `time` or `day` | Temporal information for x-axis |
 
 ### Usage
 
@@ -395,51 +273,20 @@ alleleflux-plot-trajectories \
 
 **Key Arguments:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 20 55
-   :header-rows: 1
-
-   * - Argument
-     - Default
-     - Description
-   * - ``--input_file``
-     - Required
-     - Long-format frequency table from Step 3
-   * - ``--value_col``
-     - ``min_p_value``
-     - Column for ranking sites: ``min_p_value``, ``q_value``
-   * - ``--n_sites_line``
-     - 10
-     - Number of top sites for line plots (or "all")
-   * - ``--n_sites_dist``
-     - all
-     - Number of sites for box/violin plots
-   * - ``--x_col``
-     - ``time``
-     - X-axis column: ``time`` or ``day``
-   * - ``--x_order``
-     - None
-     - Custom x-axis order (space-separated)
-   * - ``--plot_types``
-     - ``line``
-     - Plot types: ``line``, ``box``, ``violin``
-   * - ``--per_site``
-     - False
-     - Generate individual plots per site
-   * - ``--n_sites_per_site``
-     - None
-     - Number of sites for per-site plots
-   * - ``--output_dir``
-     - ``./plots``
-     - Output directory
-   * - ``--output_format``
-     - ``png``
-     - Format: ``png``, ``pdf``, ``svg``
-   * - ``--group_by_replicate``
-     - False
-     - Aggregate trajectories by replicate
-```
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--input_file` | Required | Long-format frequency table from Step 3 |
+| `--value_col` | `min_p_value` | Column for ranking sites: `min_p_value`, `q_value` |
+| `--n_sites_line` | 10 | Number of top sites for line plots (or "all") |
+| `--n_sites_dist` | all | Number of sites for box/violin plots |
+| `--x_col` | `time` | X-axis column: `time` or `day` |
+| `--x_order` | None | Custom x-axis order (space-separated) |
+| `--plot_types` | `line` | Plot types: `line`, `box`, `violin` |
+| `--per_site` | False | Generate individual plots per site |
+| `--n_sites_per_site` | None | Number of sites for per-site plots |
+| `--output_dir` | `./plots` | Output directory |
+| `--output_format` | `png` | Format: `png`, `pdf`, `svg` |
+| `--group_by_replicate` | False | Aggregate trajectories by replicate |
 
 ### Advanced Options
 
@@ -468,7 +315,7 @@ alleleflux-plot-trajectories \
 - `per_site/{contig}_{position}_{gene}_line.{format}`
 - `per_site/{contig}_{position}_{gene}_by_replicate.{format}`
 
-\---
+---
 
 ## Example: Complete Visualization Workflow
 
@@ -482,7 +329,7 @@ cd docs/source/examples/example_data
 # alleleflux-prepare-metadata ...
 
 # Step 2: Terminal nucleotide analysis
-alleleflux-terminal-nuc-analysis \
+alleleflux-terminal-nucleotide \
     --significant_sites significant_sites/significant_sites.tsv \
     --profile_dir profiles/ \
     --metadata metadata/sample_metadata.tsv \
@@ -509,7 +356,7 @@ alleleflux-plot-trajectories \
     --output_format png
 ```
 
-\---
+---
 
 ## Expected Plot Outputs
 
@@ -533,7 +380,7 @@ Distribution of allele frequencies at each timepoint across all significant site
 
 Similar to box plots but shows the full distribution density, helpful for identifying bimodal patterns or skewed distributions.
 
-\---
+---
 
 ## Generating Screenshots
 
@@ -554,7 +401,7 @@ alleleflux-plot-trajectories \
     --output_format png
 ```
 
-\---
+---
 
 ## Troubleshooting
 
@@ -579,7 +426,7 @@ alleleflux-plot-trajectories \
 - Process one MAG at a time
 - Reduce `--cpus` to limit parallel processing
 
-\---
+---
 
 ## See Also
 

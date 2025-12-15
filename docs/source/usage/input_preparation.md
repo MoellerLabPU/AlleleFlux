@@ -4,33 +4,14 @@ AlleleFlux requires several input files. This guide covers preparation and forma
 
 ## Required Files
 
-```{eval-rst}
-.. list-table::
-   :header-rows: 1
-   :widths: 20 30 50
-
-   * - File
-     - Format
-     - Description
-   * - **BAM files**
-     - ``.bam`` + ``.bai``
-     - Sorted and indexed alignments of metagenomic reads to MAGs
-   * - **Reference FASTA**
-     - ``.fa`` / ``.fasta``
-     - Combined MAG contigs. Header format: ``<MAG_ID>.fa_<contig_ID>``
-   * - **Prodigal genes**
-     - ``.fna``
-     - Nucleotide ORF predictions matching reference contig IDs
-   * - **Metadata TSV**
-     - ``.tsv``
-     - Sample information with ``sample_id``, ``bam_path``, ``subjectID``, ``group``, ``replicate``. For longitudinal: add ``time``
-   * - **MAG mapping**
-     - ``.tsv``
-     - Contig → MAG assignments (``contig_name``, ``mag_id``)
-   * - **GTDB taxonomy**
-     - ``.tsv`` (optional)
-     - ``gtdbtk.bac120.summary.tsv`` for taxonomic aggregation
-```
+| File | Format | Description |
+|------|--------|-------------|
+| **BAM files** | `.bam` + `.bai` | Sorted and indexed alignments of metagenomic reads to MAGs |
+| **Reference FASTA** | `.fa` / `.fasta` | Combined MAG contigs. Header format: `<MAG_ID>.fa_<contig_ID>` |
+| **Prodigal genes** | `.fna` | Nucleotide ORF predictions matching reference contig IDs |
+| **Metadata TSV** | `.tsv` | Sample information with `sample_id`, `bam_path`, `subjectID`, `group`, `replicate`. For longitudinal: add `time` |
+| **MAG mapping** | `.tsv` | Contig → MAG assignments (`contig_name`, `mag_id`) |
+| **GTDB taxonomy** | `.tsv` (optional) | `gtdbtk.bac120.summary.tsv` for taxonomic aggregation |
 
 ## Metadata File Format
 

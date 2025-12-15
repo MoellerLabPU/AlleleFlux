@@ -34,33 +34,14 @@ AlleleFlux generates structured outputs organized by analysis type and data type
 
 Base-level coverage and allele counts per sample-MAG pair.
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``contig``
-     - str
-     - Contig identifier
-   * - ``position``
-     - int
-     - 0-based position
-   * - ``ref_base``
-     - str
-     - Reference base (A/C/G/T/N)
-   * - ``total_coverage``
-     - int
-     - Total read depth
-   * - ``A``, ``C``, ``G``, ``T``
-     - int
-     - Base counts
-   * - ``gene_id``
-     - str
-     - Overlapping gene (null if intergenic)
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `contig` | str | Contig identifier |
+| `position` | int | 0-based position |
+| `ref_base` | str | Reference base (A/C/G/T/N) |
+| `total_coverage` | int | Total read depth |
+| `A`, `C`, `G`, `T` | int | Base counts |
+| `gene_id` | str | Overlapping gene (null if intergenic) |
 
 ### Quality Control Files
 
@@ -68,27 +49,12 @@ Base-level coverage and allele counts per sample-MAG pair.
 
 Sample-level QC metrics.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 15 60
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``sample_id``
-     - str
-     - Sample identifier
-   * - ``breadth_of_coverage``
-     - float
-     - Fraction of genome covered (0-1)
-   * - ``mean_coverage``
-     - float
-     - Average depth
-   * - ``passed_breadth``
-     - bool
-     - Whether sample passed QC
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `sample_id` | str | Sample identifier |
+| `breadth_of_coverage` | float | Fraction of genome covered (0-1) |
+| `mean_coverage` | float | Average depth |
+| `passed_breadth` | bool | Whether sample passed QC |
 
 ### Eligibility Table
 
@@ -96,22 +62,12 @@ Sample-level QC metrics.
 
 Determines which MAGs qualify for each statistical test.
 
-```{eval-rst}
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``mag_id``
-     - MAG identifier
-   * - ``unpaired_test_eligible``
-     - Eligible for unpaired tests and LMM
-   * - ``paired_test_eligible``
-     - Eligible for paired tests and CMH
-   * - ``single_sample_eligible_{group}``
-     - Per-group single-sample eligibility
-```
+| Column | Description |
+|--------|-------------|
+| `mag_id` | MAG identifier |
+| `unpaired_test_eligible` | Eligible for unpaired tests and LMM |
+| `paired_test_eligible` | Eligible for paired tests and CMH |
+| `single_sample_eligible_{group}` | Per-group single-sample eligibility |
 
 ### Allele Frequency Files
 
@@ -119,72 +75,32 @@ Determines which MAGs qualify for each statistical test.
 
 Position-level allele frequencies across samples.
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``contig``
-     - str
-     - Contig identifier
-   * - ``position``
-     - int
-     - 0-based position
-   * - ``ref_base``
-     - str
-     - Reference base
-   * - ``{sample}_allele_freq``
-     - float
-     - Allele frequency in sample (0-1)
-   * - ``{sample}_alt_allele``
-     - str
-     - Most common non-reference allele
-   * - ``{sample}_coverage``
-     - int
-     - Read depth
-   * - ``gene_id``
-     - str
-     - Overlapping gene
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `contig` | str | Contig identifier |
+| `position` | int | 0-based position |
+| `ref_base` | str | Reference base |
+| `{sample}_allele_freq` | float | Allele frequency in sample (0-1) |
+| `{sample}_alt_allele` | str | Most common non-reference allele |
+| `{sample}_coverage` | int | Read depth |
+| `gene_id` | str | Overlapping gene |
 
 ## Statistical Test Results
 
 ### Two-Sample Tests
 
 **Paths:**
-\- `significance_tests/two_sample_unpaired_{timepoints}-{groups}/{mag}_*.tsv.gz`
-\- `significance_tests/two_sample_paired_{timepoints}-{groups}/{mag}_*.tsv.gz`
+- `significance_tests/two_sample_unpaired_{timepoints}-{groups}/{mag}_*.tsv.gz`
+- `significance_tests/two_sample_paired_{timepoints}-{groups}/{mag}_*.tsv.gz`
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 15 65
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``contig``, ``position``
-     - str, int
-     - Genomic location
-   * - ``gene_id``
-     - str
-     - Overlapping gene
-   * - ``tTest_p_value``
-     - float
-     - T-test p-value
-   * - ``mannwhitneyu_p_value``
-     - float
-     - Mann-Whitney U p-value
-   * - ``mean_diff``
-     - float
-     - Mean allele frequency difference
-   * - ``cohen_d``
-     - float
-     - Effect size
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `contig`, `position` | str, int | Genomic location |
+| `gene_id` | str | Overlapping gene |
+| `tTest_p_value` | float | T-test p-value |
+| `mannwhitneyu_p_value` | float | Mann-Whitney U p-value |
+| `mean_diff` | float | Mean allele frequency difference |
+| `cohen_d` | float | Effect size |
 
 ### Single-Sample Test
 
@@ -192,18 +108,10 @@ Position-level allele frequencies across samples.
 
 Tests deviation from reference within each group.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``avg_allele_freq_{group}``
-     - Mean allele frequency in group
-   * - ``tTest_p_value_{group}``
-     - One-sample t-test p-value
-```
+| Column | Description |
+|--------|-------------|
+| `avg_allele_freq_{group}` | Mean allele frequency in group |
+| `tTest_p_value_{group}` | One-sample t-test p-value |
 
 ### CMH Test
 
@@ -211,20 +119,11 @@ Tests deviation from reference within each group.
 
 Cochran-Mantel-Haenszel test stratified by replicate/timepoint.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``cmh_p_value``
-     - CMH test p-value
-   * - ``mode``
-     - ``across-time`` or ``across-group``
-   * - Stratum columns
-     - Allele counts per stratum (replicate or timepoint)
-```
+| Column | Description |
+|--------|-------------|
+| `cmh_p_value` | CMH test p-value |
+| `mode` | `across-time` or `across-group` |
+| Stratum columns | Allele counts per stratum (replicate or timepoint) |
 
 ### LMM Test
 
@@ -232,18 +131,10 @@ Cochran-Mantel-Haenszel test stratified by replicate/timepoint.
 
 Linear mixed-effects model for longitudinal data.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``lmm_p_value``
-     - Fixed-effect p-value
-   * - ``coefficient``
-     - Estimated effect size
-```
+| Column | Description |
+|--------|-------------|
+| `lmm_p_value` | Fixed-effect p-value |
+| `coefficient` | Estimated effect size |
 
 ## Score Files
 
@@ -253,24 +144,13 @@ Linear mixed-effects model for longitudinal data.
 
 Parallelism and divergence scores per MAG.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``mag_id``
-     - MAG identifier
-   * - ``num_significant_sites``
-     - Count of significant positions
-   * - ``parallelism_score``
-     - Score for within-group consistency (0-1)
-   * - ``divergence_score``
-     - Score for between-group difference (0-1)
-   * - ``combined_score``
-     - ``parallelism_score × divergence_score``
-```
+| Column | Description |
+|--------|-------------|
+| `mag_id` | MAG identifier |
+| `num_significant_sites` | Count of significant positions |
+| `parallelism_score` | Score for within-group consistency (0-1) |
+| `divergence_score` | Score for between-group difference (0-1) |
+| `combined_score` | `parallelism_score × divergence_score` |
 
 ### Gene-Level Scores
 
@@ -278,22 +158,12 @@ Parallelism and divergence scores per MAG.
 
 Scores aggregated by gene.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``mag_id``, ``gene_id``
-     - Identifiers
-   * - ``gene_parallelism_score``
-     - Mean parallelism across gene positions
-   * - ``gene_divergence_score``
-     - Mean divergence across gene positions
-   * - ``num_significant_positions``
-     - Count of significant sites in gene
-```
+| Column | Description |
+|--------|-------------|
+| `mag_id`, `gene_id` | Identifiers |
+| `gene_parallelism_score` | Mean parallelism across gene positions |
+| `gene_divergence_score` | Mean divergence across gene positions |
+| `num_significant_positions` | Count of significant sites in gene |
 
 ### Outlier Gene Files
 
@@ -301,22 +171,12 @@ Scores aggregated by gene.
 
 Genes with exceptionally high scores (potential adaptive targets).
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``mag_id``, ``gene_id``
-     - Identifiers
-   * - ``parallelism_score``
-     - Gene-level parallelism score
-   * - ``outlier_type``
-     - ``parallelism``, ``divergence``, or ``combined``
-   * - ``z_score``
-     - Standard deviations from MAG mean
-```
+| Column | Description |
+|--------|-------------|
+| `mag_id`, `gene_id` | Identifiers |
+| `parallelism_score` | Gene-level parallelism score |
+| `outlier_type` | `parallelism`, `divergence`, or `combined` |
+| `z_score` | Standard deviations from MAG mean |
 
 ## dN/dS Analysis Outputs
 
@@ -331,10 +191,10 @@ Generated by `alleleflux-dnds-from-timepoints` (see {doc}`../usage/dnds_analysis
 **Global Summary:** `{mag}_global_summary_ng86.tsv` – Aggregate statistics
 
 Key columns:
-\- `dN_dS`: dN/dS ratio (>1 = positive selection, \<1 = purifying)
-\- `potential_S`, `potential_N`: Expected synonymous/non-synonymous sites
-\- `observed_S`, `observed_N`: Fractional observed counts (path-averaged)
-\- `k`: Number of positions changed in codon (1, 2, or 3)
+- `dN_dS`: dN/dS ratio (>1 = positive selection, <1 = purifying)
+- `potential_S`, `potential_N`: Expected synonymous/non-synonymous sites
+- `observed_S`, `observed_N`: Fractional observed counts (path-averaged)
+- `k`: Number of positions changed in codon (1, 2, or 3)
 
 ## File Format Notes
 

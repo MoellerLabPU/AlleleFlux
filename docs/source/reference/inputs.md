@@ -8,41 +8,22 @@ AlleleFlux requires specific input file formats. This reference details all requ
 
 Sorted, indexed BAM files from metagenomic alignments to reference MAGs.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Requirement
-     - Description
-   * - Format
-     - Sorted ``.bam`` with ``.bam.bai`` index
-   * - Content
-     - Reads aligned to MAG contigs
-   * - Quality
-     - Higher MAPQ → more reliable alleles
-   * - Sample ID
-     - From metadata ``bam_path`` or filename
-```
+| Requirement | Description |
+|-------------|-------------|
+| Format | Sorted `.bam` with `.bam.bai` index |
+| Content | Reads aligned to MAG contigs |
+| Quality | Higher MAPQ → more reliable alleles |
+| Sample ID | From metadata `bam_path` or filename |
 
 ### Reference FASTA
 
 Combined FASTA containing all MAG contigs.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Property
-     - Specification
-   * - Extension
-     - ``.fa`` or ``.fasta``
-   * - Header Format
-     - ``<MAG_ID>.fa_<contig_ID>``
-   * - Example
-     - ``>Bacteroides_001.fa_k141_1234``
-```
+| Property | Specification |
+|----------|---------------|
+| Extension | `.fa` or `.fasta` |
+| Header Format | `<MAG_ID>.fa_<contig_ID>` |
+| Example | `>Bacteroides_001.fa_k141_1234` |
 
 **Create combined FASTA:**
 
@@ -55,20 +36,11 @@ alleleflux-create-mag-mapping --dir mag_fastas/ --extension fa \
 
 Gene predictions in nucleotide format.
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Property
-     - Specification
-   * - Extension
-     - ``.fna``
-   * - Format
-     - Prodigal nucleotide output (``-d`` flag)
-   * - Header Example
-     - ``>Bacteroides_001.fa_k141_1234_1 # 100 # 450 # 1 # ID=1_1;...``
-```
+| Property | Specification |
+|----------|---------------|
+| Extension | `.fna` |
+| Format | Prodigal nucleotide output (`-d` flag) |
+| Header Example | `>Bacteroides_001.fa_k141_1234_1 # 100 # 450 # 1 # ID=1_1;...` |
 
 **Generate predictions:**
 
@@ -83,26 +55,14 @@ Tab-separated file with sample information.
 
 **Required columns:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 20 80
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``sample_id``
-     - Unique sample identifier
-   * - ``bam_path``
-     - Absolute path to BAM file
-   * - ``subjectID``
-     - Biological replicate/subject ID (for pairing samples)
-   * - ``group``
-     - Experimental group (e.g., ``treatment``, ``control``)
-   * - ``replicate``
-     - Replicate identifier within group (for CMH stratification)
-   * - ``time``
-     - Timepoint (longitudinal only; e.g., ``pre``, ``post``)
-```
+| Column | Description |
+|--------|-------------|
+| `sample_id` | Unique sample identifier |
+| `bam_path` | Absolute path to BAM file |
+| `subjectID` | Biological replicate/subject ID (for pairing samples) |
+| `group` | Experimental group (e.g., `treatment`, `control`) |
+| `replicate` | Replicate identifier within group (for CMH stratification) |
+| `time` | Timepoint (longitudinal only; e.g., `pre`, `post`) |
 
 **Example:**
 
@@ -124,18 +84,10 @@ alleleflux-add-bam-path --metadata meta.tsv --output meta_bam.tsv --bam-dir /dat
 
 Maps contigs to MAG IDs.
 
-```{eval-rst}
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Column
-     - Description
-   * - ``contig_name``
-     - Full contig name from reference FASTA
-   * - ``mag_id``
-     - MAG identifier
-```
+| Column | Description |
+|--------|-------------|
+| `contig_name` | Full contig name from reference FASTA |
+| `mag_id` | MAG identifier |
 
 **Example:**
 
@@ -151,18 +103,10 @@ Lachnospira_002.fa_k141_9012        Lachnospira_002
 
 GTDB-Tk classification (optional, for annotation).
 
-```{eval-rst}
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Property
-     - Specification
-   * - File
-     - ``gtdbtk.bac120.summary.tsv``
-   * - Required Columns
-     - ``user_genome`` (MAG ID), ``classification`` (GTDB taxonomy)
-```
+| Property | Specification |
+|----------|---------------|
+| File | `gtdbtk.bac120.summary.tsv` |
+| Required Columns | `user_genome` (MAG ID), `classification` (GTDB taxonomy) |
 
 **Generate with GTDB-Tk:**
 
@@ -178,33 +122,14 @@ Profile files are created by `alleleflux-profile` and serve as input for analysi
 
 **Columns:**
 
-```{eval-rst}
-.. list-table::
-   :widths: 15 15 70
-   :header-rows: 1
-
-   * - Column
-     - Type
-     - Description
-   * - ``contig``
-     - str
-     - Contig identifier
-   * - ``position``
-     - int
-     - 0-based genomic position
-   * - ``ref_base``
-     - str
-     - Reference base (A/C/G/T)
-   * - ``total_coverage``
-     - int
-     - Total read depth
-   * - ``A``, ``C``, ``G``, ``T``
-     - int
-     - Base counts
-   * - ``gene_id``
-     - str
-     - Overlapping gene (empty if intergenic)
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `contig` | str | Contig identifier |
+| `position` | int | 0-based genomic position |
+| `ref_base` | str | Reference base (A/C/G/T) |
+| `total_coverage` | int | Total read depth |
+| `A`, `C`, `G`, `T` | int | Base counts |
+| `gene_id` | str | Overlapping gene (empty if intergenic) |
 
 ## Pre-Run Checklist
 
