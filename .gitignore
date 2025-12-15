@@ -167,3 +167,4 @@ smk_workflow/logs
 logs/
 .vscode
 .github/chatmodes
+.flowbaby/

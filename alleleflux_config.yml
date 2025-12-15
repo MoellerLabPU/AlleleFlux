@@ -1,0 +1,46 @@
+run_name: alleleflux_analysis/scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+input:
+  fasta_path: /scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+  prodigal_path: /scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+  metadata_path: /scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+  gtdb_path: /scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+  mag_mapping_path: /scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv
+output:
+  root_dir: ./alleleflux_output
+log_level: INFO
+analysis:
+  data_type: longitudinal
+  allele_analysis_only: false
+  use_lmm: true
+  use_significance_tests: true
+  use_cmh: true
+  timepoints_combinations:
+  - timepoint: [pre, end]
+    focus: end
+  groups_combinations:
+  - [fat, con]
+quality_control:
+  min_sample_num: 4
+  breadth_threshold: 0.1
+  coverage_threshold: 1.0
+  disable_zero_diff_filtering: false
+profiling:
+  ignore_orphans: false
+  min_base_quality: 30
+  min_mapping_quality: 2
+  ignore_overlaps: true
+statistics:
+  filter_type: t-test
+  preprocess_between_groups: true
+  preprocess_within_groups: true
+  max_zero_count: 4
+  p_value_threshold: 0.05
+  fdr_group_by_mag_id: false
+  min_positions_after_preprocess: 1
+dnds:
+  p_value_column: q_value
+  dn_ds_test_type: two_sample_unpaired_tTest
+resources:
+  threads_per_job: 16
+  mem_per_job: 8G
+  time: '24:00:00'

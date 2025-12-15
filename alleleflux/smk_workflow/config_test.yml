@@ -1,0 +1,124 @@
+# AlleleFlux Configuration File
+# ============================
+run_name: "test1"
+
+# Input Files
+# ------------
+# Path specifications for all required input data
+input:
+  # bam_dir: "/scratch/gpfs/AMOELLER/diet_manip/copy_sg4230_scratch/sg4230/popgentoolkit/bt2"
+  fasta_path: "/scratch/gpfs/AMOELLER/diet_manip/copy_sg4230_scratch/sg4230/popgentoolkit/redo_representative_megamag.fa"
+  prodigal_path: "/scratch/gpfs/AMOELLER/diet_manip/copy_sg4230_scratch/sg4230/popgentoolkit/redo_representative_megamag.fna"
+  metadata_path: "/scratch/gpfs/AMOELLER/sidd/AlleleFlux_test/test1/longitudinal/metadata_md_bam.tsv"
+  gtdb_path: "/scratch/gpfs/AMOELLER/diet_manip/gtdbtk.bac120.summary.tsv" 
+  mag_mapping_path: "/scratch/gpfs/AMOELLER/diet_manip/copy_sg4230_scratch/sg4230/popgentoolkit/megamag_mapping.tsv"
+
+output:
+  root_dir: "/scratch/gpfs/AMOELLER/sidd/AlleleFlux_test/test3"
+
+log_level: "INFO"              # Logging level: DEBUG, INFO, WARNING, ERROR
+
+# Analysis Configuration
+# -----------------------
+# Core settings that control the type and scope of analysis
+analysis:
+  data_type: "longitudinal"           # Options: "single" or "longitudinal"
+  allele_analysis_only: False   # When True, only runs allele analysis and skips scoring/outlier detection
+
+  # Enable/disable specific analysis modules
+  use_lmm: True                 # Linear Mixed Models analysis
+  use_significance_tests: True  # Two-sample and single-sample tests
+  use_cmh: True                 # CMH test for categorical data
+
+  # Timepoints and groups to analyze
+  timepoints_combinations:
+    # For single data type: use a single timepoint in a list
+    # For longitudinal data type: use a dictionary with pair and focus keys
+    # - timepoint: ["end"] 
+    # - timepoint: ["post"]
+    - timepoint: ["pre", "end"]
+      focus: "pre"
+    # - timepoint: ["pre", "end"]
+    #   focus: "end"
+    # - timepoint: ["end", "post"]
+    #   focus: "post"
+
+  groups_combinations:
+    - ["fat", "control"]    # Currently active group comparison
+
+# Quality Control Parameters
+# --------------------------
+quality_control:
+  min_sample_num: 8         # Minimum number of samples required for analysis
+  breadth_threshold: 0.1    # Minimum coverage breadth across genome
+  coverage_threshold: 0     # Minimum average coverage depth required to pass
+  disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
+
+# Profiling Parameters
+# --------------------
+# Parameters for pileup generation during sample profiling
+profiling:
+  ignore_orphans: False          # Whether to ignore orphan reads (reads without proper pairs)
+  min_base_quality: 30           # Minimum base quality score to consider
+  min_mapping_quality: 2         # Minimum mapping quality score to consider
+  ignore_overlaps: True          # Whether to ignore overlapping read segments
+
+# Statistical Parameters
+# ----------------------
+statistics:
+  filter_type: "t-test"         # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
+  preprocess_between_groups: True   # Whether to preprocess data for between-groups tests (two-sample, LMM, CMH)
+  preprocess_within_groups: True    # Whether to preprocess data for within-group tests (single-sample, LMM across time, CMH across time)
+  max_zero_count: 4             # Maximum number of zero values allowed in single-sample test
+  p_value_threshold: 0.05       # P-value threshold for significance
+  fdr_group_by_mag_id: False    # Whether to apply FDR correction separately for each MAG ID
+  min_positions_after_preprocess: 1
+
+# dN/dS Analysis Parameters
+# -------------------------
+# Configuration for evolutionary analysis using dnds_from_timepoints.py
+dnds:
+  p_value_column: "q_value"     # Column for p-value filtering: "min_p_value" or "q_value"
+  dn_ds_test_type: "two_sample_unpaired_tTest"              # Statistical test type for filtering results
+  # group_analyzed: "fat"       # Need if `dn_ds_test_type` is ["single_sample", "lmm_across_time", "cmh_across_time"]
+
+# Compute Resources
+# -----------------
+# Resources allocated to each step of the workflow
+resources:
+  threads_per_job: 16             # Threads per job (not total threads)
+  mem_per_job: "50G"               # Memory per job. Formats: "8G", "100G", "102400M"
+  time: "8:00:00"                # Wall time limit (HH:MM:SS)
+
+# Advanced: Per-rule resource overrides (power users only)
+# ---------------------------------------------------------
+# Uncomment and customize to override resources for specific rules.
+# Rule names must match exactly. Unspecified resources use defaults above.
+# Most users should NOT need this section.
+#
+resources_override:
+  allele_analysis:               
+    mem_per_job: "100G"
+  preprocessing_eligibility_between_groups:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  preprocessing_eligibility_within_groups:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  statistical_tests:            
+    threads_per_job: 16
+    mem_per_job: "100G"
+  gene_scores:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  cmh_gene_scores:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  detect_outlier_genes:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  detect_cmh_outlier_genes:
+    mem_per_job: "10G"
+    time: "02:00:00"
+  dnds_from_timepoints:    
+    mem_per_job: "200G"
