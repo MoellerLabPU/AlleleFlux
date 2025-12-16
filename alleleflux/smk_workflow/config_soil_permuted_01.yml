@@ -1,0 +1,86 @@
+# AlleleFlux Configuration File
+# ============================
+run_name: "soil_dataset_PRJNA1109856_permuted_1"
+
+# Input Files
+# ------------
+# Path specifications for all required input data
+input:
+  bam_dir: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/bt2/bams"
+  fasta_path: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/mags/renamed/soil_megamag.fasta"
+  prodigal_path: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/mags/renamed/prodigal/soil_megamag.ffn"
+  metadata_path: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/metadata_with_acc_bam_permuted_1.tsv"
+  gtdb_path: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/mags/renamed/gtdb_r226/gtdbtk.bac120.summary.tsv" 
+  mag_mapping_path: "/scratch/gpfs/su2806/soil_dataset_PRJNA1109856/soil_megamag_mapping.tsv"
+
+output:
+  root_dir: "/scratch/gpfs/AMOELLER/sidd/soil_dataset_PRJNA1109856/alleleflux_output_permuted_1"
+
+# Analysis Configuration
+# -----------------------
+# Core settings that control the type and scope of analysis
+analysis:
+  data_type: "longitudinal"           # Options: "single" or "longitudinal"
+  allele_analysis_only: False   # When True, only runs allele analysis and skips scoring/outlier detection
+
+  # Enable/disable specific analysis modules
+  use_lmm: True                 # Linear Mixed Models analysis
+  use_significance_tests: True  # Two-sample and single-sample tests
+  use_cmh: True                 # CMH test for categorical data
+
+  # Timepoints and groups to analyze
+  timepoints_combinations:
+    # For single data type: use a single timepoint in a list
+    # For longitudinal data type: use a dictionary with pair and focus keys
+    # - timepoint: ["end"] 
+    - timepoint: ["T2", "T4"]
+      focus: "T2"
+
+  groups_combinations:
+    - ["Burned", "Unburned"]    # Currently active group comparison
+
+# Quality Control Parameters
+# --------------------------
+quality_control:
+  min_sample_num: 6         # Minimum number of samples required for analysis
+  breadth_threshold: 0.1    # Minimum coverage breadth across genome
+  disable_zero_diff_filtering: False  # Whether to keep sites with zero difference
+
+# Statistical Parameters
+# ----------------------
+statistics:
+  filter_type: "t-test"         # Filter type for two-sample preprocessing: "t-test", "wilcoxon", or "both"
+  preprocess_between_groups: True   # Whether to preprocess data for between-groups tests (two-sample, LMM, CMH)
+  preprocess_within_groups: True    # Whether to preprocess data for within-group tests (single-sample, LMM across time, CMH across time)
+  max_zero_count: 3             # Maximum number of zero values allowed in single-sample test
+  p_value_threshold: 0.05       # P-value threshold for significance
+  fdr_group_by_mag_id: False    # Whether to apply FDR correction separately for each MAG ID
+
+
+# dN/dS Analysis Parameters
+# -------------------------
+# Configuration for evolutionary analysis using dnds_from_timepoints.py
+dnds:
+  p_value_column: "min_p_value"     # Column for p-value filtering: "min_p_value" or "q_value"
+  dn_ds_test_type: "two_sample_paired_tTest"              # Statistical test type for filtering results
+  # group_analyzed: "fat"       # Need if `dn_ds_test_type` is ["single_sample", "lmm_across_time", "cmh_across_time"]
+
+# Compute Resources
+# -----------------
+# Resources allocated to each step of the workflow
+resources:
+  cpus:
+    threads_per_job: 16      # CPUs for profiling step
+  
+  memory:
+    profile: 50000   
+    quality_control: 400000 # Memory in MB (100 GB) for quality control
+    analyze_alleles: 400000 # Memory in MB (100 GB) for allele analysis
+    significance_test: 50000 # Memory in MB for significance testing
+    dn_ds: 200000
+  
+  time:                     # Runtime limits in format "days-HH:MM:SS"
+    profile: "24:00:00"     # 8 hours for profiling
+    significance_test: "08:00:00"  # 8 hours for significance tests
+    general: "24:02:00"     # 1 hour 2 minutes for general tasks
+

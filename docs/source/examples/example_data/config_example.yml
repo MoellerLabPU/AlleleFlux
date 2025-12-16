@@ -1,0 +1,82 @@
+# AlleleFlux Example Configuration
+# =================================
+# This configuration works with the example data provided in this directory.
+# Adjust paths if running from a different location.
+
+run_name: "example_analysis"
+
+# Input Files
+# -----------
+input:
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/sample_metadata.tsv"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
+
+# Output Directory
+# ----------------
+output:
+  root_dir: "./example_output"
+
+log_level: "INFO"
+
+# Analysis Configuration
+# ----------------------
+analysis:
+  data_type: "longitudinal"       # This example uses longitudinal (pre/post) data
+  allele_analysis_only: False
+
+  # Enable all test types for demonstration
+  use_lmm: True
+  use_significance_tests: True
+  use_cmh: True
+
+  # Timepoints and groups
+  timepoints_combinations:
+    - timepoint: ["pre", "post"]
+      focus: "post"
+
+  groups_combinations:
+    - ["treatment", "control"]
+
+# Quality Control Parameters
+# --------------------------
+quality_control:
+  min_sample_num: 2               # Lowered for small example dataset
+  breadth_threshold: 0.1
+  coverage_threshold: 1
+  disable_zero_diff_filtering: False
+
+# Profiling Parameters
+# --------------------
+profiling:
+  ignore_orphans: False
+  min_base_quality: 30
+  min_mapping_quality: 2
+  ignore_overlaps: True
+
+# Statistical Parameters
+# ----------------------
+statistics:
+  filter_type: "t-test"
+  preprocess_between_groups: True
+  preprocess_within_groups: True
+  max_zero_count: 2               # Lowered for small example dataset
+  p_value_threshold: 0.05
+  fdr_group_by_mag_id: False
+  min_positions_after_preprocess: 1
+
+# dN/dS Analysis Parameters
+# -------------------------
+dnds:
+  p_value_column: "q_value"
+  dn_ds_test_type: "two_sample_paired_tTest"
+
+# Compute Resources
+# -----------------
+# Conservative settings for local execution
+resources:
+  threads_per_job: 4
+  mem_per_job: "4G"
+  time: "01:00:00"
