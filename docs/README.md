@@ -88,7 +88,7 @@ sphinx-autobuild source build/html --host 0.0.0.0 --port 8000
 Then set up SSH port forwarding from your local machine:
 
 ```bash
-ssh -L 8000:localhost:8000 user@remote-server
+ssh -N -L 8000:localhost:8000 user@remote-server
 ```
 
 Open http://localhost:8000 in your local browser. Changes auto-reload.
@@ -160,12 +160,12 @@ See [Installation](getting_started/installation.md) for details.
 
 ### Code Blocks
 
-````markdown
+
 ```python
 def example():
     return "Hello"
 ```
-````
+
 
 ## Troubleshooting
 
