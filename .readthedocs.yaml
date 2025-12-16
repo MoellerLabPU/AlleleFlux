@@ -5,8 +5,9 @@ build:
   tools:
     python: "3.9"
 
-conda:
-  environment: docs/environment.yml
-
 sphinx:
-  configuration: docs/source/conf.py 
+  configuration: docs/source/conf.py
+
+python:
+  install:
+    - requirements: docs/requirements.txt 
