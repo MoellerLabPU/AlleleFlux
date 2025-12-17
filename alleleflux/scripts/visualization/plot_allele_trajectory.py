@@ -245,12 +245,12 @@ def compute_group_means(
         pd.DataFrame: A new DataFrame with aggregated mean frequencies.
                       Columns include [x_col, 'group', 'contig', 'position', 'frequency', 'valid_count'].
     """
-    validate_input_columns(df, ["group", "contig", "position", "frequency", x_col])
+    validate_input_columns(df, ["group", "contig", "position", "frequency","anchor_allele", x_col])
 
     # Enhanced aggregation with valid count tracking
     # Note: .count() excludes NA/NaN values, so valid_count reflects non-missing samples only
     mean_df = df.groupby(
-        [x_col, "group", "contig", "position"], as_index=False, observed=True
+        [x_col, "group", "contig", "position", "anchor_allele"], as_index=False, observed=True
     ).agg(frequency=("frequency", "mean"), valid_count=("frequency", "count"))
 
     # Reapply correct sorting
@@ -308,6 +308,215 @@ def compute_replicate_means(
     return mean_df
 
 
+def filter_by_initial_frequency(
+    df: pd.DataFrame,
+    x_col: str,
+    max_initial_freq: Optional[float] = None,
+    min_initial_freq: Optional[float] = None,
+    group_col: str = "group",
+    filter_group: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Filter sites based on initial frequency in a specific group.
+
+    Selects sites where the frequency at the first timepoint in the specified
+    filter_group falls within the given bounds. Once a site is selected, data from
+    ALL groups is kept for that site. This allows users to focus on alleles
+    that start at specific frequencies in one group while still comparing
+    trajectories across all groups.
+
+    What is the "first timepoint"?
+        - For numeric x_col (e.g., 'day'): The minimum value (e.g., day 0)
+        - For categorical x_col (e.g., 'time' with T1, T2, T3): The first category (e.g., T1)
+
+    Args:
+        df: Input DataFrame containing allele frequency data.
+        x_col: Column name used for the X-axis (e.g., 'time', 'day').
+        max_initial_freq: Maximum allowed frequency at the first timepoint (inclusive).
+                          Sites with initial frequency > this value are excluded.
+                          If None, no upper bound is applied.
+        min_initial_freq: Minimum allowed frequency at the first timepoint (inclusive).
+                          Sites with initial frequency < this value are excluded.
+                          If None, no lower bound is applied.
+        group_col: Column name for grouping (default: 'group').
+        filter_group: The group to use for filtering. Can be:
+                      - A specific group name (e.g., 'fat'): Filter based on that group only
+                      - 'both' or 'all': Require criteria to be met in ALL groups
+                      - None: Defaults to 'both/all' mode (criteria must be met in all groups)
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame containing data from ALL groups,
+                      but only for sites that meet the initial frequency
+                      criteria in the specified filter_group(s).
+
+    Example:
+        Suppose you have two groups ("fat" and "control") with data at days 0, 7, 14:
+
+        | site   | group   | day | frequency |
+        |--------|---------|-----|-----------|
+        | Site_A | fat     | 0   | 0.05      |  <- fat=0.05, control=0.08
+        | Site_A | control | 0   | 0.08      |
+        | Site_B | fat     | 0   | 0.05      |  <- fat=0.05, control=0.50
+        | Site_B | control | 0   | 0.50      |
+        | Site_C | fat     | 0   | 0.40      |  <- fat=0.40, control=0.02
+        | Site_C | control | 0   | 0.02      |
+
+        Example 1: filter_group='fat', max_initial_freq=0.1
+        - Site_A: fat=0.05 <= 0.1 -> KEEP (both groups plotted)
+        - Site_B: fat=0.05 <= 0.1 -> KEEP (both groups plotted)
+        - Site_C: fat=0.40 > 0.1 -> EXCLUDE
+
+        Example 2: filter_group='both', max_initial_freq=0.1 (must pass in ALL groups)
+        - Site_A: fat=0.05 <= 0.1 AND control=0.08 <= 0.1 -> KEEP
+        - Site_B: fat=0.05 <= 0.1 BUT control=0.50 > 0.1 -> EXCLUDE
+        - Site_C: fat=0.40 > 0.1 -> EXCLUDE
+
+        >>> # Keep sites where fat starts below 10%
+        >>> filtered = filter_by_initial_frequency(df, 'day', max_initial_freq=0.1, filter_group='fat')
+        >>> # Keep sites where BOTH groups start below 10%
+        >>> filtered = filter_by_initial_frequency(df, 'day', max_initial_freq=0.1, filter_group='both')
+    """
+    validate_input_columns(
+        df, ["contig", "position", "anchor_allele", "frequency", x_col, group_col]
+    )
+
+    if df.empty:
+        logger.warning("Empty DataFrame provided to filter_by_initial_frequency")
+        return df
+
+    # Validate that at least one bound is specified
+    if max_initial_freq is None and min_initial_freq is None:
+        logger.warning("Neither max_initial_freq nor min_initial_freq specified. Returning original data.")
+        return df
+
+    # Determine which group(s) to use for filtering
+    all_groups = df[group_col].unique().tolist()
+    
+    # Check for special keywords "both" or "all"
+    filter_all_groups = filter_group is not None and filter_group.lower() in ["both", "all"]
+    
+    if filter_all_groups:
+        target_groups = all_groups
+        logger.info(f"Using 'both/all' mode: criteria must be met in ALL groups: {all_groups}")
+    elif filter_group is not None:
+        if filter_group not in all_groups:
+            logger.warning(
+                f"Specified filter group '{filter_group}' not found in data. "
+                f"Available groups: {all_groups}. Returning original data unfiltered."
+            )
+            return df
+        target_groups = [filter_group]
+    else:
+        # Default to requiring criteria in ALL groups when no filter_group specified
+        target_groups = all_groups
+        filter_all_groups = True
+        logger.warning(
+            f"No filter_group specified, defaulting to 'both/all' mode: "
+            f"criteria must be met in ALL groups: {all_groups}"
+        )
+
+    # Build filter description for logging
+    filter_parts = []
+    if min_initial_freq is not None:
+        filter_parts.append(f">= {min_initial_freq}")
+    if max_initial_freq is not None:
+        filter_parts.append(f"<= {max_initial_freq}")
+    filter_desc = " AND ".join(filter_parts)
+
+    group_desc = "all groups" if filter_all_groups else f"group '{target_groups[0]}'"
+    logger.info(
+        f"Selecting sites where initial frequency {filter_desc} "
+        f"in {group_desc}. Data from all groups will be kept for matching sites."
+    )
+
+    # Helper function to get passing sites for a single group
+    def get_passing_sites_for_group(group_name):
+        group_df = df[df[group_col] == group_name]
+        
+        # Get the first (minimum) timepoint for this group.
+        # .min() works for both numeric columns (day) and categorical columns (time).
+        # For categoricals, .min() returns the first category in the ordering.
+        first_tp = group_df[x_col].min()
+
+        # Get data at the first timepoint
+        first_tp_data = group_df[group_df[x_col] == first_tp]
+
+        if first_tp_data.empty:
+            logger.warning(f"No data found at first timepoint {first_tp} for group '{group_name}'")
+            return None
+
+        # Calculate mean frequency per site at the first timepoint
+        initial_freqs = first_tp_data.groupby(
+            ["contig", "position", "anchor_allele"], observed=True
+        )["frequency"].mean()
+
+        # Apply frequency bounds to get sites that pass the filter
+        if min_initial_freq is not None and max_initial_freq is not None:
+            # Both bounds specified - use between for clarity
+            mask = initial_freqs.between(min_initial_freq, max_initial_freq)
+        elif min_initial_freq is not None:
+            mask = initial_freqs >= min_initial_freq
+        elif max_initial_freq is not None:
+            mask = initial_freqs <= max_initial_freq
+        else:
+            mask = pd.Series(True, index=initial_freqs.index)
+
+        passing = initial_freqs[mask].reset_index()
+        return set(zip(passing["contig"], passing["position"], passing["anchor_allele"]))
+
+    # Get passing sites for each target group
+    passing_sites_per_group = []
+    for group in target_groups:
+        sites = get_passing_sites_for_group(group)
+        if sites is None:
+            if filter_all_groups:
+                # If using "both/all" and a group has no data, no sites can pass
+                logger.warning(f"No data for group '{group}', no sites can pass 'both/all' filter")
+                return df.iloc[:0]
+            continue
+        passing_sites_per_group.append(sites)
+
+    if not passing_sites_per_group:
+        logger.warning(f"No sites passed the initial frequency filter ({filter_desc})")
+        return df.iloc[:0]
+
+    # Combine results: intersection of all sets (works for both single and multi-group)
+    # For single group, this just returns that group's sites
+    # For multiple groups, sites must pass in ALL groups
+    final_sites = set.intersection(*passing_sites_per_group)
+
+    if not final_sites:
+        logger.warning(
+            f"No sites passed the initial frequency filter "
+            f"({filter_desc} in {group_desc})"
+        )
+        return df.iloc[:0]
+
+    # Convert back to DataFrame for merging
+    passing_sites_df = pd.DataFrame(
+        list(final_sites), columns=["contig", "position", "anchor_allele"]
+    )
+
+    # Filter original data to keep ALL groups' data for the passing sites
+    filtered_df = df.merge(
+        passing_sites_df,
+        on=["contig", "position", "anchor_allele"],
+        how="inner",
+    )
+
+    initial_count = df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+    final_count = filtered_df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+
+    logger.info(
+        f"Initial frequency filter (based on {group_desc}): "
+        f"{initial_count} sites -> {final_count} sites "
+        f"({len(df)} rows -> {len(filtered_df)} rows)"
+    )
+
+
+    return filtered_df
+
+
 def get_plotting_data(
     df: pd.DataFrame,
     value_col: str,
@@ -356,8 +565,8 @@ def get_plotting_data(
     # Filter original data to only include selected sites
     # Uses inner join on site identifiers + value_col
     filtered = df.merge(
-        top_sites,
-        on=["contig", "position", "anchor_allele", value_col],
+        top_sites[["contig", "position", "anchor_allele"]],
+        on=["contig", "position", "anchor_allele"],
         how="inner",
     )
     if filtered.empty:
@@ -481,7 +690,7 @@ def plot_combined(
         # We loop manually to get the "Spaghetti" effect (one line per site)
         # sns.lineplot(units=...) can do this, but explicit looping is often safer
         # for 'hue' control on complex groupings.
-        for (contig, pos), subdf in df.groupby(["contig", "position"]):
+        for (contig, pos, allele), subdf in df.groupby(["contig", "position", "anchor_allele"]):
             # Skip empty subsets
             if subdf.empty:
                 continue
@@ -688,6 +897,9 @@ def plot_group_distributions(
     min_samples_per_bin: int = 1,
     group_by_replicate: bool = False,
     line_alpha: float = 0.8,
+    max_initial_freq: Optional[float] = None,
+    min_initial_freq: Optional[float] = None,
+    initial_freq_group: Optional[str] = None,
 ) -> None:
     """
     Orchestrates the plotting process: filters data, computes means, and generates requested plots.
@@ -714,6 +926,13 @@ def plot_group_distributions(
         min_samples_per_bin: Minimum number of valid (non-NA) samples required per bin (default: 1).
         group_by_replicate: If True, aggregate subject trajectories by replicate in per-site plots.
         line_alpha: Transparency level for lines in line plots (0.0 to 1.0).
+        max_initial_freq: Optional maximum initial frequency threshold (inclusive). Sites with
+                          initial frequency > this value in initial_freq_group are excluded.
+        min_initial_freq: Optional minimum initial frequency threshold (inclusive). Sites with
+                          initial frequency < this value in initial_freq_group are excluded.
+        initial_freq_group: The group to use for initial frequency filtering. Sites are
+                            selected based on their initial frequency in this group only.
+                            Data from ALL groups is kept for matching sites.
     """
     # === VALIDATION PHASE ===
     # Early exit if no data to process
@@ -743,6 +962,19 @@ def plot_group_distributions(
     # === X-AXIS PREPARATION ===
     # Apply custom ordering/filtering if specified, or convert 'day' to numeric
     df, sorted_vals = prepare_x_axis(df, x_col, x_order)
+
+    # === VALIDATE TIME COLUMN ORDERING ===
+    # When using 'time' as x_col, require explicit --x_order to avoid lexicographic
+    # sorting issues (e.g., 'T10' < 'T2' in string order)
+    if x_col == "time" and x_order is None:
+        unique_times = sorted(df[x_col].unique().tolist())
+        raise ValueError(
+            f"When using --x_col time, you must specify --x_order to define the "
+            f"correct chronological order. Lexicographic sorting can cause issues "
+            f"(e.g., 'T10' sorts before 'T2'). "
+            f"Found time values: {unique_times}. "
+            f"Example: --x_order T1 T2 T3 T10"
+        )
 
     # === TIME BINNING (OPTIONAL) ===
     # Groups continuous day values into discrete bins for cleaner visualization
@@ -779,6 +1011,32 @@ def plot_group_distributions(
         df["bin_label"] = pd.Categorical(
             df["bin_label"], categories=ordered_labels, ordered=True
         )
+
+    # === INITIAL FREQUENCY FILTERING (OPTIONAL) ===
+    # Filters trajectories based on their frequency at the first timepoint
+    # This is done AFTER binning so that "first timepoint" refers to the first bin
+    if max_initial_freq is not None or min_initial_freq is not None:
+        # Determine which x_col to use for finding the first timepoint
+        # When binning is enabled, use bin_midpoint (numeric) for correct ordering
+        filter_x_col = "bin_midpoint" if bin_width_days is not None else x_col
+        
+        df = filter_by_initial_frequency(
+            df, filter_x_col,
+            max_initial_freq=max_initial_freq,
+            min_initial_freq=min_initial_freq,
+            filter_group=initial_freq_group,
+        )
+        if df.empty:
+            filter_desc = []
+            if min_initial_freq is not None:
+                filter_desc.append(f"min={min_initial_freq}")
+            if max_initial_freq is not None:
+                filter_desc.append(f"max={max_initial_freq}")
+            logger.error(
+                f"No data remaining after initial frequency filtering "
+                f"({', '.join(filter_desc)})"
+            )
+            return
 
     # === DATA CACHING ===
     # Cache computed data to avoid redundant processing when n_line == n_dist
@@ -972,6 +1230,33 @@ def main():
         default=0.8,
         help="Transparency level for lines in line plots (0.0 = fully transparent, 1.0 = fully opaque).",
     )
+    parser.add_argument(
+        "--max_initial_freq",
+        type=float,
+        default=None,
+        help="Maximum initial frequency threshold (inclusive). Only sites where the frequency at the "
+        "first timepoint (in --initial_freq_group) is <= this value will be kept. "
+        "Can be used alone or with --min_initial_freq to specify a range. "
+        "Example: --max_initial_freq 0.1 --initial_freq_group fat",
+    )
+    parser.add_argument(
+        "--min_initial_freq",
+        type=float,
+        default=None,
+        help="Minimum initial frequency threshold (inclusive). Only sites where the frequency at the "
+        "first timepoint (in --initial_freq_group) is >= this value will be kept. "
+        "Can be used alone or with --max_initial_freq to specify a range. "
+        "Example: --min_initial_freq 0.05 --max_initial_freq 0.2 --initial_freq_group fat",
+    )
+    parser.add_argument(
+        "--initial_freq_group",
+        type=str,
+        default=None,
+        help="The group to use for initial frequency filtering. Can be a specific group name (e.g., 'fat'), "
+        "or 'both'/'all' to require the criteria be met in ALL groups. "
+        "Data from ALL groups is plotted for sites that pass the filter. "
+        "Examples: --max_initial_freq 0.1 --initial_freq_group fat | --initial_freq_group both",
+    )
 
     args = parser.parse_args()
 
@@ -1023,6 +1308,9 @@ def main():
         min_samples_per_bin=args.min_samples_per_bin,
         group_by_replicate=args.group_by_replicate,
         line_alpha=args.line_alpha,
+        max_initial_freq=args.max_initial_freq,
+        min_initial_freq=args.min_initial_freq,
+        initial_freq_group=args.initial_freq_group,
     )
 
     logger.info("Plotting completed successfully")
