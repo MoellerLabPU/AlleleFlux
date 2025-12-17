@@ -69,7 +69,11 @@ rule plot_trajectories:
         bin_width_arg = f"--bin_width_days {config['plotting_params']['bin_width_days']}" if config["plotting_params"].get("bin_width_days") else "",
         min_samples_arg = f"--min_samples_per_bin {config['plotting_params']['min_samples_per_bin']}" if config["plotting_params"].get("min_samples_per_bin") else "",
         group_rep_arg = "--group_by_replicate" if config["plotting_params"].get("group_by_replicate") else "",
-        line_alpha_arg = f"--line_alpha {config['plotting_params']['line_alpha']}" if config["plotting_params"].get("line_alpha") else ""
+        line_alpha_arg = f"--line_alpha {config['plotting_params']['line_alpha']}" if config["plotting_params"].get("line_alpha") else "",
+        # Initial frequency filtering
+        max_init_freq_arg = f"--max_initial_freq {config['plotting_params']['max_initial_freq']}" if config["plotting_params"].get("max_initial_freq") else "",
+        min_init_freq_arg = f"--min_initial_freq {config['plotting_params']['min_initial_freq']}" if config["plotting_params"].get("min_initial_freq") else "",
+        init_freq_group_arg = f"--initial_freq_group {config['plotting_params']['initial_freq_group']}" if config["plotting_params"].get("initial_freq_group") else ""
     threads: 1
     shell:
         """
@@ -88,5 +92,8 @@ rule plot_trajectories:
             {params.bin_width_arg} \
             {params.min_samples_arg} \
             {params.group_rep_arg} \
-            {params.line_alpha_arg}
+            {params.line_alpha_arg} \
+            {params.max_init_freq_arg} \
+            {params.min_init_freq_arg} \
+            {params.init_freq_group_arg}
         """
