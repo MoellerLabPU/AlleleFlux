@@ -144,7 +144,7 @@ resources:
 | | `gtdb_path` | GTDB-Tk taxonomy file |
 | | `mag_mapping_path` | MAG-to-contig mapping TSV |
 | **analysis** | `data_type` | `"longitudinal"` (multiple timepoints) or `"single"` |
-| | `allele_analysis_only` | Skip scoring/outliers if `True` |
+| | `allele_analysis_only` | Skip significance tests, scoring, and outlier detection if `True` |
 | | `use_lmm` | Enable Linear Mixed Models |
 | | `use_significance_tests` | Enable two-sample/single-sample tests |
 | | `use_cmh` | Enable Cochran-Mantel-Haenszel tests |
