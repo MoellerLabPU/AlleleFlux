@@ -6,8 +6,11 @@ package:
   version: {{ version }}
 
 source:
-  url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
+  # For bioconda submission, use:
+  # url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
   # sha256: <update after creating release tag>
+  # For local testing:
+  path: ..
 
 build:
   number: 0
@@ -18,17 +21,17 @@ build:
 
 requirements:
   host:
-    - python >=3.7
+    - python >=3.9
     - pip
     - setuptools >=64.0.0
     - wheel
   run:
-    - python >=3.7
+    - python >=3.9
     # Core scientific stack (conda-forge)
     - numpy
     - pandas
     - scipy
-    - matplotlib-base
+    - matplotlib
     - seaborn
     - statsmodels
     - tqdm
@@ -51,11 +54,44 @@ test:
     - alleleflux.scripts.preprocessing
     - alleleflux.scripts.statistics
   commands:
-    - alleleflux --help
-    - alleleflux-profile --help
-    - alleleflux-qc --help
-    - alleleflux-scores --help
-    - alleleflux-cmh --help
+    # Main CLI
+    - alleleflux --help > /dev/null 2>&1
+    # Analysis scripts
+    - alleleflux-profile --help > /dev/null 2>&1
+    - alleleflux-allele-freq --help > /dev/null 2>&1
+    - alleleflux-scores --help > /dev/null 2>&1
+    - alleleflux-taxa-scores --help > /dev/null 2>&1
+    - alleleflux-gene-scores --help > /dev/null 2>&1
+    - alleleflux-outliers --help > /dev/null 2>&1
+    - alleleflux-cmh-scores --help > /dev/null 2>&1
+    # Preprocessing scripts
+    - alleleflux-metadata --help > /dev/null 2>&1
+    - alleleflux-qc --help > /dev/null 2>&1
+    - alleleflux-eligibility --help > /dev/null 2>&1
+    - alleleflux-preprocess-between-groups --help > /dev/null 2>&1
+    - alleleflux-preprocess-within-group --help > /dev/null 2>&1
+    - alleleflux-preprocessing-eligibility --help > /dev/null 2>&1
+    - alleleflux-p-value-summary --help > /dev/null 2>&1
+    # Statistics scripts
+    - alleleflux-lmm --help > /dev/null 2>&1
+    - alleleflux-single-sample --help > /dev/null 2>&1
+    - alleleflux-two-sample-paired --help > /dev/null 2>&1
+    - alleleflux-two-sample-unpaired --help > /dev/null 2>&1
+    - alleleflux-cmh --help > /dev/null 2>&1
+    # Evolution scripts
+    - alleleflux-dnds-from-timepoints --help > /dev/null 2>&1
+    # Accessory scripts
+    - alleleflux-create-mag-mapping --help > /dev/null 2>&1
+    - alleleflux-add-bam-path --help > /dev/null 2>&1
+    - alleleflux-coverage-allele-stats --help > /dev/null 2>&1
+    - alleleflux-list-mags --help > /dev/null 2>&1
+    - alleleflux-positions-qc --help > /dev/null 2>&1
+    - alleleflux-copy-profiles --help > /dev/null 2>&1
+    # Visualization scripts
+    - alleleflux-prepare-metadata --help > /dev/null 2>&1
+    - alleleflux-terminal-nucleotide --help > /dev/null 2>&1
+    - alleleflux-track-alleles --help > /dev/null 2>&1
+    - alleleflux-plot-trajectories --help > /dev/null 2>&1
 
 about:
   home: https://github.com/MoellerLabPU/AlleleFlux
@@ -64,12 +100,12 @@ about:
   license_file: LICENSE
   summary: A tool for fine-grained evolutionary analysis of microbial populations and communities
   description: |
-    AlleleFlux is a python package for analyzing allele frequencies 
+    AlleleFlux is a python package for analyzing allele frequencies trajectories
     in metagenomic data. It profiles MAG (Metagenome-Assembled Genome) populations 
     across samples, detecting parallel evolution through allele frequency changes.
   dev_url: https://github.com/MoellerLabPU/AlleleFlux
-  doc_url: https://github.com/MoellerLabPU/AlleleFlux
+  doc_url: https://alleleflux.readthedocs.io/en/latest/?badge=latest
 
 extra:
   recipe-maintainers:
-    - sidd-uppal
+    - Sidduppal

@@ -17,7 +17,7 @@ cluster-generic-submit-cmd:
 
 # Safety-net fallbacks (all rules should specify resources from config.yml)
 default-resources:
-  - mem_mb=10000
+  - mem_mb=20000
   - time="8:00:00"
 
 restart-times: 0
