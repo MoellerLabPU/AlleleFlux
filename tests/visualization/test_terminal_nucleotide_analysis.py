@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from alleleflux.scripts.accessory.terminal_nucleotide_analysis import (
+from alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis import (
     NUCLEOTIDES,
     find_profile_files,
     get_terminal_samples,
@@ -440,7 +440,7 @@ class TestPerformMajorityVoting(TestTerminalNucleotideAnalysis):
 class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
     """Test worker wrapper and MAG processing functions."""
 
-    @patch("alleleflux.scripts.accessory.terminal_nucleotide_analysis.logger")
+    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
     def test_process_single_mag_basic(self, mock_logger):
         """Test basic MAG processing functionality."""
         # Create test data
@@ -502,7 +502,7 @@ class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
         for nuc in majority_counts.keys():
             self.assertIn(nuc, NUCLEOTIDES)
 
-    @patch("alleleflux.scripts.accessory.terminal_nucleotide_analysis.logger")
+    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
     def test_process_single_mag_with_missing_profile_files(self, mock_logger):
         """Test MAG processing when some profile files are missing."""
         mag_id = "MAG001"
@@ -535,7 +535,7 @@ class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
                 mag_id, mag_sites, profile_files, sample_ids, p_value_column, output_dir
             )
 
-    @patch("alleleflux.scripts.accessory.terminal_nucleotide_analysis.logger")
+    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
     def test_process_single_mag_with_empty_sites(self, mock_logger):
         """Test MAG processing with empty sites DataFrame."""
         mag_id = "MAG001"
