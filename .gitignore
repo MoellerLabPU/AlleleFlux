@@ -168,3 +168,5 @@ logs/
 .vscode
 .github/chatmodes
 .flowbaby/
+.kilocode/*
+alleleflux/smk_workflow/config_*
