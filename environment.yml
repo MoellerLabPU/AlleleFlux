@@ -19,6 +19,7 @@ dependencies:
   - snakemake-executor-plugin-cluster-generic
   - rpy2 # Added for R integration
   - r-base # Required by rpy2
+  - r-tidyr
   - pip
   - pip:
       - -e .

@@ -1,0 +1,32 @@
+# https://github.com/jdblischak/smk-simple-slurm?tab=readme-ov-file
+# https://bioconda.github.io/recipes/snakemake-executor-plugin-cluster-generic/README.html
+#
+# Resources are configured in your AlleleFlux config.yml under "resources".
+# The default-resources below are safety-net fallbacks only used if a rule
+# somehow doesn't specify mem_mb or time (which shouldn't happen normally).
+executor: cluster-generic
+cluster-generic-submit-cmd:
+  mkdir -p logs/{config[run_name]}/`date +"%d-%m-%y"`/{rule} &&
+  sbatch
+    --cpus-per-task={threads}
+    --mem={resources.mem_mb}
+    --time={resources.time}
+    --job-name=smk-{rule}-{wildcards}
+    --output=logs/{config[run_name]}/`date +"%d-%m-%y"`/{rule}/{rule}-{wildcards}-%j.out
+    --parsable
+
+# Safety-net fallbacks (all rules should specify resources from config.yml)
+default-resources:
+  - mem_mb=20000
+  - time="8:00:00"
+
+restart-times: 0
+max-jobs-per-second: 100
+max-status-checks-per-second: 1
+latency-wait: 60
+jobs: 100
+keep-going: True
+rerun-incomplete: True
+printshellcmds: True
+use-conda: True
+cluster-generic-cancel-cmd: scancel

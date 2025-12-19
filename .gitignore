@@ -165,3 +165,9 @@ smk_workflow/.snakemake
 .snakemake
 smk_workflow/logs
 logs/
+.vscode
+.github/chatmodes
+.flowbaby/
+.kilocode/*
+alleleflux/smk_workflow/config_*
+alleleflux_config*
