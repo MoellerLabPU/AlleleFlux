@@ -170,3 +170,4 @@ logs/
 .flowbaby/
 .kilocode/*
 alleleflux/smk_workflow/config_*
+alleleflux_config*
