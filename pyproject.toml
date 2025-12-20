@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AlleleFlux"
-version = "0.1.1"
+version = "0.1.2"
 description = "AlleleFlux: A tool for fine grained evolutionary analysis of microbial populations and communities"
 authors = [
     {name = "Siddhartha Uppal", email = "sidd.uppal96@gmail.com"},
     {name = "Andrew Moeller", email = "andrew.moeller@princeton.edu"}
 ]
 readme = "README.md"
-license = {text = "GPL-3.0-or-later"}
-requires-python = ">=3.7"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.9"
 
 [project.scripts]
 alleleflux = "alleleflux.cli:main"
@@ -58,6 +58,10 @@ alleleflux-prepare-metadata = "alleleflux.scripts.visualization.accessory.prepar
 alleleflux-terminal-nucleotide = "alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis:main"
 alleleflux-track-alleles = "alleleflux.scripts.visualization.accessory.track_allele_frequencies:main"
 alleleflux-plot-trajectories = "alleleflux.scripts.visualization.plot_allele_trajectory:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["alleleflux*"]
 
 [tool.setuptools.package-data]
 # Include the runner script AND everything inside the smk_workflow directory
