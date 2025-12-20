@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: PLACEHOLDER_UPDATE_AFTER_TAGGING
+  sha256: db752e6c76ecae6dcb72ffc3e0b64587016212e88c210cdabb3f859704780266
 
 build:
   number: 0
