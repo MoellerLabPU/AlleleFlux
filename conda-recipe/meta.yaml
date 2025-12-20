@@ -1,16 +1,13 @@
 {% set name = "alleleflux" %}
-{% set version = "0.1.0" %}
+{% set version = "0.1.1" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  # For bioconda submission, use:
-  # url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
-  # sha256: <update after creating release tag>
-  # For local testing:
-  path: ..
+  url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: PLACEHOLDER_UPDATE_AFTER_TAGGING
 
 build:
   number: 0

@@ -15,10 +15,10 @@ import re
 import subprocess
 import sys
 from datetime import datetime
+from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import List, Optional
 
-import pkg_resources
 import yaml
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
@@ -110,14 +110,16 @@ def get_template_path() -> Path:
     package_dir = Path(__file__).parent
     template = package_dir / "smk_workflow" / "config.template.yml"
 
-    # Fallback to pkg_resources if Path-based lookup fails
+    # Fallback to importlib.resources if Path-based lookup fails
     if not template.exists():
         try:
-            return Path(
-                pkg_resources.resource_filename(
-                    "alleleflux", "smk_workflow/config.template.yml"
+            # For Python 3.9+
+            with importlib_resources.as_file(
+                importlib_resources.files("alleleflux").joinpath(
+                    "smk_workflow/config.template.yml"
                 )
-            )
+            ) as resource_path:
+                return Path(resource_path)
         except Exception:
             pass
 

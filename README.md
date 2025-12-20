@@ -1,7 +1,6 @@
-
-[![Documentation Status](https://readthedocs.org/projects/alleleflux/badge/?version=latest)](https://alleleflux.readthedocs.io/en/latest/?badge=latest) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoellerLabPU/AlleleFlux) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-
 # AlleleFlux
+
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/alleleflux.svg)](https://bioconda.github.io/recipes/alleleflux/README.html) [![Downloads](https://img.shields.io/conda/dn/bioconda/alleleflux.svg)](https://bioconda.github.io/recipes/alleleflux/README.html) [![Documentation Status](https://readthedocs.org/projects/alleleflux/badge/?version=latest)](https://alleleflux.readthedocs.io/en/latest/?badge=latest) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoellerLabPU/AlleleFlux) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 AlleleFlux is a bioinformatics toolkit for analyzing allele frequency changes in metagenomic time-series data. It identifies genomic targets of natural selection in microbial communities by calculating:
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AlleleFlux"
-version = "0.1.0"
+version = "0.1.1"
 description = "AlleleFlux: A tool for fine grained evolutionary analysis of microbial populations and communities"
 authors = [
     {name = "Siddhartha Uppal", email = "sidd.uppal96@gmail.com"},
