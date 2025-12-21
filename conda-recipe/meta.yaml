@@ -1,6 +1,8 @@
 {% set name = "alleleflux" %}
 {% set version = "0.1.2" %}
 
+# Build with: conda build conda-recipe/ -c conda-forge -c bioconda --no-anaconda-upload
+
 package:
   name: {{ name|lower }}
   version: {{ version }}
@@ -8,11 +10,13 @@ package:
 source:
   url: https://github.com/MoellerLabPU/AlleleFlux/archive/refs/tags/v{{ version }}.tar.gz
   sha256: 2e900406050475a3b53cfb2cd6eddf5e059afb4382890481836a54253130ec94
+  # For local testing:
+  # path: ..
 
 build:
   number: 0
   noarch: python
-  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation --no-cache-dir -vvv
+  script: {{ PYTHON }} -m pip install . --use-pep517 --no-deps --no-build-isolation --no-cache-dir -vvv
   run_exports:
     - {{ pin_subpackage(name, max_pin="x.x") }}
 
@@ -33,6 +37,9 @@ requirements:
     - statsmodels
     - tqdm
     - intervaltree
+    - click
+    - questionary
+    - pyyaml
     # Bioinformatics (bioconda)
     - pysam
     - biopython
