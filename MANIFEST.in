@@ -33,6 +33,7 @@ recursive-include alleleflux/smk_workflow *.smk
 recursive-include alleleflux/smk_workflow *.yml
 recursive-include alleleflux/smk_workflow *.yaml
 recursive-include alleleflux/smk_workflow *.template.yml
+recursive-include alleleflux/smk_workflow Snakefile
 
 # -----------------------------------------------------------------------------
 # EXCLUDE VERSION CONTROL AND CI/CD

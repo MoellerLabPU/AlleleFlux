@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "AlleleFlux"
-version = "0.1.2"
+version = "0.1.3"
 description = "AlleleFlux: A tool for fine grained evolutionary analysis of microbial populations and communities"
 authors = [
     {name = "Siddhartha Uppal", email = "sidd.uppal96@gmail.com"},
@@ -13,6 +13,24 @@ authors = [
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+    "seaborn",
+    "statsmodels",
+    "tqdm",
+    "intervaltree",
+    "pysam",
+    "biopython",
+    "snakemake>=8.0.0",
+    "snakemake-executor-plugin-cluster-generic",
+    "rpy2",
+    "click",
+    "questionary",
+    "pyyaml",
+]
 
 [project.scripts]
 alleleflux = "alleleflux.cli:main"
@@ -59,13 +77,29 @@ alleleflux-terminal-nucleotide = "alleleflux.scripts.visualization.accessory.ter
 alleleflux-track-alleles = "alleleflux.scripts.visualization.accessory.track_allele_frequencies:main"
 alleleflux-plot-trajectories = "alleleflux.scripts.visualization.plot_allele_trajectory:main"
 
+# Prevent setuptools from auto-including files from MANIFEST.in or VCS
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["alleleflux*"]
+namespaces = false
 
 [tool.setuptools.package-data]
-# Include the runner script AND everything inside the smk_workflow directory
-alleleflux = ["smk_workflow/**"] 
+# Include only static workflow files required at runtime.
+# Explicit patterns prevent accidental inclusion of .snakemake/, logs/, or data outputs.
+alleleflux = [
+    "smk_workflow/*.smk",           # Snakemake workflow files
+    "smk_workflow/**/*.smk",        # Nested workflow rules
+    "smk_workflow/**/Snakefile",    # Main Snakefile
+    "smk_workflow/*.yml",           # Config templates
+    "smk_workflow/*.yaml",          # Config templates (alt extension)
+    "smk_workflow/**/*.yml",        # Nested configs
+    "smk_workflow/**/*.yaml",       # Nested configs (alt extension)
+    "smk_workflow/**/*.R",          # R scripts used by workflow
+    "smk_workflow/slurm_profile/*", # Slurm profile configuration
+]
 
 [project.urls]
 "Homepage" = "https://github.com/MoellerLabPU/AlleleFlux"
@@ -74,6 +108,3 @@ alleleflux = ["smk_workflow/**"]
 [tool.isort]
 profile = "black"
 line_length = 88 
-
-[tool.esbonio.sphinx]
-buildCommand = ["sphinx-build", "-M", "html", "docs/source", "${defaultBuildDir}"]
