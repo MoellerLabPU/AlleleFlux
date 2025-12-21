@@ -1,0 +1,173 @@
+# =============================================================================
+# MANIFEST.in for AlleleFlux
+# =============================================================================
+# This file controls what gets included in source distributions (sdist).
+# The goal is to keep packages lightweight while including everything needed
+# for installation and runtime on HPC systems.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ESSENTIAL PACKAGING FILES
+# -----------------------------------------------------------------------------
+# Core files required for package metadata, installation, and licensing
+include pyproject.toml
+include setup.py
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include environment.yml
+
+# -----------------------------------------------------------------------------
+# PYTHON SOURCE CODE
+# -----------------------------------------------------------------------------
+# Include all Python source files from the main package directory
+# This is handled automatically by setuptools, but explicit is better
+recursive-include alleleflux *.py
+
+# -----------------------------------------------------------------------------
+# SNAKEMAKE WORKFLOW FILES (REQUIRED AT RUNTIME)
+# -----------------------------------------------------------------------------
+# The smk_workflow directory contains Snakemake rules and configs needed
+# for the pipeline to run. These are bundled as package data.
+recursive-include alleleflux/smk_workflow *.smk
+recursive-include alleleflux/smk_workflow *.yml
+recursive-include alleleflux/smk_workflow *.yaml
+recursive-include alleleflux/smk_workflow *.template.yml
+
+# -----------------------------------------------------------------------------
+# EXCLUDE VERSION CONTROL AND CI/CD
+# -----------------------------------------------------------------------------
+# These are development-only and not needed for installation
+prune .git
+prune .github
+exclude .gitignore
+exclude .readthedocs.yaml
+
+# -----------------------------------------------------------------------------
+# EXCLUDE DEVELOPMENT AND TESTING DIRECTORIES
+# -----------------------------------------------------------------------------
+# Tests are not needed for package installation or runtime
+prune tests
+
+# Documentation source is not needed for runtime (built docs hosted elsewhere)
+prune docs
+
+# Example notebooks and data are for learning, not runtime
+prune notebooks
+prune examples
+
+# -----------------------------------------------------------------------------
+# EXCLUDE BUILD ARTIFACTS AND CACHES
+# -----------------------------------------------------------------------------
+# These are generated during development/build and should never be distributed
+prune build
+prune dist
+prune *.egg-info
+prune AlleleFlux.egg-info
+prune .eggs
+
+# Python bytecode caches
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *$py.class
+
+# Pytest and coverage caches
+prune .pytest_cache
+prune .coverage
+prune htmlcov
+prune .tox
+
+# IDE and editor caches
+prune .vscode
+prune .idea
+prune .ipynb_checkpoints
+prune .kilocode
+
+# -----------------------------------------------------------------------------
+# EXCLUDE SNAKEMAKE AND CONDA BUILD ARTIFACTS
+# -----------------------------------------------------------------------------
+# These are generated during workflow execution and can be very large
+prune .snakemake
+prune conda-bld
+prune conda-recipe
+
+# Snakemake working directories (may exist in various locations)
+prune work
+recursive-exclude * .snakemake
+
+# -----------------------------------------------------------------------------
+# EXCLUDE DATA AND OUTPUT DIRECTORIES
+# -----------------------------------------------------------------------------
+# Large data files, outputs, and results should never be packaged
+# These directories may be created during workflow runs
+prune data
+prune outputs
+prune output
+prune results
+prune logs
+
+# -----------------------------------------------------------------------------
+# EXCLUDE LARGE BIOINFORMATICS FILES (GLOBAL)
+# -----------------------------------------------------------------------------
+# These file types are common in bioinformatics and can be very large
+# They should never be included in source distributions
+
+# Alignment and sequence files
+global-exclude *.bam
+global-exclude *.bam.bai
+global-exclude *.cram
+global-exclude *.cram.crai
+global-exclude *.sam
+global-exclude *.fastq
+global-exclude *.fastq.gz
+global-exclude *.fq
+global-exclude *.fq.gz
+global-exclude *.fasta
+global-exclude *.fa
+global-exclude *.fna
+global-exclude *.fasta.gz
+global-exclude *.fa.gz
+
+# Variant files
+global-exclude *.vcf
+global-exclude *.vcf.gz
+global-exclude *.bcf
+
+# Tabular data files (often large in bioinformatics pipelines)
+global-exclude *.tsv
+global-exclude *.csv
+global-exclude *.parquet
+global-exclude *.tsv.gz
+global-exclude *.csv.gz
+
+# Compressed archives (may contain large data)
+global-exclude *.tar
+global-exclude *.tar.gz
+global-exclude *.tgz
+global-exclude *.zip
+
+# -----------------------------------------------------------------------------
+# EXCLUDE LOGS AND TEMPORARY FILES
+# -----------------------------------------------------------------------------
+# Log files from workflow runs and general temporary files
+global-exclude *.log
+global-exclude *.tmp
+global-exclude *.temp
+global-exclude *.swp
+global-exclude *.swo
+global-exclude *~
+global-exclude .DS_Store
+global-exclude Thumbs.db
+
+# Jupyter notebook checkpoints
+global-exclude .ipynb_checkpoints
+
+# -----------------------------------------------------------------------------
+# EXCLUDE COMPILED AND BINARY FILES
+# -----------------------------------------------------------------------------
+# Compiled extensions and shared libraries (should be built on target system)
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude *.o
+global-exclude *.a
