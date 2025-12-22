@@ -13,6 +13,7 @@ import os
 import pandas as pd
 from glob import glob
 from collections import defaultdict
+from pathlib import Path
 import logging
 
 # Setup module-level logger for Snakemake shared utilities (no configuration here)
@@ -154,6 +155,17 @@ if DATA_TYPE == "single":
     OUTDIR = os.path.join(OUTDIR, "single_timepoint")
 elif DATA_TYPE == "longitudinal":
     OUTDIR = os.path.join(OUTDIR, "longitudinal")
+
+# Profile reuse configuration
+# If profiles_path is specified and exists, use existing profiles instead of generating new ones
+EXISTING_PROFILES_PATH = config["input"].get("profiles_path", "")
+USE_EXISTING_PROFILES = bool(EXISTING_PROFILES_PATH and os.path.isdir(EXISTING_PROFILES_PATH))
+PROFILES_DIR = EXISTING_PROFILES_PATH if USE_EXISTING_PROFILES else os.path.join(OUTDIR, "profiles")
+
+if USE_EXISTING_PROFILES:
+    logging.info(f"Using existing profiles from: {EXISTING_PROFILES_PATH}")
+else:
+    logging.info(f"Profiles will be generated in: {PROFILES_DIR}")
 
 timepoints_labels = []
 focus_timepoints = {}

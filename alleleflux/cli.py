@@ -740,6 +740,23 @@ def init_config(use_template, output):
             "Path to MAG mapping file:", validate_file=True, required=True
         )
 
+        # Optional: Existing profiles for reuse
+        click.echo("\n📁 Optional: Existing Profiles (to skip profiling step):")
+        click.echo("  If you have profiles from a previous run, you can reuse them.")
+        click.echo("  This saves compute time when only changing analysis parameters.")
+        profiles_path = prompt_text(
+            "Path to existing profiles directory (leave blank to generate new):",
+            default="",
+            show_default_used=False,
+        )
+        if profiles_path:
+            if not Path(profiles_path).is_dir():
+                click.echo(f"  ⚠️  Directory not found: {profiles_path}")
+                click.echo("  Profiling will run from scratch.")
+                profiles_path = ""
+            else:
+                click.echo(f"  ✓ Will reuse profiles from: {profiles_path}")
+
         # Output directory
         click.echo("\n📂 Output Configuration:")
         output_dir = prompt_text(
@@ -916,6 +933,7 @@ def init_config(use_template, output):
     config_template["input"]["prodigal_path"] = prodigal_path
     config_template["input"]["gtdb_path"] = gtdb_path
     config_template["input"]["mag_mapping_path"] = mag_mapping_path
+    config_template["input"]["profiles_path"] = profiles_path
 
     config_template["output"]["root_dir"] = output_dir
 

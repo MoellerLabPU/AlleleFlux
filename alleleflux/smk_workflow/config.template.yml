@@ -16,6 +16,9 @@ input:
   metadata_path: ""               # Sample metadata file with columns: sample_id, file_path, group, time
   gtdb_path: ""                   # GTDB taxonomy file (gtdbtk.bac120.summary.tsv)
   mag_mapping_path: ""            # MAG-to-contig mapping file with columns: mag_id, contig_id
+  profiles_path: ""               # Optional: Path to pre-existing profiles directory
+                                  # If provided, profiling step is skipped and these profiles are used
+                                  # Useful for rerunning analysis with different parameters
 
 # Output Directory
 # ----------------
