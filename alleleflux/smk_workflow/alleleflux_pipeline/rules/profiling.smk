@@ -11,6 +11,16 @@ prevent unnecessary re-runs when these stable files have updated timestamps.
 If USE_EXISTING_PROFILES is True (profiles_path specified in config), the
 profiling step is skipped and existing profiles are used instead. This enables
 reusing profiles across multiple analysis runs with different parameters.
+
+Expected directory structure for profiles_path:
+    {profiles_path}/
+        {sample1}/
+            {sample1}_{MAG1}_profiled.tsv.gz
+            {sample1}_{MAG2}_profiled.tsv.gz
+            ...
+        {sample2}/
+            {sample2}_{MAG1}_profiled.tsv.gz
+            ...
 """
 
 if USE_EXISTING_PROFILES:
@@ -21,8 +31,12 @@ if USE_EXISTING_PROFILES:
         Validate and link existing profile directories.
         
         This rule is used when profiles_path is specified in the config.
-        It validates that the expected profile directory exists in the
-        pre-existing profiles location and creates a symbolic link to it.
+        It validates that the expected sample subdirectory exists in the
+        pre-existing profiles location (profiles_path/{sample}/) and creates
+        a symbolic link to it in the output directory.
+        
+        Expected structure in profiles_path:
+            profiles_path/{sample}/{sample}_{MAG}_profiled.tsv.gz
         """
         input:
             existing_profile=lambda wildcards: os.path.join(EXISTING_PROFILES_PATH, wildcards.sample),

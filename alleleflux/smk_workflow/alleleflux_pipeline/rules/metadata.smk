@@ -25,6 +25,12 @@ rule generate_metadata:
         ),
     params:
         # Read profiles from the profiles directory in OUTDIR (which may be symlinks)
+        rootDir=os.path.join(OUTDIR, "profiles"),
+        data_type=DATA_TYPE,
+        group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
+        timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
+    resources:
+        mem_mb=get_mem_mb("generate_metadata"),
         time=get_time("generate_metadata"),
     shell:
         """
