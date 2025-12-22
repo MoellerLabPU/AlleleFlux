@@ -5,18 +5,32 @@ This module generates per-MAG metadata files that organize sample profile paths
 by experimental group and timepoint. These metadata files are used as input for
 QC analysis and downstream statistical tests.
 
-Note: When USE_EXISTING_PROFILES is True, profiles are read from PROFILES_DIR
-(the existing profiles path), but the metadata is still written to OUTDIR.
+When USE_EXISTING_PROFILES is True, profiles are read directly from PROFILES_DIR
+(the existing profiles path specified in config). No profiling step runs.
+The metadata files will contain the actual paths to the existing profile files.
 """
+
+# Define input function to conditionally depend on profile rule outputs
+def get_metadata_inputs(wildcards):
+    """Return inputs for generate_metadata rule.
+    
+    When using existing profiles, we don't depend on the profile rule outputs.
+    When generating new profiles, we depend on all sample directories.
+    """
+    inputs = {"metadata": config["input"]["metadata_path"]}
+    
+    if not USE_EXISTING_PROFILES:
+        # Only depend on profile outputs when generating new profiles
+        inputs["sampleDirs"] = expand(
+            os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples
+        )
+    
+    return inputs
+
 
 rule generate_metadata:
     input:
-        metadata=config["input"]["metadata_path"],
-        # This ensures that generate_metadata is run after all samples are profiled
-        # Uses OUTDIR/profiles which will be symlinks when using existing profiles
-        sampleDirs=expand(
-            os.path.join(OUTDIR, "profiles", "{sample}"), sample=samples
-        ),
+        unpack(get_metadata_inputs),
     output:
         outDir=directory(
             os.path.join(
@@ -24,8 +38,8 @@ rule generate_metadata:
             )
         ),
     params:
-        # Read profiles from the profiles directory in OUTDIR (which may be symlinks)
-        rootDir=os.path.join(OUTDIR, "profiles"),
+        # Read profiles from PROFILES_DIR - either existing profiles or newly generated
+        rootDir=PROFILES_DIR,
         data_type=DATA_TYPE,
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",

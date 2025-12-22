@@ -9,8 +9,8 @@ Reference files (FASTA, Prodigal, MAG mapping) are wrapped with ancient() to
 prevent unnecessary re-runs when these stable files have updated timestamps.
 
 If USE_EXISTING_PROFILES is True (profiles_path specified in config), the
-profiling step is skipped and existing profiles are used instead. This enables
-reusing profiles across multiple analysis runs with different parameters.
+profiling step is skipped entirely - downstream rules read directly from the
+existing profiles directory (PROFILES_DIR).
 
 Expected directory structure for profiles_path:
     {profiles_path}/
@@ -23,62 +23,10 @@ Expected directory structure for profiles_path:
             ...
 """
 
-if USE_EXISTING_PROFILES:
-    # When using existing profiles, create a validation rule that checks
-    # the profile directory exists and creates a symlink in the output directory
-    rule use_existing_profiles:
-        """
-        Validate and link existing profile directories.
-        
-        This rule is used when profiles_path is specified in the config.
-        It validates that the expected sample subdirectory exists in the
-        pre-existing profiles location (profiles_path/{sample}/) and creates
-        a symbolic link to it in the output directory.
-        
-        Expected structure in profiles_path:
-            profiles_path/{sample}/{sample}_{MAG}_profiled.tsv.gz
-        """
-        input:
-            existing_profile=lambda wildcards: os.path.join(EXISTING_PROFILES_PATH, wildcards.sample),
-        output:
-            sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
-        run:
-            import os
-            import shutil
-            
-            src_dir = input.existing_profile
-            dst_dir = output.sampleDirs
-            
-            # Validate the source directory exists
-            if not os.path.isdir(src_dir):
-                raise FileNotFoundError(
-                    f"Profile directory not found: {src_dir}. "
-                    f"Ensure profiles_path in config is correct and contains "
-                    f"profiles for sample '{wildcards.sample}'."
-                )
-            
-            # Check that the directory contains profile files
-            profile_files = list(Path(src_dir).glob("*_profiled.tsv.gz"))
-            if not profile_files:
-                raise FileNotFoundError(
-                    f"No profile files (*_profiled.tsv.gz) found in {src_dir}. "
-                    f"The directory may be empty or contain invalid profiles."
-                )
-            
-            # Create parent directory if needed
-            os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
-            
-            # Create symbolic link to the existing profile directory
-            # This avoids copying data while making it accessible at the expected path
-            if os.path.islink(dst_dir):
-                os.unlink(dst_dir)
-            elif os.path.exists(dst_dir):
-                shutil.rmtree(dst_dir)
-            
-            os.symlink(os.path.abspath(src_dir), dst_dir)
-
-else:
-    # Standard profiling rule - generates new profiles from BAM files
+# Only define the profile rule when NOT using existing profiles.
+# When USE_EXISTING_PROFILES is True, downstream rules read directly from PROFILES_DIR
+# (which points to the user-specified profiles_path).
+if not USE_EXISTING_PROFILES:
     rule profile:
         input:
             bam=lambda wildcards: sample_to_bam_map[wildcards.sample],
