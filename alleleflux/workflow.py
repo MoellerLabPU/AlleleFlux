@@ -185,6 +185,17 @@ def validate_config(config_path: Path) -> dict:
         logger.error(f"Configuration missing required input paths: {missing_inputs}")
         sys.exit(1)
 
+    # Validate optional profiles_path if specified
+    profiles_path = input_config.get("profiles_path", "")
+    if profiles_path:
+        if not os.path.isdir(profiles_path):
+            logger.error(f"Specified profiles_path does not exist or is not a directory: {profiles_path}")
+            sys.exit(1)
+        logger.info(f"Using existing profiles from: {profiles_path}")
+        logger.info("Profiling step will be skipped - profiles will be symlinked.")
+    else:
+        logger.info("No existing profiles specified - profiling will run from BAM files.")
+
     return config
 
 
