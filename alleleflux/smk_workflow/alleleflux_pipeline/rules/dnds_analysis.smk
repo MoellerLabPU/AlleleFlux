@@ -40,7 +40,9 @@ rule dnds_from_timepoints:
         # P-value summary file for the specified test type
         significant_sites=get_significant_sites_df_path(),
         # Profile directory containing all sample profiles
-        profile_dir=os.path.join(OUTDIR, "profiles"),
+        # Uses PROFILES_DIR which points to either existing profiles (if profiles_path
+        # is specified in config) or newly generated profiles in OUTDIR/profiles
+        profile_dir=PROFILES_DIR,
         # Prodigal gene predictions
         prodigal_fasta=config["input"]["prodigal_path"],
     output:
