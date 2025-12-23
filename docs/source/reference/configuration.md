@@ -74,24 +74,51 @@ Core analysis settings.
 |-----------|---------|-------------|
 | `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). |
 | `allele_analysis_only` | `false` | If true, only run allele frequency analysis without statistical tests. |
-| `use_lmm` | `true` | Enable Linear Mixed Models (LMM) analysis for longitudinal data. |
-| `use_significance_tests` | `true` | Enable two-sample and single-sample statistical tests. |
-| `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel (CMH) tests. |
+| `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
+| `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
+| `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel tests for stratified categorical analysis. Best for detecting consistent directional changes. |
 | `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
 | `groups_combinations` | Required | List of group pairs to compare (see below). |
 
+:::{seealso}
+For detailed information about statistical tests and score calculations, see [Statistical Tests Reference](statistical_tests.md).
+:::
+
 **Timepoints Configuration:**
 
-For longitudinal analysis, specify pairs of timepoints and a focus timepoint:
+For longitudinal analysis, specify pairs of timepoints and a **focus timepoint**:
 
 ```yaml
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [pre, end]
-      focus: end
+    - timepoint: [pre, post]
+      focus: post      # The later/derived timepoint
     - timepoint: [pre, mid]
       focus: mid
+```
+
+**Understanding the Focus Timepoint:**
+
+The focus timepoint represents the **derived** or **later** state in evolutionary comparisons:
+
+- **For dN/dS analysis**: The focus timepoint is treated as the "derived" (Time 2) state, while the other timepoint is "ancestral" (Time 1). AlleleFlux calculates evolutionary changes in the direction: ancestral → derived.
+- **For CMH scores**: The score measures differential significance relative to the focus timepoint (sites significant at focus but not at the other timepoint).
+- **Selection guideline**: Always choose the **later** or **endpoint** timepoint as focus.
+- **Default behavior**: If not specified, defaults to the second timepoint in the list.
+
+**Examples:**
+
+```yaml
+# Typical longitudinal study: Day 0 → Day 30
+timepoints_combinations:
+  - timepoint: [day0, day30]
+    focus: day30        # day30 is derived, day0 is ancestral
+
+# Treatment study: Baseline → Post-treatment
+timepoints_combinations:
+  - timepoint: [baseline, post_treatment]
+    focus: post_treatment  # Post is derived state
 ```
 
 For single timepoint analysis:
@@ -100,7 +127,7 @@ For single timepoint analysis:
 analysis:
   data_type: single
   timepoints_combinations:
-    - timepoint: [baseline]
+    - timepoint: [baseline]  # No focus needed for single timepoint
 ```
 
 **Groups Configuration:**
