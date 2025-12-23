@@ -143,6 +143,14 @@ rule dnds_from_timepoints:
             raise ValueError(f"No sample pair found for subject {wildcards.subject_id}")
         
         ancestral_sample_id, derived_sample_id = subject_pair
+        
+        # Log which samples are ancestral and derived
+        logger.info(
+            f"dN/dS analysis for subject {wildcards.subject_id}: "
+            f"Ancestral (Time 1) = {ancestral_sample_id}, "
+            f"Derived (Time 2) = {derived_sample_id}"
+        )
+        
         shell(
             """
             alleleflux-dnds-from-timepoints \
