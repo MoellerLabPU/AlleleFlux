@@ -53,6 +53,7 @@ reference/cli_reference.md
 reference/configuration.md
 reference/inputs.md
 reference/outputs.md
+reference/statistical_tests.md
 ```
 
 # Indices and tables

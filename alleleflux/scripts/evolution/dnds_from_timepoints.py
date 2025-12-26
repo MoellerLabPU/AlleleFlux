@@ -1950,6 +1950,13 @@ def main():
     # Determine number of CPUs to use, ensuring it doesn't exceed the number of MAGs
     num_cpus = min(args.cpus, len(args.mag_ids))
     logger.info(f"Using {num_cpus} CPUs to process {len(args.mag_ids)} MAGs")
+    
+    # Log which samples are being used as ancestral and derived
+    logger.info(
+        f"Sample configuration for dN/dS analysis: "
+        f"Ancestral (Time 1) = '{args.ancestral_sample_id}', "
+        f"Derived (Time 2) = '{args.derived_sample_id}'"
+    )
 
     # Pre-warm the NG86 cache (4,096 codon pairs) once in parent before forking.
     # On Linux: workers inherit via copy-on-write (shared memory, ~0.5s saved per worker).

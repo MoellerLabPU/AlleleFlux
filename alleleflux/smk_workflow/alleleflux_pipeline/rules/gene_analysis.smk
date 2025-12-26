@@ -82,15 +82,23 @@ rule gene_scores:
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the original shell command
-            shell(
-                """
-                alleleflux-gene-scores \
-                    --pValue_table {input.pvalue_table} \
-                    --pValue_threshold {params.pValue_threshold} \
-                    --output_dir {params.outDir} \
-                    --prefix {params.prefix}
-                """
-            )
+            # Execute the gene scores command
+            from snakemake.logging import logger
+            import subprocess
+
+            cmd = f"""
+            alleleflux-gene-scores \\
+                --pValue_table {input.pvalue_table} \\
+                --pValue_threshold {params.pValue_threshold} \\
+                --output_dir {params.outDir} \\
+                --prefix {params.prefix}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
         else:
             test_type = wildcards.test_type
             if wildcards.group_str:
@@ -248,15 +256,23 @@ rule detect_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            shell(
-                """
-                alleleflux-outliers \
-                    --mag_file {input.mag_score} \
-                    --mag_id {wildcards.mag} \
-                    --gene_file {input.gene_scores} \
-                    --out_fPath {output}
-                """
-            )
+            # Run the outlier detection
+            from snakemake.logging import logger
+            import subprocess
+
+            cmd = f"""
+            alleleflux-outliers \\
+                --mag_file {input.mag_score} \\
+                --mag_id {wildcards.mag} \\
+                --gene_file {input.gene_scores} \\
+                --out_fPath {output}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
 
 rule cmh_gene_scores:
     input:
@@ -304,15 +320,23 @@ rule cmh_gene_scores:
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the gene scores command
-            shell(
-                """
-                alleleflux-gene-scores \
-                    --pValue_table {input.pvalue_table} \
-                    --pValue_threshold {params.pValue_threshold} \
-                    --output_dir {params.outDir} \
-                    --prefix {params.prefix}
-                """
-            )
+            # Execute the gene scores command
+            from snakemake.logging import logger
+            import subprocess
+
+            cmd = f"""
+            alleleflux-gene-scores \\
+                --pValue_table {input.pvalue_table} \\
+                --pValue_threshold {params.pValue_threshold} \\
+                --output_dir {params.outDir} \\
+                --prefix {params.prefix}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
         else:
             # Create empty output files with appropriate columns for CMH test
             columns = ['gene_id', 'total_sites_per_group_CMH',
@@ -371,12 +395,20 @@ rule detect_cmh_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            shell(
-                """
-                alleleflux-outliers \
-                    --mag_file {input.mag_score} \
-                    --mag_id {wildcards.mag} \
-                    --gene_file {input.gene_scores} \
-                    --out_fPath {output}
-                """
-            )
+            # Run the outlier detection
+            from snakemake.logging import logger
+            import subprocess
+
+            cmd = f"""
+            alleleflux-outliers \\
+                --mag_file {input.mag_score} \\
+                --mag_id {wildcards.mag} \\
+                --gene_file {input.gene_scores} \\
+                --out_fPath {output}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
