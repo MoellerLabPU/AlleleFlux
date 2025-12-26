@@ -23,7 +23,8 @@ import yaml
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
-setup_logging()
+# Note: setup_logging() is NOT called at module level to avoid interfering
+# with Snakemake's logging system. It's called inside execute_workflow().
 logger = logging.getLogger(__name__)
 # =============================================================================
 # Memory Utilities
@@ -371,6 +372,10 @@ def execute_workflow(
     Returns:
         Exit code (0 = success).
     """
+    # Configure logging here (not at module level) to avoid interfering
+    # with Snakemake's logging system during import
+    setup_logging()
+
     # Get the Snakefile path
     snakefile = get_snakefile()
 

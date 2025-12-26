@@ -82,6 +82,12 @@ def setup_logging(
         Whether to use colored output. If None (default), auto-detects based on
         terminal capabilities.
     """
+    # Idempotency check: skip if already configured
+    # This prevents reconfiguring logging when called multiple times
+    alleleflux_logger = logging.getLogger("alleleflux")
+    if alleleflux_logger.handlers:
+        return  # Already configured
+
     # 1. Determine Log Level
     # Read level from environment if provided, falling back to the default `level`.
     raw = os.getenv("ALLELEFLUX_LOG_LEVEL", str(level)).strip()

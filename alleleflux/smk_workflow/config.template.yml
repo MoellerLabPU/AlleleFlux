@@ -68,7 +68,7 @@ quality_control:
 # --------------------
 # Parameters for pileup generation during sample profiling
 profiling:
-  ignore_orphans: False           # Ignore orphan reads (without proper pairs)
+  ignore_orphans: True           # Ignore orphan reads (without proper pairs)
   min_base_quality: 30            # Minimum base quality score to consider
   min_mapping_quality: 2          # Minimum mapping quality score to consider
   ignore_overlaps: True           # Ignore overlapping read segments
