@@ -10,10 +10,9 @@ to maintain workflow continuity.
 """
 
 import os
-# import logging
 import pandas as pd
 from snakemake.logging import logger
-# from alleleflux.scripts.utilities.logging_config import setup_logging
+import subprocess
 
 def check_for_gene_ids(pvalue_table_path):
     """
@@ -75,17 +74,9 @@ rule gene_scores:
         mem_mb=get_mem_mb("gene_scores"),
         time=get_time("gene_scores"),
     run:
-        # Ensure logging configured
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the original shell command
-            # Execute the gene scores command
-            from snakemake.logging import logger
-            import subprocess
-
             cmd = f"""
             alleleflux-gene-scores \\
                 --pValue_table {input.pvalue_table} \\
@@ -188,9 +179,6 @@ rule detect_outlier_genes:
         mem_mb=get_mem_mb("detect_outlier_genes"),
         time=get_time("detect_outlier_genes"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-        
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
             # Create an empty output file with appropriate columns based on test_type
@@ -256,10 +244,6 @@ rule detect_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            # Run the outlier detection
-            from snakemake.logging import logger
-            import subprocess
-
             cmd = f"""
             alleleflux-outliers \\
                 --mag_file {input.mag_score} \\
@@ -314,16 +298,9 @@ rule cmh_gene_scores:
         mem_mb=get_mem_mb("cmh_gene_scores"),
         time=get_time("cmh_gene_scores"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the gene scores command
-            # Execute the gene scores command
-            from snakemake.logging import logger
-            import subprocess
-
             cmd = f"""
             alleleflux-gene-scores \\
                 --pValue_table {input.pvalue_table} \\
@@ -378,9 +355,6 @@ rule detect_cmh_outlier_genes:
         mem_mb=get_mem_mb("detect_cmh_outlier_genes"),
         time=get_time("detect_cmh_outlier_genes"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-        
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
             # Create an empty output file with appropriate columns for CMH test
@@ -395,10 +369,6 @@ rule detect_cmh_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            # Run the outlier detection
-            from snakemake.logging import logger
-            import subprocess
-
             cmd = f"""
             alleleflux-outliers \\
                 --mag_file {input.mag_score} \\

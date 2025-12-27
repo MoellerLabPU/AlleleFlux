@@ -11,6 +11,7 @@ import pandas as pd
 # import logging
 # from alleleflux.scripts.utilities.logging_config import setup_logging
 from snakemake.logging import logger
+import subprocess
 
 rule significance_score_per_MAG_standard:
     input:
@@ -37,10 +38,7 @@ rule significance_score_per_MAG_standard:
     resources:
         mem_mb=get_mem_mb("significance_score_per_MAG_standard"),
         time=get_time("significance_score_per_MAG_standard"),
-    run:
-        from snakemake.logging import logger
-        import subprocess
-        
+    run:    
         cmd = f"""
         alleleflux-scores \\
             --gtdb_taxonomy {input.gtdb_taxonomy} \\
@@ -87,9 +85,6 @@ rule significance_score_per_MAG_cmh:
         mem_mb=get_mem_mb("significance_score_per_MAG_cmh"),
         time=get_time("significance_score_per_MAG_cmh"),
     run:
-        from snakemake.logging import logger
-        import subprocess
-
         if params.data_type == "single":
             cmd = f"""
             alleleflux-scores \\
@@ -164,9 +159,6 @@ rule combine_MAG_scores:
         mem_mb=get_mem_mb("combine_MAG_scores"),
         time=get_time("combine_MAG_scores"),
     run:
-        # setup_logging()
-        # logger = logging.getLogger(__name__)
-
         dfs = []
         for file in input.scores:
             logger.info(f"Reading {file}")
@@ -212,9 +204,6 @@ rule combine_MAG_scores_cmh:
         mem_mb=get_mem_mb("combine_MAG_scores_cmh"),
         time=get_time("combine_MAG_scores_cmh"),
     run:
-        # setup_logging()
-        # logger = logging.getLogger(__name__)
-
         dfs = []
         for file in input.scores:
             logger.info(f"Reading {file}")
@@ -261,9 +250,6 @@ rule taxa_scores:
         mem_mb=get_mem_mb("taxa_scores"),
         time=get_time("taxa_scores"),
     run:
-        from snakemake.logging import logger
-        import subprocess
-
         cmd = f"""
         alleleflux-taxa-scores \\
             --input_df {input.concatenated} \\
@@ -301,9 +287,6 @@ rule taxa_scores_cmh:
         mem_mb=get_mem_mb("taxa_scores_cmh"),
         time=get_time("taxa_scores_cmh"),
     run:
-        from snakemake.logging import logger
-        import subprocess
-
         cmd = f"""
         alleleflux-taxa-scores \\
             --input_df {input.concatenated} \\

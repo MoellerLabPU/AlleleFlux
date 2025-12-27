@@ -69,9 +69,6 @@ rule dnds_from_timepoints:
         from pathlib import Path
         import pandas as pd
         from snakemake.logging import logger
-        # from alleleflux.scripts.utilities.logging_config import setup_logging
-        # setup_logging()
-        # logger = logging.getLogger(__name__)
 
         outdir = Path(str(output[0]))
         
