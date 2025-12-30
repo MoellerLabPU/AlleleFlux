@@ -190,12 +190,16 @@ def validate_config(config_path: Path) -> dict:
     profiles_path = input_config.get("profiles_path", "")
     if profiles_path:
         if not os.path.isdir(profiles_path):
-            logger.error(f"Specified profiles_path does not exist or is not a directory: {profiles_path}")
+            logger.error(
+                f"Specified profiles_path does not exist or is not a directory: {profiles_path}"
+            )
             sys.exit(1)
         logger.info(f"Using existing profiles from: {profiles_path}")
         logger.info("Profiling step will be skipped - profiles will be symlinked.")
     else:
-        logger.info("No existing profiles specified - profiling will run from BAM files.")
+        logger.info(
+            "No existing profiles specified - profiling will run from BAM files."
+        )
 
     return config
 
@@ -404,10 +408,39 @@ def execute_workflow(
 
     # Only create output directory and logfile if not doing a dry run
     logfile = None
+    runtime_config_path = None
     if not dry_run:
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         logfile = output_dir / f"alleleflux_{timestamp}.log"
+
+        # Generate runtime config with timestamp
+        runtime_config_path = output_dir / f"config_runtime_{timestamp}.yml"
+        runtime_config = config.copy()
+        runtime_config["_runtime"] = {
+            "version": version,
+            "timestamp": timestamp,
+            "working_dir": str(Path(working_dir).resolve()),
+            "config_file": str(config_path.resolve()),
+            "threads": threads,
+            "jobs": jobs,
+            "memory": memory,
+            "profile": profile,
+        }
+
+        # Custom representer to use flow style (inline) only for simple lists
+        # This produces ["T2", "T4"] instead of block style for readability
+        def represent_list(dumper, data):
+            is_simple = all(isinstance(item, (str, int, float, bool)) for item in data)
+            return dumper.represent_sequence(
+                "tag:yaml.org,2002:seq", data, flow_style=is_simple
+            )
+
+        yaml.add_representer(list, represent_list)
+
+        with open(runtime_config_path, "w") as f:
+            yaml.dump(runtime_config, f, default_flow_style=False, sort_keys=False)
+        logger.info(f"Runtime config saved: {runtime_config_path}")
 
     # Build snakemake command
     cmd = build_snakemake_command(
@@ -460,6 +493,7 @@ def execute_workflow(
         logger.info("AlleleFlux workflow completed successfully!")
         if not dry_run:
             logger.info(f"Output directory: {output_dir}")
+            logger.info(f"Runtime config: {runtime_config_path}")
             logger.info(f"Log file: {logfile}")
         logger.info("=" * 60)
     elif exit_code == 130:
