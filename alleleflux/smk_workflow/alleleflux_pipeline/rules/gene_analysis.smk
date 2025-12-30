@@ -10,10 +10,9 @@ to maintain workflow continuity.
 """
 
 import os
-# import logging
 import pandas as pd
 from snakemake.logging import logger
-# from alleleflux.scripts.utilities.logging_config import setup_logging
+import subprocess
 
 def check_for_gene_ids(pvalue_table_path):
     """
@@ -75,22 +74,22 @@ rule gene_scores:
         mem_mb=get_mem_mb("gene_scores"),
         time=get_time("gene_scores"),
     run:
-        # Ensure logging configured
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the original shell command
-            shell(
-                """
-                alleleflux-gene-scores \
-                    --pValue_table {input.pvalue_table} \
-                    --pValue_threshold {params.pValue_threshold} \
-                    --output_dir {params.outDir} \
-                    --prefix {params.prefix}
-                """
-            )
+            cmd = f"""
+            alleleflux-gene-scores \\
+                --pValue_table {input.pvalue_table} \\
+                --pValue_threshold {params.pValue_threshold} \\
+                --output_dir {params.outDir} \\
+                --prefix {params.prefix}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
         else:
             test_type = wildcards.test_type
             if wildcards.group_str:
@@ -180,9 +179,6 @@ rule detect_outlier_genes:
         mem_mb=get_mem_mb("detect_outlier_genes"),
         time=get_time("detect_outlier_genes"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-        
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
             # Create an empty output file with appropriate columns based on test_type
@@ -248,15 +244,19 @@ rule detect_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            shell(
-                """
-                alleleflux-outliers \
-                    --mag_file {input.mag_score} \
-                    --mag_id {wildcards.mag} \
-                    --gene_file {input.gene_scores} \
-                    --out_fPath {output}
-                """
-            )
+            cmd = f"""
+            alleleflux-outliers \\
+                --mag_file {input.mag_score} \\
+                --mag_id {wildcards.mag} \\
+                --gene_file {input.gene_scores} \\
+                --out_fPath {output}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
 
 rule cmh_gene_scores:
     input:
@@ -298,21 +298,22 @@ rule cmh_gene_scores:
         mem_mb=get_mem_mb("cmh_gene_scores"),
         time=get_time("cmh_gene_scores"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-
         # Check if input file exists and has gene IDs
         if check_for_gene_ids(input.pvalue_table):
             # Execute the gene scores command
-            shell(
-                """
-                alleleflux-gene-scores \
-                    --pValue_table {input.pvalue_table} \
-                    --pValue_threshold {params.pValue_threshold} \
-                    --output_dir {params.outDir} \
-                    --prefix {params.prefix}
-                """
-            )
+            cmd = f"""
+            alleleflux-gene-scores \\
+                --pValue_table {input.pvalue_table} \\
+                --pValue_threshold {params.pValue_threshold} \\
+                --output_dir {params.outDir} \\
+                --prefix {params.prefix}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
         else:
             # Create empty output files with appropriate columns for CMH test
             columns = ['gene_id', 'total_sites_per_group_CMH',
@@ -354,9 +355,6 @@ rule detect_cmh_outlier_genes:
         mem_mb=get_mem_mb("detect_cmh_outlier_genes"),
         time=get_time("detect_cmh_outlier_genes"),
     run:
-        # setup_logging()
-        # rule_logger = logging.getLogger(__name__)
-        
         gene_df = pd.read_csv(input.gene_scores, sep='\t')
         if len(gene_df) == 0 or gene_df['gene_id'].isna().all():
             # Create an empty output file with appropriate columns for CMH test
@@ -371,12 +369,16 @@ rule detect_cmh_outlier_genes:
             logger.info(f"No gene data found in {input.gene_scores}. Created empty output file with appropriate columns.")
         else:
             # Run the outlier detection
-            shell(
-                """
-                alleleflux-outliers \
-                    --mag_file {input.mag_score} \
-                    --mag_id {wildcards.mag} \
-                    --gene_file {input.gene_scores} \
-                    --out_fPath {output}
-                """
-            )
+            cmd = f"""
+            alleleflux-outliers \\
+                --mag_file {input.mag_score} \\
+                --mag_id {wildcards.mag} \\
+                --gene_file {input.gene_scores} \\
+                --out_fPath {output}
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
