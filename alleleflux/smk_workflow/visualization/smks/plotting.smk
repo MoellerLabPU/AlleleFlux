@@ -56,9 +56,9 @@ rule plot_trajectories:
     params:
         out_dir = directory(os.path.join(config["output_dir"], "plots", "{mag_id}")),
         val_col = config["plotting_params"]["value_col"],
-        n_line_arg = f"--n_sites_line {config['plotting_params']['n_sites_line']}" if config["plotting_params"].get("n_sites_line") else "",
-        n_dist_arg = f"--n_sites_dist {config['plotting_params']['n_sites_dist']}" if config["plotting_params"].get("n_sites_dist") else "",
-        n_per_site_arg = f"--n_sites_per_site {config['plotting_params']['n_sites_per_site']}" if config["plotting_params"].get("n_sites_per_site") else "",
+        n_line_arg = f"--n_sites_line {config['plotting_params']['n_sites_line']}" if config["plotting_params"].get("n_sites_line") is not None else "",
+        n_dist_arg = f"--n_sites_dist {config['plotting_params']['n_sites_dist']}" if config["plotting_params"].get("n_sites_dist") is not None else "",
+        n_per_site_arg = f"--n_sites_per_site {config['plotting_params']['n_sites_per_site']}" if config["plotting_params"].get("n_sites_per_site") is not None else "",
         x_col = config["plotting_params"]["x_col"],
         # Handle optional x_order list
         x_order_arg = f"--x_order {' '.join(config['plotting_params']['x_order'])}" if config["plotting_params"]["x_order"] else "",

@@ -31,6 +31,9 @@ rule clean_metadata:
         # Pass the entire parameter set for the specific run
         run_params=lambda wildcards: RUN_ID_PARAMS[wildcards.run_id]
     run:
+        import subprocess
+        from snakemake.logging import logger
+        
         # Base command
         cmd = [
             "alleleflux-prepare-metadata",
@@ -48,7 +51,14 @@ rule clean_metadata:
         cmd.append(f"--replicate-col '{params.run_params.get('replicate_col', 'replicate')}'")
 
         # Execute the command
-        shell(" ".join(cmd))
+        cmd_str = " ".join(cmd)
+        logger.info(f"Executing command: {cmd_str}")
+        
+        try:
+            subprocess.run(cmd_str, shell=True, check=True, executable="/bin/bash")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed with exit code {e.returncode}")
+            raise e
 
 # === RULE : 'aggregate_metadata' (The "Gather" Step) ===
 # This rule runs *after* all 'clean_metadata' jobs are finished.

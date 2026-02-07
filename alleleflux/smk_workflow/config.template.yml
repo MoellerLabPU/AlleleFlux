@@ -35,17 +35,23 @@ analysis:
   allele_analysis_only: False     # When True, only runs allele analysis and skips scoring/outlier detection
 
   # Enable/disable specific analysis modules
-  use_lmm: True                   # Linear Mixed Models analysis
-  use_significance_tests: True    # Two-sample and single-sample tests
-  use_cmh: True                   # CMH test for categorical data
+  # For details on each test and score calculations, see documentation
+  use_lmm: True                   # Linear Mixed Models: Best for repeated measures, accounts for subject-level variation
+  use_significance_tests: True    # Two-sample (t-test, Mann-Whitney) and single-sample tests: Simple comparisons
+  use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
 
   # Timepoints and groups to analyze
   # For longitudinal analysis: specify pairs of timepoints and which one to focus on
   # For single analysis: specify individual timepoints
   timepoints_combinations:
     - timepoint: ["pre", "post"]  # Timepoint pair for longitudinal analysis
-      focus: "post"               # Which timepoint is the "focus" for comparisons
-    # - timepoint: ["end"]        # For single timepoint analysis (uncomment data_type: "single")
+      focus: "post"               # FOCUS TIMEPOINT: The derived/later state for evolutionary analysis
+                                  # - For dN/dS: focus = derived (Time 2), other = ancestral (Time 1)
+                                  # - For CMH scores: measures sites significant at focus but not at other timepoint
+                                  # - Guideline: Always choose the LATER or ENDPOINT timepoint as focus
+                                  # - Default: If not specified, uses the second timepoint
+                                  # - Example: For Day 0 → Day 30, use focus: "day30"
+    # - timepoint: ["end"]        # For single timepoint analysis (set data_type: "single")
 
   groups_combinations:
     - ["treatment", "control"]    # Groups to compare (e.g., treatment vs control)
@@ -62,7 +68,7 @@ quality_control:
 # --------------------
 # Parameters for pileup generation during sample profiling
 profiling:
-  ignore_orphans: False           # Ignore orphan reads (without proper pairs)
+  ignore_orphans: True           # Ignore orphan reads (without proper pairs)
   min_base_quality: 30            # Minimum base quality score to consider
   min_mapping_quality: 2          # Minimum mapping quality score to consider
   ignore_overlaps: True           # Ignore overlapping read segments

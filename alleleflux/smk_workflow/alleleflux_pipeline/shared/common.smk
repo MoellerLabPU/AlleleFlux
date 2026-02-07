@@ -14,10 +14,7 @@ import pandas as pd
 from glob import glob
 from collections import defaultdict
 from pathlib import Path
-import logging
-
-# Setup module-level logger for Snakemake shared utilities (no configuration here)
-# logger = logging.getLogger(__name__)
+from snakemake.logging import logger
 
 # Load the configuration file
 # configfile: os.path.join(workflow.basedir, "config.yml")
@@ -151,6 +148,37 @@ DATA_TYPE = config["analysis"]["data_type"]
 OUTDIR = config["output"]["root_dir"]
 DN_DS_TEST_TYPE = config["dnds"]["dn_ds_test_type"]
 
+
+def get_base_test_type(test_type):
+    """
+    Convert a specific test type to its base eligibility test type.
+    
+    Maps specific test variants (e.g., 'two_sample_paired_tTest') to their
+    base types (e.g., 'two_sample_paired') for eligibility checking.
+    
+    Parameters:
+        test_type: The specific test type string from config
+    
+    Returns:
+        The base test type string for eligibility lookup
+    
+    Raises:
+        ValueError: If the test type is not recognized
+    """
+    if test_type in ["two_sample_unpaired_tTest", "two_sample_unpaired_MannWhitney", 
+                     "two_sample_unpaired_tTest_abs", "two_sample_unpaired_MannWhitney_abs"]:
+        return "two_sample_unpaired"
+    elif test_type in ["two_sample_paired_tTest", "two_sample_paired_Wilcoxon", 
+                       "two_sample_paired_tTest_abs", "two_sample_paired_Wilcoxon_abs"]:
+        return "two_sample_paired"
+    elif test_type in ["single_sample_tTest", "single_sample_Wilcoxon"]:
+        return "single_sample"
+    elif test_type in ["lmm", "lmm_abs", "lmm_across_time", "cmh", "cmh_across_time"]:
+        return test_type
+    else:
+        raise ValueError(f"Unsupported test type: {test_type}")
+
+
 if DATA_TYPE == "single":
     OUTDIR = os.path.join(OUTDIR, "single_timepoint")
 elif DATA_TYPE == "longitudinal":
@@ -163,9 +191,9 @@ USE_EXISTING_PROFILES = bool(EXISTING_PROFILES_PATH and os.path.isdir(EXISTING_P
 PROFILES_DIR = EXISTING_PROFILES_PATH if USE_EXISTING_PROFILES else os.path.join(OUTDIR, "profiles")
 
 if USE_EXISTING_PROFILES:
-    logging.info(f"Using existing profiles from: {EXISTING_PROFILES_PATH}")
+    logger.info(f"Using existing profiles from: {EXISTING_PROFILES_PATH}")
 else:
-    logging.info(f"Profiles will be generated in: {PROFILES_DIR}")
+    logger.info(f"Profiles will be generated in: {PROFILES_DIR}")
 
 timepoints_labels = []
 focus_timepoints = {}
@@ -192,7 +220,7 @@ for time_combo in config["analysis"]["timepoints_combinations"]:
                 raise ValueError(f"Invalid focus timepoint '{time_combo['focus']}' for combination '{label}'. Must be one of {timepoint}")
         else:
             # Default to second timepoint if focus not specified
-            logging.warning(f"No focus specified for timepoint combination {label}. Using '{timepoint[1]}' as default.")
+            logger.warning(f"No focus specified for timepoint combination {label}. Using '{timepoint[1]}' as default.")
             focus_timepoints[label] = timepoint[1]
 
 # Define valid focus timepoint values for each timepoint label
@@ -437,7 +465,7 @@ def get_mags_by_preprocessing_eligibility(timepoints, groups, test_type, group=N
     df = pd.read_csv(eligibility_file, sep="\t")
     
     if eligible_column not in df.columns:
-        logging.warning(
+        logger.warning(
             f"Column '{eligible_column}' not found in {eligibility_file}. "
             "Returning empty list."
         )
@@ -517,7 +545,7 @@ def parse_metadata_for_timepoint_pairs(timepoints_label, groups_label):
         if len(ancestral_samples) == 1 and len(derived_samples) == 1:
             sample_pairs.append((subject, ancestral_samples[0], derived_samples[0]))
         else:
-            logging.warning(
+            logger.warning(
                 f"Skipping subject {subject}: found {len(ancestral_samples)} ancestral "
                 f"and {len(derived_samples)} derived samples"
             )

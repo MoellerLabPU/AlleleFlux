@@ -777,15 +777,18 @@ def init_config(use_template, output):
             data_type = "longitudinal"
 
         # Statistical analysis options
-        click.echo("\nStatistical Analysis Options:")
+        click.echo("\n📊 Statistical Analysis Options:")
+        click.echo("  LMM: Best for repeated measures, accounts for subject variation")
+        click.echo("  Significance tests: Simple two-sample and single-sample comparisons")
+        click.echo("  CMH: Stratified categorical analysis, detects directional changes")
         use_lmm = prompt_boolean(
-            "Use Linear Mixed Models analysis? (true/false):", default=True
+            "Enable Linear Mixed Models (LMM)? (true/false):", default=True
         )
         use_significance_tests = prompt_boolean(
-            "Use significance tests? (true/false):", default=True
+            "Enable significance tests (t-test, Mann-Whitney)? (true/false):", default=True
         )
         use_cmh = prompt_boolean(
-            "Use Cochran-Mantel-Haenszel test? (true/false):", default=True
+            "Enable Cochran-Mantel-Haenszel (CMH) test? (true/false):", default=True
         )
 
         # Timepoint configuration
@@ -848,6 +851,13 @@ def init_config(use_template, output):
                     )
                     continue
 
+                # Explain focus timepoint
+                click.echo("\n  ℹ️  Focus Timepoint:")
+                click.echo("     The focus represents the DERIVED or LATER state.")
+                click.echo("     - For dN/dS: focus = derived (Time 2), other = ancestral (Time 1)")
+                click.echo("     - For CMH: measures sites significant at focus but not at other")
+                click.echo(f"     - Guideline: Choose the LATER timepoint (typically '{tp2}')")
+                
                 focus = prompt_choice("Select the focus timepoint:", [tp1, tp2])
                 timepoints_combinations.append(
                     {"timepoint": [tp1, tp2], "focus": focus}
