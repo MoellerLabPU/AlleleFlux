@@ -361,11 +361,47 @@ def generate_outlier_gene_targets(tp, gr):
 def generate_dnds_analysis_targets(tp, gr):
     """
     Generate dN/dS analysis targets, which are now directories, one for each subject.
+    
+    This function checks MAG eligibility before generating targets. If no MAGs
+    are eligible for the test type used by dN/dS analysis, no targets are generated.
+    This prevents downstream rules (like p_value_summary) from running when
+    there's no data to process.
+    
+    Triggers the preprocessing eligibility checkpoint to ensure the eligibility
+    file exists and is up-to-date before checking eligibility.
     """
     targets = []
 
     # dN/dS is only applicable to longitudinal data.
     if DATA_TYPE != "longitudinal":
+        return targets
+
+    # Check preprocessing config
+    preprocess_between = config["statistics"].get("preprocess_between_groups", False)
+    preprocess_within = config["statistics"].get("preprocess_within_groups", False)
+
+    # Map dN/dS test type to base eligibility test type using shared helper
+    eligibility_test_type = get_base_test_type(DN_DS_TEST_TYPE)
+    
+    # Trigger preprocessing eligibility checkpoint if enabled (similar to p_value_summary.smk)
+    # This ensures the eligibility file exists before get_eligible_mags() reads it
+    if eligibility_test_type in BETWEEN_GROUP_TEST_TYPES:
+        if preprocess_between:
+            checkpoints.preprocessing_eligibility_between_groups.get(
+                timepoints=tp,
+                groups=gr
+            )
+    elif eligibility_test_type in WITHIN_GROUP_TEST_TYPES:
+        if preprocess_within:
+            checkpoints.preprocessing_eligibility_within_groups.get(
+                timepoints=tp,
+                groups=gr
+            )
+    
+    # Check if there are any eligible MAGs for the dN/dS test type
+    eligible_mags = get_eligible_mags(tp, gr, eligibility_test_type)
+    if not eligible_mags:
+        # No eligible MAGs - don't generate any dN/dS targets
         return targets
 
     # Get subject pairs to determine how many directories to expect.

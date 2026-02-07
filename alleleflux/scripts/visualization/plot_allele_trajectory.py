@@ -245,12 +245,16 @@ def compute_group_means(
         pd.DataFrame: A new DataFrame with aggregated mean frequencies.
                       Columns include [x_col, 'group', 'contig', 'position', 'frequency', 'valid_count'].
     """
-    validate_input_columns(df, ["group", "contig", "position", "frequency","anchor_allele", x_col])
+    validate_input_columns(
+        df, ["group", "contig", "position", "frequency", "anchor_allele", x_col]
+    )
 
     # Enhanced aggregation with valid count tracking
     # Note: .count() excludes NA/NaN values, so valid_count reflects non-missing samples only
     mean_df = df.groupby(
-        [x_col, "group", "contig", "position", "anchor_allele"], as_index=False, observed=True
+        [x_col, "group", "contig", "position", "anchor_allele"],
+        as_index=False,
+        observed=True,
     ).agg(frequency=("frequency", "mean"), valid_count=("frequency", "count"))
 
     # Reapply correct sorting
@@ -386,18 +390,25 @@ def filter_by_initial_frequency(
 
     # Validate that at least one bound is specified
     if max_initial_freq is None and min_initial_freq is None:
-        logger.warning("Neither max_initial_freq nor min_initial_freq specified. Returning original data.")
+        logger.warning(
+            "Neither max_initial_freq nor min_initial_freq specified. Returning original data."
+        )
         return df
 
     # Determine which group(s) to use for filtering
     all_groups = df[group_col].unique().tolist()
-    
+
     # Check for special keywords "both" or "all"
-    filter_all_groups = filter_group is not None and filter_group.lower() in ["both", "all"]
-    
+    filter_all_groups = filter_group is not None and filter_group.lower() in [
+        "both",
+        "all",
+    ]
+
     if filter_all_groups:
         target_groups = all_groups
-        logger.info(f"Using 'both/all' mode: criteria must be met in ALL groups: {all_groups}")
+        logger.info(
+            f"Using 'both/all' mode: criteria must be met in ALL groups: {all_groups}"
+        )
     elif filter_group is not None:
         if filter_group not in all_groups:
             logger.warning(
@@ -432,7 +443,7 @@ def filter_by_initial_frequency(
     # Helper function to get passing sites for a single group
     def get_passing_sites_for_group(group_name):
         group_df = df[df[group_col] == group_name]
-        
+
         # Get the first (minimum) timepoint for this group.
         # .min() works for both numeric columns (day) and categorical columns (time).
         # For categoricals, .min() returns the first category in the ordering.
@@ -442,7 +453,9 @@ def filter_by_initial_frequency(
         first_tp_data = group_df[group_df[x_col] == first_tp]
 
         if first_tp_data.empty:
-            logger.warning(f"No data found at first timepoint {first_tp} for group '{group_name}'")
+            logger.warning(
+                f"No data found at first timepoint {first_tp} for group '{group_name}'"
+            )
             return None
 
         # Calculate mean frequency per site at the first timepoint
@@ -462,7 +475,9 @@ def filter_by_initial_frequency(
             mask = pd.Series(True, index=initial_freqs.index)
 
         passing = initial_freqs[mask].reset_index()
-        return set(zip(passing["contig"], passing["position"], passing["anchor_allele"]))
+        return set(
+            zip(passing["contig"], passing["position"], passing["anchor_allele"])
+        )
 
     # Get passing sites for each target group
     passing_sites_per_group = []
@@ -471,7 +486,9 @@ def filter_by_initial_frequency(
         if sites is None:
             if filter_all_groups:
                 # If using "both/all" and a group has no data, no sites can pass
-                logger.warning(f"No data for group '{group}', no sites can pass 'both/all' filter")
+                logger.warning(
+                    f"No data for group '{group}', no sites can pass 'both/all' filter"
+                )
                 return df.iloc[:0]
             continue
         passing_sites_per_group.append(sites)
@@ -504,15 +521,18 @@ def filter_by_initial_frequency(
         how="inner",
     )
 
-    initial_count = df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
-    final_count = filtered_df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+    initial_count = (
+        df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+    )
+    final_count = (
+        filtered_df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+    )
 
     logger.info(
         f"Initial frequency filter (based on {group_desc}): "
         f"{initial_count} sites -> {final_count} sites "
         f"({len(df)} rows -> {len(filtered_df)} rows)"
     )
-
 
     return filtered_df
 
@@ -690,7 +710,9 @@ def plot_combined(
         # We loop manually to get the "Spaghetti" effect (one line per site)
         # sns.lineplot(units=...) can do this, but explicit looping is often safer
         # for 'hue' control on complex groupings.
-        for (contig, pos, allele), subdf in df.groupby(["contig", "position", "anchor_allele"]):
+        for (contig, pos, allele), subdf in df.groupby(
+            ["contig", "position", "anchor_allele"]
+        ):
             # Skip empty subsets
             if subdf.empty:
                 continue
@@ -1019,9 +1041,10 @@ def plot_group_distributions(
         # Determine which x_col to use for finding the first timepoint
         # When binning is enabled, use bin_midpoint (numeric) for correct ordering
         filter_x_col = "bin_midpoint" if bin_width_days is not None else x_col
-        
+
         df = filter_by_initial_frequency(
-            df, filter_x_col,
+            df,
+            filter_x_col,
             max_initial_freq=max_initial_freq,
             min_initial_freq=min_initial_freq,
             filter_group=initial_freq_group,
@@ -1090,49 +1113,55 @@ def plot_group_distributions(
     # === GENERATE PER-SITE PLOTS ===
     # Creates individual trajectory plots for each selected site
     if per_site:
-        logger.info("Creating per-site plots")
-
         # Use n_per_site if specified, otherwise fall back to n_line
         n_per_site_val = n_per_site if n_per_site is not None else n_line
 
-        # Per-site plots are trajectory plots, so always use "line" config
-        cache_key = (
-            (n_per_site_val, "line") if bin_width_days is not None else n_per_site_val
-        )
-        if cache_key not in data_cache:
-            data_cache[cache_key] = get_plotting_data(
-                df=df,
-                value_col=value_col,
-                n_val=n_per_site_val,
-                x_col=x_col,
-                sorted_vals=sorted_vals,
-                bin_width_days=bin_width_days,
-                min_samples_per_bin=min_samples_per_bin,
-                plot_type="line",
+        # Skip per-site plots if n_per_site is explicitly set to 0
+        if n_per_site_val == 0:
+            logger.info("Skipping per-site plots (n_per_site=0)")
+        else:
+            logger.info("Creating per-site plots")
+
+            # Per-site plots are trajectory plots, so always use "line" config
+            cache_key = (
+                (n_per_site_val, "line")
+                if bin_width_days is not None
+                else n_per_site_val
             )
-
-        # Use filtered (raw sample data), not mean_df (we compute means per-site)
-        filtered, _, n_label, plot_x_col = data_cache[cache_key]
-
-        if filtered is not None:
-            # Validate that replicate column exists if replicate grouping requested
-            if group_by_replicate and "replicate" not in filtered.columns:
-                logger.error(
-                    "--group_by_replicate was specified but 'replicate' column is missing from input data"
-                )
-                raise ValueError(
-                    "Cannot group by replicate: 'replicate' column not found in input data"
+            if cache_key not in data_cache:
+                data_cache[cache_key] = get_plotting_data(
+                    df=df,
+                    value_col=value_col,
+                    n_val=n_per_site_val,
+                    x_col=x_col,
+                    sorted_vals=sorted_vals,
+                    bin_width_days=bin_width_days,
+                    min_samples_per_bin=min_samples_per_bin,
+                    plot_type="line",
                 )
 
-            plot_per_site(
-                filtered,
-                plot_x_col,
-                n_label,
-                value_col,
-                output_dir,
-                output_format,
-                group_by_replicate=group_by_replicate,
-            )
+            # Use filtered (raw sample data), not mean_df (we compute means per-site)
+            filtered, _, n_label, plot_x_col = data_cache[cache_key]
+
+            if filtered is not None:
+                # Validate that replicate column exists if replicate grouping requested
+                if group_by_replicate and "replicate" not in filtered.columns:
+                    logger.error(
+                        "--group_by_replicate was specified but 'replicate' column is missing from input data"
+                    )
+                    raise ValueError(
+                        "Cannot group by replicate: 'replicate' column not found in input data"
+                    )
+
+                plot_per_site(
+                    filtered,
+                    plot_x_col,
+                    n_label,
+                    value_col,
+                    output_dir,
+                    output_format,
+                    group_by_replicate=group_by_replicate,
+                )
 
 
 def main():

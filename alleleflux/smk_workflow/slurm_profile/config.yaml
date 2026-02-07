@@ -13,7 +13,8 @@ cluster-generic-submit-cmd:
     --time={resources.time}
     --job-name=smk-{rule}-{wildcards}
     --output=logs/{config[run_name]}/`date +"%d-%m-%y"`/{rule}/{rule}-{wildcards}-%j.out
-    --parsable
+    --parsable 
+    --wckey=alleleflux_{config[run_name]}
 
 # Safety-net fallbacks (all rules should specify resources from config.yml)
 default-resources:
