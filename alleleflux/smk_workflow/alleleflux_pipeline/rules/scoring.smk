@@ -205,6 +205,7 @@ rule combine_MAG_scores_cmh:
         time=get_time("combine_MAG_scores_cmh"),
     run:
         dfs = []
+        insufficient_data_mags = []
         for file in input.scores:
             logger.info(f"Reading {file}")
             df = pd.read_csv(file, sep="\t")
@@ -212,7 +213,18 @@ rule combine_MAG_scores_cmh:
             if "focus_timepoint" in df.columns and df["focus_timepoint"].iloc[0] != wildcards.focus_tp:
                 raise ValueError(f"Mismatched focus timepoint in {file}: "
                                  f"expected {wildcards.focus_tp}, found {df['focus_timepoint'].iloc[0]}")
+            # Track MAGs with insufficient data (score=0 due to missing timepoint data)
+            if "total_sites_per_group_CMH" in df.columns and df["total_sites_per_group_CMH"].iloc[0] == 0:
+                mag_id = df["MAG_ID"].iloc[0] if "MAG_ID" in df.columns else file
+                insufficient_data_mags.append(mag_id)
             dfs.append(df)
+
+        if insufficient_data_mags:
+            logger.warning(
+                f"{len(insufficient_data_mags)} MAG(s) had insufficient CMH data "
+                f"(score=0) for {wildcards.timepoints}-{wildcards.groups} "
+                f"focus_tp={wildcards.focus_tp}: {insufficient_data_mags}"
+            )
 
         logger.info(
             f"Combining CMH scores for {wildcards.timepoints}-{wildcards.groups} "
