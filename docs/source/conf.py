@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 
 # Project information
 project = "AlleleFlux"
-copyright = "2024-2025, Siddhartha Uppal, Andrew Moeller"
+copyright = "2024-2026, Siddhartha Uppal, Andrew Moeller"
 author = "Siddhartha Uppal, Andrew Moeller"
 version = "0.1.4"
 release = "0.1.4"
