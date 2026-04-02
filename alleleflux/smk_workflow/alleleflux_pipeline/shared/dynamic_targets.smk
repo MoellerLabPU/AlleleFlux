@@ -358,6 +358,49 @@ def generate_outlier_gene_targets(tp, gr):
     return targets
 
 
+def generate_regional_contrast_targets(tp, gr):
+    """Generate regional contrast output targets for a timepoint-group combination.
+
+    Returns one per-host (``.tsv.gz``) and one summary (``.tsv``) path per
+    eligible MAG.  Only generates targets for longitudinal data (the rule
+    requires allele-frequency-change columns that do not exist in single-
+    timepoint output).
+
+    Parameters:
+        tp: Timepoint label (e.g., "pre_post")
+        gr: Groups label (e.g., "treatment_control")
+
+    Returns:
+        list: Expected output file paths (empty for single-timepoint data or
+              when ``use_regional_contrast`` is disabled in config).
+    """
+    targets = []
+
+    # Regional contrast requires longitudinal mean-change data
+    if DATA_TYPE != "longitudinal":
+        return targets
+
+    # Honour the opt-out flag; defaults to True (run by default)
+    if not config["analysis"].get("use_regional_contrast", True):
+        return targets
+
+    # Use the same QC-eligibility set as allele analysis (one output per MAG)
+    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type="all")
+
+    base_dir = os.path.join(
+        OUTDIR, "regional_contrast", f"regional_contrast_{tp}-{gr}"
+    )
+    for mag in eligible_mags:
+        targets.append(
+            os.path.join(base_dir, f"{mag}_regional_contrast_per_host_region.tsv.gz")
+        )
+        targets.append(
+            os.path.join(base_dir, f"{mag}_regional_contrast_region_summary.tsv")
+        )
+
+    return targets
+
+
 def generate_dnds_analysis_targets(tp, gr):
     """
     Generate dN/dS analysis targets, which are now directories, one for each subject.

@@ -879,26 +879,26 @@ def init_config(use_template, output):
                 if groups_combinations
                 else ""
             )
-            g1 = prompt_text(
-                f"Enter first group name{count_msg} (or leave blank to finish):",
+            treatment = prompt_text(
+                f"Enter treatment group name{count_msg} (or leave blank to finish):",
                 default="",
                 show_default_used=False,
             )
-            if not g1:
+            if not treatment:
                 if not groups_combinations:
                     click.echo("  ⚠️  At least one group pair is required.")
                     continue
                 break
 
-            g2 = prompt_text(
-                f"Enter second group name (different from '{g1}'):", required=True
+            control = prompt_text(
+                f"Enter control group name (different from '{treatment}'):", required=True
             )
-            if g2 == g1:
-                click.echo("  ⚠️  Second group must differ from first. Try again.")
+            if control == treatment:
+                click.echo("  ⚠️  Control group must differ from treatment. Try again.")
                 continue
 
-            groups_combinations.append([g1, g2])
-            click.echo(f"  ✓ Added comparison: {g1} vs {g2}")
+            groups_combinations.append({"treatment": treatment, "control": control})
+            click.echo(f"  ✓ Added comparison: {treatment} (treatment) vs {control} (control)")
 
         click.echo(f"  → {len(groups_combinations)} group comparison(s) configured.")
 

@@ -39,6 +39,8 @@ analysis:
   use_lmm: True                   # Linear Mixed Models: Best for repeated measures, accounts for subject-level variation
   use_significance_tests: True    # Two-sample (t-test, Mann-Whitney) and single-sample tests: Simple comparisons
   use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
+  use_regional_contrast: True     # Regional contrast: detect genes/windows with differential allele-frequency evolution
+                                  # Only applicable to longitudinal data; runs on raw allele-frequency changes (no preprocessing)
 
   # Timepoints and groups to analyze
   # For longitudinal analysis: specify pairs of timepoints and which one to focus on
@@ -54,7 +56,8 @@ analysis:
     # - timepoint: ["end"]        # For single timepoint analysis (set data_type: "single")
 
   groups_combinations:
-    - ["treatment", "control"]    # Groups to compare (e.g., treatment vs control)
+    - treatment: "treatment"      # Name of the treatment group as it appears in metadata
+      control: "control"          # Name of the control group as it appears in metadata
 
 # Quality Control Parameters
 # --------------------------
@@ -90,6 +93,21 @@ statistics:
 dnds:
   p_value_column: "q_value"       # Column for filtering: "min_p_value" or "q_value"
   dn_ds_test_type: "two_sample_paired_tTest"  # Test type for filtering results
+
+# Regional Contrast Parameters
+# ----------------------------
+# Settings for regional contrast analysis (longitudinal data only).
+# Detects genes / sliding windows where treatment and control groups show
+# consistently different allele-frequency evolution across paired hosts.
+# Input: *_allele_frequency_changes_mean.tsv.gz (no preprocessing needed).
+regional_contrast:
+  mode: "both"                    # Region type: "gene", "window", or "both"
+  window_size: 1000               # Non-overlapping tile width in bp (used when mode is "window" or "both")
+  agg_method: "median"            # How to summarise site scores per region: "median", "mean", or "trimmed_mean"
+  # trim_fraction: 0.1              # Fraction to trim from each tail (trimmed_mean only)
+  min_informative_sites: 5        # Minimum sites present in the input per region (0 disables filter)
+  min_informative_fraction: 0.0   # Minimum fraction of region length covered by sites (0.0 disables)
+  use_fisher: True               # Also compute Fisher combined p-values from percentile ranks (secondary/exploratory)
 
 # Compute Resources
 # -----------------
@@ -129,3 +147,6 @@ resources:
 #     threads_per_job: 1
 #     mem_per_job: "200G"
 #     time: "48:00:00"
+#   regional_contrast:             # Rule: regional_contrast
+#     mem_per_job: "16G"
+#     time: "04:00:00"

@@ -241,6 +241,86 @@ dnds:
 
 ---
 
+### regional_contrast
+
+Parameters for regional contrast analysis (longitudinal data only). Detects genes or sliding windows where treatment and control groups show consistently different allele-frequency evolution across paired hosts.
+
+:::{note}
+Regional contrast analysis is **only applicable to longitudinal data** (`data_type: longitudinal`). It operates on raw allele-frequency changes without statistical preprocessing to avoid selection bias.
+:::
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `mode` | `both` | Region type(s) to analyze: `gene` (gene annotations), `window` (sliding windows), or `both`. |
+| `window_size` | `1000` | Non-overlapping tile width in base pairs for sliding window analysis. Used when mode is `window` or `both`. |
+| `agg_method` | `median` | How to summarize site scores within a region: `median` (robust), `mean` (simple average), or `trimmed_mean` (robust mean with custom tail trimming). |
+| `trim_fraction` | `0.1` | Fraction of values to trim from each tail when using `agg_method: trimmed_mean`. Ignored for other aggregation methods. |
+| `min_informative_sites` | `5` | Minimum number of variable sites required per region. Regions with fewer sites are excluded. Set to `0` to disable. **Note:** Sites with `site_score == 0` (perfect evolutionary stasis) are counted if they exist in the input. |
+| `min_informative_fraction` | `0.0` | Minimum fraction of region length that must be covered by informative sites (0.0–1.0). Set to `0.0` to disable. |
+| `use_fisher` | `true` | Also compute Fisher combined p-values from percentile-derived empirical p-values (secondary/exploratory analysis). Set to `false` to skip this computationally intensive step. |
+| `use_regional_contrast` | `true` | Enable or disable regional contrast analysis entirely. Set to `false` to skip this analysis. |
+
+**Example with default settings:**
+
+```yaml
+regional_contrast:
+  mode: both
+  window_size: 1000
+  agg_method: median
+  min_informative_sites: 5
+  min_informative_fraction: 0.0
+  use_fisher: true
+  use_regional_contrast: true
+```
+
+**Example with stringent filtering:**
+
+```yaml
+regional_contrast:
+  mode: both
+  window_size: 1000
+  agg_method: trimmed_mean
+  trim_fraction: 0.15
+  min_informative_sites: 10
+  min_informative_fraction: 0.5
+  use_fisher: false
+```
+
+**Understanding the parameters:**
+
+- **mode**: `gene` focuses on annotated genes; `window` focuses on fixed-size genomic tiles; `both` runs both analyses in parallel.
+- **window_size**: Typical values range from 500 bp (fine-grained) to 5000 bp (coarse-grained). Smaller windows increase power for localized signals; larger windows increase robustness to sparse data.
+- **agg_method**: `median` is recommended for skewed data; `trimmed_mean` is robust to outliers; `mean` is simple but sensitive to extreme values.
+- **min_informative_sites**: Higher values improve statistical power but reduce the number of analyzable regions. A region with all sites showing `site_score == 0` still counts as having full informative sites (no signal ≠ sparse data).
+- **min_informative_fraction**: Ensures that only well-sampled regions are tested. A value of 0.5 requires at least 50% of the region to have observed variable sites.
+- **use_fisher**: Fisher combined p-values provide an orthogonal statistical perspective but require additional computation. Set to `false` for large datasets if runtime is a concern.
+
+---
+
+### Multiple Group Combinations
+
+AlleleFlux supports running regional contrast (and all other analyses) on **multiple group pairs simultaneously**. Each pair is analyzed independently:
+
+```yaml
+analysis:
+  groups_combinations:
+    - treatment: "high_fat"
+      control: "control"
+    - treatment: "high_fat"
+      control: "standard"
+```
+
+For each group combination:
+- A separate eligibility table is generated based on sample quality metrics for that specific pair
+- Regional contrast analysis runs independently with separate output directories:
+  - `regional_contrast/regional_contrast_{timepoints}-high_fat_control/`
+  - `regional_contrast/regional_contrast_{timepoints}-high_fat_standard/`
+- Results files are segregated by group combination, preventing cross-contamination
+
+**Key note:** The `treatment` and `control` wildcards in the Snakemake rule are constrained to valid values from your configuration, ensuring that only defined group pairs are processed.
+
+---
+
 ### resources
 
 Computational resource allocation for cluster execution.
@@ -315,6 +395,15 @@ statistics:
 dnds:
   p_value_column: q_value
   dn_ds_test_type: two_sample_unpaired_tTest
+
+regional_contrast:
+  mode: both
+  window_size: 1000
+  agg_method: median
+  min_informative_sites: 5
+  min_informative_fraction: 0.0
+  use_fisher: true
+  use_regional_contrast: true
 
 resources:
   threads_per_job: 16

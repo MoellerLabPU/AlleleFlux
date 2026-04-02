@@ -233,11 +233,14 @@ for tp in timepoints_labels:
         valid_focus_timepoints[tp] = [tp]
 
 groups_labels = [
-    f"{gr[0]}_{gr[1]}" for gr in config["analysis"]["groups_combinations"]
+    f"{gr['treatment']}_{gr['control']}" for gr in config["analysis"]["groups_combinations"]
 ]  # ["G1_G2", "G2_G4"]
 
 # Flatten the list of group values from the groups_combinations config.
-group_values = sorted({item for gr in config["analysis"]["groups_combinations"] for item in gr})
+group_values = sorted(
+    {gr["treatment"] for gr in config["analysis"]["groups_combinations"]}
+    | {gr["control"] for gr in config["analysis"]["groups_combinations"]}
+)
 # Build the regex: optionally an underscore and one of the allowed group values.
 group_str_regex = "(_({}))?".format("|".join(group_values))
 
@@ -256,6 +259,9 @@ wildcard_constraints:
     focus_tp="|".join(set([tp for tp_pair in valid_focus_timepoints.values() for tp in tp_pair if tp])),
     # Subject ID constraint - alphanumeric with optional underscores/hyphens
     subject_id="[a-zA-Z0-9_-]+",
+    # Explicit treatment/control wildcards (used by regional_contrast rule)
+    treatment=f"({'|'.join(sorted({gr['treatment'] for gr in config['analysis']['groups_combinations']}))})",
+    control=f"({'|'.join(sorted({gr['control'] for gr in config['analysis']['groups_combinations']}))})",
     
 # Function to get sample information from metadata file
 def get_sample_info():
