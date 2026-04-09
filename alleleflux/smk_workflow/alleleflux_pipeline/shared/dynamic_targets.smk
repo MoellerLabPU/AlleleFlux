@@ -369,7 +369,6 @@ def generate_gene_scores_targets(tp, gr):
             OUTDIR, "scores", "processed", base_subdir,
             f"{prefix}_gene_scores_combined.tsv",
         )
-
     if config["analysis"].get("use_significance_tests", True):
         for test_type in ["two_sample_unpaired", "two_sample_paired"]:
             mags = get_eligible_mags(tp, gr, test_type)
