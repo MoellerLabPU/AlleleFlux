@@ -108,10 +108,10 @@ PVAL_TTEST_GREATER_COL = "p_value_ttest_greater"
 QVAL_TTEST_GREATER_COL = "q_value_ttest_greater"
 PVAL_TTEST_LESS_COL = "p_value_ttest_less"
 QVAL_TTEST_LESS_COL = "q_value_ttest_less"
-FISHER_PVAL_TREATMENT_COL = "fisher_p_value_treatment"
-FISHER_QVAL_TREATMENT_COL = "fisher_q_value_treatment"
-FISHER_PVAL_CONTROL_COL = "fisher_p_value_control"
-FISHER_QVAL_CONTROL_COL = "fisher_q_value_control"
+FISHER_PVAL_TREATMENT_COL = "p_value_fisher_treatment"
+FISHER_QVAL_TREATMENT_COL = "q_value_fisher_treatment"
+FISHER_PVAL_CONTROL_COL = "p_value_fisher_control"
+FISHER_QVAL_CONTROL_COL = "q_value_fisher_control"
 
 
 # ── 1. Load & validate ──────────────────────────────────────────────────
@@ -601,6 +601,21 @@ def _wilcoxon_test(contrasts: np.ndarray, alternative: str) -> float:
     alternative : {"greater", "less"}
         ``"greater"`` tests H₁: median contrast > 0 (treatment evolved more).
         ``"less"``    tests H₁: median contrast < 0 (control evolved more).
+
+    Notes
+    -----
+    The full *contrasts* array (including zeros) is passed to
+    ``scipy.stats.wilcoxon``, which uses ``zero_method="wilcox"`` by default
+    and therefore discards zero differences internally — the same behaviour as
+    ``single_sample.py``.  Manually filtering zeros before the call is not
+    needed and would produce an inconsistent minimum-sample threshold between
+    the Wilcoxon and t-test.  If too few non-zero differences remain after
+    scipy's internal exclusion, a ``ValueError`` is raised and caught here,
+    returning ``NaN``.
+
+    The minimum-observations guard (formerly ``len(contrasts) < 3``) is now
+    handled upstream by ``min_replicates`` in :func:`test_region_contrasts`,
+    so no explicit length check is needed here.
     """
     if len(contrasts) == 0:
         return np.nan
@@ -609,11 +624,8 @@ def _wilcoxon_test(contrasts: np.ndarray, alternative: str) -> float:
     # NaN when the answer is unambiguously "no effect")
     if np.var(contrasts) == 0 and np.mean(contrasts) == 0:
         return 1.0
-    non_zero = contrasts[contrasts != 0]
-    if len(non_zero) < 3:
-        return np.nan
     try:
-        _, p = wilcoxon(non_zero, alternative=alternative)
+        _, p = wilcoxon(contrasts, alternative=alternative)
         return float(p)
     except ValueError:
         return np.nan
@@ -627,8 +639,13 @@ def _ttest_test(contrasts: np.ndarray, alternative: str) -> float:
     alternative : {"greater", "less"}
         ``"greater"`` tests H₁: mean contrast > 0 (treatment evolved more).
         ``"less"``    tests H₁: mean contrast < 0 (control evolved more).
+
+    Notes
+    -----
+    The minimum-observations guard is handled upstream by ``min_replicates``
+    in :func:`test_region_contrasts`, so no explicit length check is needed.
     """
-    if len(contrasts) < 3:
+    if len(contrasts) == 0:
         return np.nan
     # Perfect null: all contrasts are zero → p = 1.0 (same guard as
     # single_sample.py; without this, ttest_1samp returns NaN because
@@ -647,11 +664,12 @@ def test_region_contrasts(
     paired_df: pd.DataFrame,
     host_col: str,
     contig_col: str,
+    min_replicates: int = 4,
 ) -> pd.DataFrame:
     """Test each region for a consistently positive contrast across hosts.
 
     For each region, aggregates contrasts (treatment − control allele-frequency
-    scores) across hosts and runs two independent one-sided tests:
+    scores) across replicates and runs two independent one-sided tests:
 
     - **"greater"** (H₁: contrast > 0): treatment evolved more than control.
     - **"less"**    (H₁: contrast < 0): control evolved more than treatment.
@@ -669,11 +687,15 @@ def test_region_contrasts(
     ----------
     paired_df : pd.DataFrame
         Output of :func:`reshape_treatment_control` with one row per
-        (host × region) pair and a ``contrast`` column.
+        (replicate × region) pair and a ``contrast`` column.
     host_col : str
         Column name for the paired-unit identifier (e.g., "replicate").
     contig_col : str
         Column name for genomic contig identifier. Optional metadata.
+    min_replicates : int
+        Minimum number of replicates required for a region to be included in
+        the output.  Regions with fewer replicates are silently dropped.
+        Defaults to 4.
 
     Returns
     -------
@@ -685,9 +707,9 @@ def test_region_contrasts(
         - ``region_type``: ``"gene"`` or ``"window"``
         - *contig_col*, ``region_start``, ``region_end``: Genomic location metadata
           (included if present in input)
-        - ``n_hosts``: Number of hosts (replicates) contributing to the test
-        - ``mean_contrast``: Arithmetic mean of contrasts across hosts
-        - ``median_contrast``: Median of contrasts across hosts
+        - ``n_replicates``: Number of replicates contributing to the test
+        - ``mean_contrast``: Arithmetic mean of contrasts across replicates
+        - ``median_contrast``: Median of contrasts across replicates
         - ``p_value_wilcoxon_greater``: Wilcoxon p-value for H₁: treatment > control
         - ``p_value_wilcoxon_less``:    Wilcoxon p-value for H₁: control > treatment
         - ``p_value_ttest_greater``:    t-test p-value for H₁: treatment > control
@@ -712,8 +734,8 @@ def test_region_contrasts(
 
     .. code-block:: text
 
-        region_id          region_type  n_hosts  mean_contrast  median_contrast  p_value_wilcoxon_greater  p_value_wilcoxon_less
-        contig_1:1-1000    window       4        0.1250         0.1650           0.0625                    0.9688
+        region_id          region_type  n_replicates  mean_contrast  median_contrast  p_value_wilcoxon_greater  p_value_wilcoxon_less
+        contig_1:1-1000    window       4             0.1250         0.1650           0.0625                    0.9688
     """
     # Gather all region-identifying column names (always include region_id and region_type)
     # and optionally add genomic location metadata if present
@@ -723,19 +745,25 @@ def test_region_contrasts(
             region_meta_cols.append(col)
 
     results: list[dict] = []
+    n_dropped = 0
     # Iterate over each unique region (identified by region_meta_cols)
     for keys, grp in paired_df.groupby(region_meta_cols):
-        # Extract all contrasts (treatment − control) for this region across hosts
+        # Extract all contrasts (treatment − control) for this region across replicates
         contrasts = grp["contrast"].dropna().values
-        n_hosts = len(contrasts)
+        n_replicates = len(contrasts)
+
+        # Skip regions that do not meet the minimum replicate threshold
+        if n_replicates < min_replicates:
+            n_dropped += 1
+            continue
 
         # Map region identifiers back to a dict (groupby with 2+ columns always returns tuple)
         row = dict(zip(region_meta_cols, keys))
 
-        # Store basic statistics across hosts for this region
-        row["n_hosts"] = n_hosts
-        row["mean_contrast"] = float(np.mean(contrasts)) if n_hosts else np.nan
-        row["median_contrast"] = float(np.median(contrasts)) if n_hosts else np.nan
+        # Store basic statistics across replicates for this region
+        row["n_replicates"] = n_replicates
+        row["mean_contrast"] = float(np.mean(contrasts))
+        row["median_contrast"] = float(np.median(contrasts))
 
         # Two independent one-sided tests — each uses its full α budget for one direction:
         #   "greater": treatment evolved more than control (contrast > 0)
@@ -750,8 +778,28 @@ def test_region_contrasts(
 
         results.append(row)
 
-    summary = pd.DataFrame(results)
-    logger.info(f"Tested {len(summary):,} regions across hosts")
+    if n_dropped:
+        logger.info(
+            f"Dropped {n_dropped:,} regions with fewer than {min_replicates} replicates"
+        )
+
+    if results:
+        summary = pd.DataFrame(results)
+    else:
+        # Return an empty DataFrame with the correct column schema so that a
+        # downstream outer-merge with fisher_df (and subsequent groupby in the
+        # FDR step) does not fail with a KeyError on 'region_id' or similar.
+        empty_cols = region_meta_cols + [
+            "n_replicates",
+            "mean_contrast",
+            "median_contrast",
+            PVAL_WILCOXON_GREATER_COL,
+            PVAL_WILCOXON_LESS_COL,
+            PVAL_TTEST_GREATER_COL,
+            PVAL_TTEST_LESS_COL,
+        ]
+        summary = pd.DataFrame(columns=empty_cols)
+    logger.info(f"Tested {len(summary):,} regions across replicates")
     return summary
 
 
@@ -761,6 +809,7 @@ def test_region_contrasts(
 def fisher_combine_empirical_pvalues(
     paired_df: pd.DataFrame,
     contig_col: str,
+    min_replicates: int = 4,
 ) -> pd.DataFrame:
     """Combine percentile-derived empirical p-like values via Fisher's method.
 
@@ -794,13 +843,16 @@ def fisher_combine_empirical_pvalues(
         - ``region_type``: ``"gene"`` or ``"window"``
         - *contig_col*, ``region_start``, ``region_end``: Genomic location metadata
           (included if present in input)
-        - ``fisher_p_value_treatment``: Combined Fisher p-value across hosts for
+        - ``n_replicates_treatment``: Number of non-null treatment percentile values
+        - ``n_replicates_control``: Number of non-null control percentile values
+        - ``p_value_fisher_treatment``: Combined Fisher p-value across hosts for
           the treatment group (high percentile → small p → treatment evolved a lot)
-        - ``fisher_p_value_control``: Combined Fisher p-value across hosts for
+        - ``p_value_fisher_control``: Combined Fisher p-value across hosts for
           the control group
 
-        A region is included if *either* group has ≥ 2 non-null percentile values;
-        the other group's column is NaN for that row if it has < 2 values.
+        A region is included if *either* group has ≥ *min_replicates* non-null
+        percentile values; the other group's column is NaN for that row if it
+        has fewer than *min_replicates* values.
 
     Example
     -------
@@ -820,7 +872,7 @@ def fisher_combine_empirical_pvalues(
 
     .. code-block:: text
 
-        region_id  region_type  fisher_p_value_treatment  fisher_p_value_control
+        region_id  region_type  p_value_fisher_treatment  p_value_fisher_control
         gene_X     gene         0.0502                    0.7130
     """
     # Gather all region-identifying column names (always include region_id and region_type)
@@ -833,10 +885,9 @@ def fisher_combine_empirical_pvalues(
     def _fisher_p(pct: np.ndarray) -> float:
         """Convert percentiles to empirical p-values and combine via Fisher's method.
 
-        Returns NaN if fewer than 2 non-null values are available (minimum
-        required for Fisher's chi-squared statistic with df = 2k).
+        Returns NaN if fewer than *min_replicates* non-null values are available.
         """
-        if len(pct) < 2:
+        if len(pct) < min_replicates:
             return np.nan
         # Convert percentile ranks to empirical p-like values: p ≈ 1 − (percentile / 100)
         # Clamp to (1e-10, 1−1e-10) to avoid log(0) in Fisher's chi-squared statistic
@@ -854,14 +905,17 @@ def fisher_combine_empirical_pvalues(
         pct_ctrl = grp["percentile_control"].dropna().values
 
         # Skip regions where neither group has enough data to combine
-        if len(pct_trt) < 2 and len(pct_ctrl) < 2:
+        if len(pct_trt) < min_replicates and len(pct_ctrl) < min_replicates:
             continue
 
         # Map region identifiers back to a dict (groupby with 2+ columns always returns tuple)
         row = dict(zip(region_meta_cols, keys))
-        # Compute Fisher p for each group independently; NaN if < 2 hosts available
-        row["fisher_p_value_treatment"] = _fisher_p(pct_trt)
-        row["fisher_p_value_control"] = _fisher_p(pct_ctrl)
+        # Track the number of replicates per group (may differ if unpaired)
+        row["n_replicates_treatment"] = len(pct_trt)
+        row["n_replicates_control"] = len(pct_ctrl)
+        # Compute Fisher p for each group independently; NaN if < min_replicates hosts available
+        row["p_value_fisher_treatment"] = _fisher_p(pct_trt)
+        row["p_value_fisher_control"] = _fisher_p(pct_ctrl)
         results.append(row)
 
     if not results:
@@ -949,8 +1003,6 @@ def write_outputs(
     summary_df: pd.DataFrame,
     output_dir: str | Path,
     prefix: str,
-    host_col: str,
-    contig_col: str,
 ) -> None:
     """Serialize per-host and region-summary results to disk.
 
@@ -990,13 +1042,15 @@ def write_outputs(
     Example
     -------
     Given per-host results with 1 000 (host × region) pairs and region summary
-    with 100 regions, this function writes:
+    with 100 regions (50 genes, 50 windows), this function writes:
 
     .. code-block:: text
 
         output_dir/
-            regional_contrast_per_host_region.tsv.gz  (1000 rows, compressed)
-            regional_contrast_region_summary.tsv       (100 rows, plain text)
+            regional_contrast_per_host_region.tsv.gz          (1000 rows, compressed)
+            regional_contrast_region_summary.tsv               (100 rows, combined)
+            regional_contrast_gene_region_summary.tsv          (50 rows)
+            regional_contrast_window_region_summary.tsv        (50 rows)
     """
     # Ensure output directory exists
     out = Path(output_dir)
@@ -1008,11 +1062,18 @@ def write_outputs(
     per_host_df.to_csv(host_path, sep="\t", index=False, compression="gzip")
     logger.info(f"Per-host table → {host_path} ({len(per_host_df):,} rows)")
 
-    # Write region summary table (smaller: one row per region, aggregated across hosts)
-    # Stored as plain text for easy inspection and downstream analysis
+    # Write combined region summary (all region types; useful for manual inspection)
     summ_path = out / f"{prefix}_region_summary.tsv"
     summary_df.to_csv(summ_path, sep="\t", index=False)
     logger.info(f"Summary table  → {summ_path} ({len(summary_df):,} rows)")
+
+    # Write per-region-type summary files so downstream scoring rules can consume
+    # each type independently without subprocess filtering or temp files.
+    if "region_type" in summary_df.columns:
+        for rt, rt_df in summary_df.groupby("region_type"):
+            rt_path = out / f"{prefix}_{rt}_region_summary.tsv"
+            rt_df.to_csv(rt_path, sep="\t", index=False)
+            logger.info(f"{rt} summary    → {rt_path} ({len(rt_df):,} rows)")
 
 
 # ── main ────────────────────────────────────────────────────────────────
@@ -1125,6 +1186,16 @@ def main() -> None:
 
     # ── Statistical tests ──
     tst = parser.add_argument_group("Statistical tests")
+    tst.add_argument(
+        "--min_replicates",
+        type=int,
+        default=4,
+        help=(
+            "Minimum number of replicates (hosts) required for a region to "
+            "be included in the statistical test output.  Regions with fewer "
+            "replicates are dropped before testing and FDR correction."
+        ),
+    )
     tst.add_argument(
         "--use_fisher",
         action="store_true",
@@ -1243,6 +1314,7 @@ def main() -> None:
         paired_df,
         host_col=HOST_COL,
         contig_col=CONTIG_COL,
+        min_replicates=args.min_replicates,
     )
 
     # 8. Optional Fisher (secondary / exploratory)
@@ -1251,6 +1323,7 @@ def main() -> None:
         fisher_df = fisher_combine_empirical_pvalues(
             paired_df,
             contig_col=CONTIG_COL,
+            min_replicates=args.min_replicates,
         )
         if not fisher_df.empty:
             fisher_p_cols = [FISHER_PVAL_TREATMENT_COL, FISHER_PVAL_CONTROL_COL]
@@ -1307,7 +1380,7 @@ def main() -> None:
                 method=FDR_METHOD,
             )
         fdr_parts.append(grp)
-    summary_df = pd.concat(fdr_parts, ignore_index=True)
+    summary_df = pd.concat(fdr_parts, ignore_index=True) if fdr_parts else summary_df
 
     # 10. Write
     logger.info("── Step 10: Writing outputs ──")
@@ -1316,8 +1389,6 @@ def main() -> None:
         summary_df,
         output_dir=args.output_dir,
         prefix=args.prefix,
-        host_col=HOST_COL,
-        contig_col=CONTIG_COL,
     )
 
     logger.info("Done.")

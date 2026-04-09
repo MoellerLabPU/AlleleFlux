@@ -72,16 +72,20 @@ def get_final_pipeline_outputs(wildcards):
             # Now that the checkpoints have been evaluated (and files potentially created/updated),
             # we can generate the targets for Step 2.
             
-            # Taxa Score Targets
             if not config["analysis"].get("allele_analysis_only", False):
+                # MAG-level combined score targets (always computed)
+                final_targets.extend(generate_mag_scores_targets(tp, gr))
+
+                # Taxa Score Targets (only for levels listed in taxa_score_levels)
                 final_targets.extend(generate_taxa_scores_targets(tp, gr))
-            
-            # Outlier Targets
-            if not config["analysis"].get("allele_analysis_only", False):
+
+                # Gene Score Targets (gated by use_gene_scores)
+                final_targets.extend(generate_gene_scores_targets(tp, gr))
+
+                # Outlier Gene Targets (gated by use_outlier_detection)
                 final_targets.extend(generate_outlier_gene_targets(tp, gr))
-                
-            # P-value Summary Targets
-            if not config["analysis"].get("allele_analysis_only", False):
+
+                # P-value Summary Targets
                 final_targets.extend(generate_p_value_summary_targets(tp, gr))
                 
             # dN/dS Analysis Targets
