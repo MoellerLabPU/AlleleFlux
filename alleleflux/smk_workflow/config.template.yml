@@ -41,8 +41,8 @@ analysis:
   use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
   use_regional_contrast: True     # Regional contrast: detect genes/windows with differential allele-frequency evolution
                                   # Only applicable to longitudinal data; runs on raw allele-frequency changes (no preprocessing)
-  use_gene_scores: True            # Compute gene-level significance scores (alleleflux-gene-scores); requires Prodigal annotations
-  use_outlier_detection: True      # Detect outlier genes by comparing gene vs MAG scores (alleleflux-outliers); requires use_gene_scores: True
+  use_gene_scores: False           # Compute gene-level significance scores (alleleflux-gene-scores); requires Prodigal annotations
+  use_outlier_detection: False     # Detect outlier genes by comparing gene vs MAG scores (alleleflux-outliers); requires use_gene_scores: True
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
     - phylum                       # Remove or comment out levels you don't need; set to [] for MAG level only
     - class

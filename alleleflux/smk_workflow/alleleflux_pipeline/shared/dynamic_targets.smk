@@ -359,7 +359,7 @@ def generate_gene_scores_targets(tp, gr):
         return []
     targets = []
 
-    if not config["analysis"].get("use_gene_scores", True):
+    if not config["analysis"].get("use_gene_scores", False):
         return targets
 
     base_subdir = f"gene_scores_{tp}-{gr}"
@@ -412,7 +412,7 @@ def generate_outlier_gene_targets(tp, gr):
         return []
     targets = []
 
-    if not config["analysis"].get("use_outlier_detection", True):
+    if not config["analysis"].get("use_outlier_detection", False):
         return targets
 
     # Add significance test outlier targets if enabled
