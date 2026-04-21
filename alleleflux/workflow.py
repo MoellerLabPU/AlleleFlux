@@ -390,7 +390,7 @@ def execute_workflow(
     # Handle unlock
     if unlock:
         logger.info("Unlocking working directory...")
-        unlock_cmd = f"snakemake --snakefile {snakefile} --unlock"
+        unlock_cmd = f"snakemake --snakefile {snakefile} --configfile {config_path.resolve()} --directory {working_dir} --unlock"
         return run_snakemake(unlock_cmd)
 
     # Get output directory from config for logging
