@@ -80,3 +80,6 @@ resources:
   threads_per_job: 4
   mem_per_job: "4G"
   time: "01:00:00"
+  retries: 2                      # Number of retries per job
+  mem_step: "2G"                  # Memory added per retry
+  time_step: "1:00:00"            # Time added per retry

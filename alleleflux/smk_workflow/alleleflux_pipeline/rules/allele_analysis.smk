@@ -62,6 +62,7 @@ rule allele_analysis:
         data_type=DATA_TYPE,
 
     threads: get_threads("allele_analysis")
+    retries: get_retries("allele_analysis")
     resources:
         mem_mb=get_mem_mb("allele_analysis"),
         time=get_time("allele_analysis"),

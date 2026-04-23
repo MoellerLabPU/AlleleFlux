@@ -36,6 +36,7 @@ if not USE_EXISTING_PROFILES:
         output:
             sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
         threads: get_threads("profile")
+        retries: get_retries("profile")
         resources:
             mem_mb=get_mem_mb("profile"),
             time=get_time("profile"),

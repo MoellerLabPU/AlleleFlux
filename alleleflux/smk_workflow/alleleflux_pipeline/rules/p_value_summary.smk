@@ -82,6 +82,10 @@ rule p_value_summary:
             if config["statistics"].get("fdr_group_by_mag_id", False)
             else ""
         )
+    retries: get_retries("p_value_summary")
+    resources:
+        mem_mb=get_mem_mb("p_value_summary"),
+        time=get_time("p_value_summary"),
     shell:
         """
         alleleflux-p-value-summary \

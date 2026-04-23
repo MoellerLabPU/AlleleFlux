@@ -47,6 +47,7 @@ rule dnds_from_timepoints:
         p_value_threshold=config["statistics"]["p_value_threshold"],  # Use from statistics section
         dn_ds_test_type=DN_DS_TEST_TYPE,
         log_level=config.get("log_level", "INFO"),
+    retries: get_retries("dnds_from_timepoints")
     resources:
         time=get_time("dnds_from_timepoints"),
         mem_mb=get_mem_mb("dnds_from_timepoints"),

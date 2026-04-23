@@ -20,6 +20,7 @@ rule qc:
         coverage_threshold=config["quality_control"]["coverage_threshold"],
         data_type=DATA_TYPE,
     threads: get_threads("qc")
+    retries: get_retries("qc")
     resources:
         time=get_time("qc"),
         mem_mb=get_mem_mb("qc"),

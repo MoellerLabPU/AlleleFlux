@@ -36,6 +36,7 @@ rule preprocess_within_groups:
         ),
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
         min_sample_num=config["quality_control"]["min_sample_num"],
+    retries: get_retries("preprocess_within_groups")
     resources:
         mem_mb=get_mem_mb("preprocess_within_groups"),
         time=get_time("preprocess_within_groups"),
@@ -76,6 +77,7 @@ rule single_sample:
             OUTDIR, "significance_tests", "single_sample_{timepoints}-{groups}"
         ),
     threads: get_threads("statistical_tests")
+    retries: get_retries("statistical_tests")
     resources:
         mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
@@ -131,6 +133,7 @@ rule lmm_analysis_across_time:
             else ""
         )
     threads: get_threads("statistical_tests")
+    retries: get_retries("statistical_tests")
     resources:
         time=get_time("statistical_tests"),
         mem_mb=get_mem_mb("statistical_tests")
@@ -175,6 +178,7 @@ rule cmh_test_across_time:
             else ""
         )
     threads: get_threads("statistical_tests")
+    retries: get_retries("statistical_tests")
     resources:
         time=get_time("statistical_tests"),
         mem_mb=get_mem_mb("statistical_tests"),

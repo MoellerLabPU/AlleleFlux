@@ -67,6 +67,78 @@ def parse_mem(mem_value):
         return int(float(mem_str))
 
 
+def parse_time_to_minutes(time_str):
+    """
+    Convert a time string (HH:MM:SS or D-HH:MM:SS) to total minutes.
+    
+    Args:
+        time_str: Time string in HH:MM:SS or D-HH:MM:SS format
+    
+    Returns:
+        int: Total minutes
+    
+    Examples:
+        >>> parse_time_to_minutes("24:00:00")
+        1440
+        >>> parse_time_to_minutes("4:00:00")
+        240
+        >>> parse_time_to_minutes("1-00:00:00")
+        1440
+        >>> parse_time_to_minutes("0:30:00")
+        30
+    """
+    time_str = str(time_str).strip()
+    
+    # Handle D-HH:MM:SS format
+    days = 0
+    if "-" in time_str:
+        day_part, time_str = time_str.split("-", 1)
+        days = int(day_part)
+    
+    parts = time_str.split(":")
+    if len(parts) == 3:
+        hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+    elif len(parts) == 2:
+        hours, minutes = 0, int(parts[0])
+        seconds = int(parts[1])
+    else:
+        raise ValueError(f"Invalid time format: {time_str}. Use HH:MM:SS or D-HH:MM:SS.")
+    
+    return days * 24 * 60 + hours * 60 + minutes + (1 if seconds > 0 else 0)
+
+
+def minutes_to_time_str(total_minutes):
+    """
+    Convert total minutes to HH:MM:SS or D-HH:MM:SS format.
+    
+    Uses D-HH:MM:SS format only when days >= 1 for cleaner output.
+    
+    Args:
+        total_minutes: Total minutes as int
+    
+    Returns:
+        str: Time string in HH:MM:SS or D-HH:MM:SS format
+    
+    Examples:
+        >>> minutes_to_time_str(240)
+        '4:00:00'
+        >>> minutes_to_time_str(1440)
+        '1-00:00:00'
+        >>> minutes_to_time_str(1500)
+        '1-01:00:00'
+    """
+    total_minutes = max(1, int(total_minutes))
+    days = total_minutes // (24 * 60)
+    remaining = total_minutes % (24 * 60)
+    hours = remaining // 60
+    minutes = remaining % 60
+    
+    if days > 0:
+        return f"{days}-{hours:02d}:{minutes:02d}:00"
+    else:
+        return f"{hours}:{minutes:02d}:00"
+
+
 def get_resource(rule_name, resource_type, default=None):
     """
     Get resource value for a rule, checking for per-rule override first.
@@ -106,6 +178,28 @@ def get_resource(rule_name, resource_type, default=None):
     return value
 
 
+# -- Internal helpers for retry / resource stepping --
+
+def _get_retries_for_rule(rule_name=None):
+    """Get retry count, checking per-rule override first, then global default."""
+    if rule_name:
+        overrides = config.get("resources_override", {}).get(rule_name, {})
+        if "retries" in overrides:
+            return int(overrides["retries"])
+    return int(config.get("resources", {}).get("retries", 2))
+
+
+def _get_step_value(rule_name, key, global_default):
+    """Get a step value (mem_step, time_step) with per-rule override support."""
+    if rule_name:
+        overrides = config.get("resources_override", {}).get(rule_name, {})
+        if key in overrides:
+            return overrides[key]
+    return config.get("resources", {}).get(key, global_default)
+
+
+# -- Public resource functions used by rules --
+
 def get_threads(rule_name=None):
     """Get threads_per_job, optionally checking for rule-specific override."""
     if rule_name:
@@ -113,18 +207,85 @@ def get_threads(rule_name=None):
     return config.get("resources", {}).get("threads_per_job", 1)
 
 
+def get_retries(rule_name=None):
+    """
+    Get retry count for a rule, for use in the rule-level retries: directive.
+    
+    Checks per-rule override first, then falls back to global resources.retries.
+    Default is 2 retries if not specified.
+    
+    Args:
+        rule_name: Name of the Snakemake rule (optional)
+    
+    Returns:
+        int: Number of retries
+    """
+    return _get_retries_for_rule(rule_name)
+
+
 def get_mem_mb(rule_name=None):
-    """Get memory in MB, optionally checking for rule-specific override."""
+    """
+    Get memory in MB, with automatic scaling on retry when mem_step is configured.
+    
+    When retries > 0 and mem_step is set, returns a callable
+    ``lambda wildcards, attempt: base + (attempt-1) * step`` so that
+    Snakemake allocates more memory on each retry.
+    When no stepping is configured, returns a static int (backward-compatible).
+    
+    Args:
+        rule_name: Name of the Snakemake rule (optional)
+    
+    Returns:
+        int or callable: Memory in MB (static or attempt-aware)
+    """
     if rule_name:
-        return get_resource(rule_name, "mem_per_job")
-    return parse_mem(config.get("resources", {}).get("mem_per_job", "8G"))
+        base_mb = get_resource(rule_name, "mem_per_job")
+    else:
+        base_mb = parse_mem(config.get("resources", {}).get("mem_per_job", "8G"))
+    
+    retries = _get_retries_for_rule(rule_name)
+    step_raw = _get_step_value(rule_name, "mem_step", None)
+    
+    if retries > 0 and step_raw:
+        step_mb = parse_mem(step_raw)
+        if step_mb > 0:
+            return lambda wildcards, attempt: base_mb + (attempt - 1) * step_mb
+    
+    return base_mb
 
 
 def get_time(rule_name=None):
-    """Get wall time, optionally checking for rule-specific override."""
+    """
+    Get wall time, with automatic scaling on retry when time_step is configured.
+    
+    When retries > 0 and time_step is set, returns a callable
+    ``lambda wildcards, attempt: base_time + (attempt-1) * step`` so that
+    Snakemake allocates more time on each retry.
+    When no stepping is configured, returns a static string (backward-compatible).
+    
+    Args:
+        rule_name: Name of the Snakemake rule (optional)
+    
+    Returns:
+        str or callable: Wall time (static or attempt-aware)
+    """
     if rule_name:
-        return get_resource(rule_name, "time")
-    return config.get("resources", {}).get("time", "24:00:00")
+        base_time = get_resource(rule_name, "time")
+    else:
+        base_time = config.get("resources", {}).get("time", "24:00:00")
+    
+    retries = _get_retries_for_rule(rule_name)
+    step_raw = _get_step_value(rule_name, "time_step", None)
+    
+    if retries > 0 and step_raw:
+        base_mins = parse_time_to_minutes(base_time)
+        step_mins = parse_time_to_minutes(step_raw)
+        if step_mins > 0:
+            return lambda wildcards, attempt: minutes_to_time_str(
+                base_mins + (attempt - 1) * step_mins
+            )
+    
+    return base_time
 
 
 # =============================================================================

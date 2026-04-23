@@ -15,6 +15,7 @@ checkpoint eligibility_table:
     params:
         min_sample_num=config["quality_control"]["min_sample_num"],
         data_type=DATA_TYPE,
+    retries: get_retries("eligibility_table")
     resources:
         time=get_time("eligibility_table"),
     shell:

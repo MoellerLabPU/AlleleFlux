@@ -92,6 +92,7 @@ checkpoint preprocessing_eligibility_between_groups:
             "preprocessed_between_groups_{timepoints}-{groups}"
         ),
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
+    retries: get_retries("preprocessing_eligibility_between_groups")
     resources:
         mem_mb=get_mem_mb("preprocessing_eligibility_between_groups"),
         time=get_time("preprocessing_eligibility_between_groups"),
@@ -130,6 +131,7 @@ checkpoint preprocessing_eligibility_within_groups:
         min_positions=config["statistics"].get("min_positions_after_preprocess", 1),
         # Extract group names from the groups wildcard (e.g., "fat_control" -> ["fat", "control"])
         groups=lambda wildcards: wildcards.groups.split("_"),
+    retries: get_retries("preprocessing_eligibility_within_groups")
     resources:
         mem_mb=get_mem_mb("preprocessing_eligibility_within_groups"),
         time=get_time("preprocessing_eligibility_within_groups"),

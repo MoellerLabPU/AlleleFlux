@@ -43,6 +43,7 @@ rule generate_metadata:
         data_type=DATA_TYPE,
         group_args=lambda wildcards: f"--groups {wildcards.groups.replace('_', ' ')}",
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
+    retries: get_retries("generate_metadata")
     resources:
         mem_mb=get_mem_mb("generate_metadata"),
         time=get_time("generate_metadata"),

@@ -932,6 +932,26 @@ def init_config(use_template, output):
             "Time limit per job (HH:MM:SS format):", default="24:00:00"
         )
 
+        # Retry configuration
+        click.echo("\n🔄 Retry Configuration (press Enter to use defaults):")
+        click.echo("Jobs can automatically retry with more memory/time on failure.")
+        retries = prompt_integer(
+            "Number of retries per job (0 = no retries):",
+            default=2,
+            min_value=0,
+            max_value=5,
+        )
+        if retries > 0:
+            mem_step = prompt_memory(
+                "Memory added per retry (e.g., '4G'):", default="4G"
+            )
+            time_step = prompt_time(
+                "Time added per retry (e.g., '4:00:00'):", default="4:00:00"
+            )
+        else:
+            mem_step = "0G"
+            time_step = "0:00:00"
+
     except KeyboardInterrupt:
         click.echo("\nConfiguration cancelled.")
         return
@@ -962,6 +982,9 @@ def init_config(use_template, output):
     config_template["resources"]["threads_per_job"] = threads_per_job
     config_template["resources"]["mem_per_job"] = mem_per_job
     config_template["resources"]["time"] = time_limit
+    config_template["resources"]["retries"] = retries
+    config_template["resources"]["mem_step"] = mem_step
+    config_template["resources"]["time_step"] = time_step
 
     # Set timepoints and groups
     config_template["analysis"]["timepoints_combinations"] = timepoints_combinations

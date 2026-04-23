@@ -70,6 +70,7 @@ rule gene_scores:
         outDir=os.path.join(
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
+    retries: get_retries("gene_scores")
     resources:
         mem_mb=get_mem_mb("gene_scores"),
         time=get_time("gene_scores"),
@@ -175,6 +176,7 @@ rule detect_outlier_genes:
             "{timepoints}-{groups}",
             "{mag}_{test_type}{group_str}_outlier_genes.tsv",
         ),
+    retries: get_retries("detect_outlier_genes")
     resources:
         mem_mb=get_mem_mb("detect_outlier_genes"),
         time=get_time("detect_outlier_genes"),
@@ -294,6 +296,7 @@ rule cmh_gene_scores:
         outDir=os.path.join(
             OUTDIR, "scores", "processed", "gene_scores_{timepoints}-{groups}"
         ),
+    retries: get_retries("cmh_gene_scores")
     resources:
         mem_mb=get_mem_mb("cmh_gene_scores"),
         time=get_time("cmh_gene_scores"),
@@ -351,6 +354,7 @@ rule detect_cmh_outlier_genes:
             "{timepoints}-{groups}",
             "{mag}_cmh_{focus_tp}_outlier_genes.tsv",
         ),
+    retries: get_retries("detect_cmh_outlier_genes")
     resources:
         mem_mb=get_mem_mb("detect_cmh_outlier_genes"),
         time=get_time("detect_cmh_outlier_genes"),

@@ -86,6 +86,7 @@ rule regional_contrast:
             if config.get("regional_contrast", {}).get("use_fisher", True)
             else ""
         ),
+    retries: get_retries("regional_contrast")
     resources:
         mem_mb=get_mem_mb("regional_contrast"),
         time=get_time("regional_contrast"),
@@ -137,6 +138,7 @@ rule regional_contrast_scores:
         region_type="gene|window",
     params:
         p_value_threshold=config["statistics"].get("p_value_threshold", 0.05),
+    retries: get_retries("regional_contrast_scores")
     resources:
         mem_mb=get_mem_mb("regional_contrast_scores"),
         time=get_time("regional_contrast_scores"),
@@ -188,6 +190,7 @@ rule combine_regional_contrast_scores:
         ),
     wildcard_constraints:
         region_type="gene|window",
+    retries: get_retries("combine_regional_contrast_scores")
     resources:
         mem_mb=get_mem_mb("combine_regional_contrast_scores"),
         time=get_time("combine_regional_contrast_scores"),
@@ -262,6 +265,7 @@ rule regional_contrast_summary:
             "regional_contrast_{timepoints}-{treatment}_{control}",
         ),
         prefix="region_contrast_summary",
+    retries: get_retries("regional_contrast_summary")
     resources:
         mem_mb=get_mem_mb("regional_contrast_summary"),
         time=get_time("regional_contrast_summary"),

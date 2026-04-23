@@ -125,10 +125,17 @@ regional_contrast:
 # - Cluster (SLURM): These are passed to sbatch; profile can override
 resources:
   threads_per_job: 16             # Threads per job (not total threads)
-  mem_per_job: "8G"               # Memory per job. Formats: "8G", "100G", "102400M"
+  mem_per_job: "8G"               # Memory per job (base allocation). Formats: "8G", "100G", "102400M"
                                   # Local: Keep low to avoid OOM (Snakemake auto-limits jobs)
                                   # Cluster: Can increase; SLURM allocates per-node
   time: "24:00:00"                # Wall time limit (HH:MM:SS)
+
+  # Retry configuration
+  # Jobs automatically retry with increased resources on failure.
+  # Memory/time increase additively: attempt N gets base + (N-1) * step.
+  retries: 2                      # Number of retries per job (0 = no retries)
+  mem_step: "4G"                  # Memory added per retry (e.g., 8G → 12G → 16G)
+  time_step: "4:00:00"            # Time added per retry (e.g., 24h → 28h → 32h)
 
 # Advanced: Per-rule resource overrides (power users only)
 # ---------------------------------------------------------
@@ -151,11 +158,14 @@ resources:
 #                                  # cmh_test_across_time
 #     threads_per_job: 4
 #     mem_per_job: "64G"
+#     mem_step: "32G"              # Override step for memory-intensive rules
 #     time: "12:00:00"
 #   dnds_from_timepoints:          # Rule: dnds_from_timepoints
 #     threads_per_job: 1
 #     mem_per_job: "200G"
+#     mem_step: "50G"
 #     time: "48:00:00"
+#     retries: 3                   # Override retry count for this rule
 #   regional_contrast:             # Rule: regional_contrast
 #     mem_per_job: "16G"
 #     time: "04:00:00"
