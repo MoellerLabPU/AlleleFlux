@@ -42,6 +42,7 @@ requirements:
     - pyyaml
     # Bioinformatics (bioconda)
     - pysam
+    - samtools
     - biopython
     # Workflow management (bioconda)
     - snakemake-minimal >=8.0.0

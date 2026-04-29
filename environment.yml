@@ -13,6 +13,7 @@ dependencies:
   - seaborn
   - tqdm
   - pysam
+  - samtools
   - biopython
   - intervaltree
   - snakemake>=8.0.0
