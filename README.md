@@ -24,6 +24,8 @@ Explore AlleleFlux results interactively with our new web-based dashboard:
 
 ### From Bioconda (Recommended)
 
+Installation via conda typically takes 2–5 minutes on a standard desktop computer, depending on internet speed and pre-existing dependencies. All dependencies can be found here in [environment.yml](https://github.com/MoellerLabPU/AlleleFlux/blob/main/environment.yml).
+
 ```bash
 # Install with conda (or mamba)
 conda install -c conda-forge -c bioconda alleleflux
