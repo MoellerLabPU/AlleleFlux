@@ -1,0 +1,9 @@
+sample_id	bam_path	subjectID	group	replicate	time
+control_subj1_pre	bams/control_subj1_pre.bam	subj1	control	A	pre
+control_subj1_post	bams/control_subj1_post.bam	subj1	control	A	post
+control_subj2_pre	bams/control_subj2_pre.bam	subj2	control	B	pre
+control_subj2_post	bams/control_subj2_post.bam	subj2	control	B	post
+treatment_subj3_pre	bams/treatment_subj3_pre.bam	subj3	treatment	A	pre
+treatment_subj3_post	bams/treatment_subj3_post.bam	subj3	treatment	A	post
+treatment_subj4_pre	bams/treatment_subj4_pre.bam	subj4	treatment	B	pre
+treatment_subj4_post	bams/treatment_subj4_post.bam	subj4	treatment	B	post
