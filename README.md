@@ -11,6 +11,16 @@ AlleleFlux is a bioinformatics toolkit for analyzing allele frequency changes in
 
 These scores enable direct comparisons of evolutionary dynamics across taxa, genomes, and genes, helping identify loci under strong selection.
 
+---
+
+### 📊 Visualize Your Results with AlleleFlux Explorer
+
+Explore AlleleFlux results interactively with our new web-based dashboard:
+
+**🚀 [AlleleFlux Explorer](https://github.com/MoellerLabPU/alleleflux-explorer)** — Interactive visualization of parallelism scores, divergence, allele trajectories, and dN/dS results. (Active development)
+
+---
+
 ## Installation
 
 ### From Bioconda (Recommended)
