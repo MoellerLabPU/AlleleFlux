@@ -174,3 +174,4 @@ alleleflux_config*
 .kilo/
 .claude/
 .github/prompts/
+alleleflux/smk_workflow/visualization/visualization_config_*.yaml
