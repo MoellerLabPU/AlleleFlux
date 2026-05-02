@@ -22,17 +22,21 @@
 
 These scores enable direct comparisons of evolutionary dynamics across taxa, genomes, and genes, helping identify loci under strong selection.
 
-## Requirements
+---
 
-- **Python** >= 3.9
-- **R** (required for CMH tests via `rpy2`)
-- **samtools** (for BAM indexing)
+### 📊 Visualize Your Results with AlleleFlux Explorer
 
-All dependencies are bundled in the provided `environment.yml` for reproducible setup.
+Explore AlleleFlux results interactively with our new web-based dashboard:
+
+**🚀 [AlleleFlux Explorer](https://github.com/MoellerLabPU/alleleflux-explorer)** — Interactive visualization of parallelism scores, divergence, allele trajectories, and dN/dS results. (Active development)
+
+---
 
 ## Installation
 
 ### From Bioconda (Recommended)
+
+Installation via conda typically takes 2–5 minutes on a standard desktop computer, depending on internet speed and pre-existing dependencies. All dependencies can be found here in [environment.yml](https://github.com/MoellerLabPU/AlleleFlux/blob/main/environment.yml). This software has been tested on the Red Hat Enterprise Linux 9 operating system.
 
 ```bash
 # Install with conda (or mamba)
