@@ -31,8 +31,8 @@ import logging
 
 import pandas as pd
 
-from alleleflux.scripts.utilities.utilities import read_gtdb
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import read_gtdb
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +54,13 @@ def load_cmh_results(file_path, timepoint=None):
 
     if timepoint is not None:
         if "time" in df.columns:
+            available_timepoints = df["time"].unique().tolist()
             logger.info(f"Filtering results to timepoint: {timepoint}")
             df = df[df["time"] == timepoint].copy()
             if df.empty:
-                raise ValueError(
-                    f"No data found for timepoint '{timepoint}' in file {file_path}"
+                logger.warning(
+                    f"No data found for timepoint '{timepoint}' in file {file_path}. "
+                    f"Available timepoints: {available_timepoints}"
                 )
         else:
             logger.warning(
@@ -221,26 +223,46 @@ def main():
         df1 = load_cmh_results(args.tp1_file)
         df2 = load_cmh_results(args.tp2_file)
 
-    # Identify positions common to both timepoints
-    intersect_set = get_common_sites(df1, df2)
-    logger.info(
-        f"Identified {len(intersect_set):,} common positions between timepoints."
-    )
-    total_sites = len(intersect_set)
-    if total_sites == 0:
-        logger.error("No common positions found between both timepoints.")
-        raise ValueError("Warning: no positions found in union of both files.")
+    # Check if either timepoint returned empty results
+    if df1.empty or df2.empty:
+        empty_tps = []
+        if df1.empty:
+            empty_tps.append(args.tp1_name)
+        if df2.empty:
+            empty_tps.append(args.tp2_name)
+        logger.warning(
+            f"No CMH results for timepoint(s) {empty_tps} for MAG '{args.mag_id}'. "
+            f"Writing score=0 output."
+        )
+        total_sites = 0
+        significant_sites = 0
+        score = 0.0
+    else:
+        # Identify positions common to both timepoints
+        intersect_set = get_common_sites(df1, df2)
+        logger.info(
+            f"Identified {len(intersect_set):,} common positions between timepoints."
+        )
+        total_sites = len(intersect_set)
 
-    # Determine which DataFrame is focus and which is other
-    focus_df, other_df = get_focus_and_other(args, df1, df2)
+        if total_sites == 0:
+            logger.warning(
+                f"No common positions found between timepoints for MAG '{args.mag_id}'. "
+                f"Writing score=0 output."
+            )
+            significant_sites = 0
+            score = 0.0
+        else:
+            # Determine which DataFrame is focus and which is other
+            focus_df, other_df = get_focus_and_other(args, df1, df2)
 
-    # Compute differential significance
-    significant_sites = compute_diff_significance(
-        focus_df, other_df, intersect_set, args.threshold
-    )
+            # Compute differential significance
+            significant_sites = compute_diff_significance(
+                focus_df, other_df, intersect_set, args.threshold
+            )
 
-    # Calculate score as percentage
-    score = (significant_sites / total_sites) * 100 if total_sites > 0 else 0
+            # Calculate score as percentage
+            score = (significant_sites / total_sites) * 100
 
     logger.info(
         f"Differential significance score for '{args.focus}': {significant_sites}/{total_sites} = {score:.4f}"

@@ -11,6 +11,7 @@ import pandas as pd
 # import logging
 # from alleleflux.scripts.utilities.logging_config import setup_logging
 from snakemake.logging import logger
+import subprocess
 
 rule significance_score_per_MAG_standard:
     input:
@@ -37,16 +38,22 @@ rule significance_score_per_MAG_standard:
     resources:
         mem_mb=get_mem_mb("significance_score_per_MAG_standard"),
         time=get_time("significance_score_per_MAG_standard"),
-    shell:
-        """
-        alleleflux-scores \
-            --gtdb_taxonomy {input.gtdb_taxonomy} \
-            --pValue_table {input.pvalue_table} \
-            --group_by_column {params.group_by_column} \
-            --pValue_threshold {params.pValue_threshold} \
-            --out_fPath {output} \
+    run:    
+        cmd = f"""
+        alleleflux-scores \\
+            --gtdb_taxonomy {input.gtdb_taxonomy} \\
+            --pValue_table {input.pvalue_table} \\
+            --group_by_column {params.group_by_column} \\
+            --pValue_threshold {params.pValue_threshold} \\
+            --out_fPath {output} \\
             --mag_mapping_file {input.mag_mapping}
         """
+        logger.info(f"Executing: {cmd}")
+        try:
+            subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed with exit code {e.returncode}")
+            raise e
 
 
 rule significance_score_per_MAG_cmh:
@@ -79,29 +86,39 @@ rule significance_score_per_MAG_cmh:
         time=get_time("significance_score_per_MAG_cmh"),
     run:
         if params.data_type == "single":
-            shell(
-            """
-            alleleflux-scores \
-                --gtdb_taxonomy {input.gtdb_taxonomy} \
-                --pValue_table {input.pvalue_table} \
-                --group_by_column {params.group_by_column} \
-                --pValue_threshold {params.pValue_threshold} \
-                --out_fPath {output} \
+            cmd = f"""
+            alleleflux-scores \\
+                --gtdb_taxonomy {input.gtdb_taxonomy} \\
+                --pValue_table {input.pvalue_table} \\
+                --group_by_column {params.group_by_column} \\
+                --pValue_threshold {params.pValue_threshold} \\
+                --out_fPath {output} \\
                 --mag_mapping_file {input.mag_mapping}
-            """)
-        elif params.data_type == "longitudinal":
-            shell(
             """
-            alleleflux-cmh-scores \
-                --combined-file {input.pvalue_table} \
-                --tp1-name {params.tp1_name} \
-                --tp2-name {params.tp2_name} \
-                --focus {wildcards.focus_tp} \
-                --gtdb_taxonomy {input.gtdb_taxonomy} \
-                --mag_id {wildcards.mag} \
-                --threshold {params.pValue_threshold} \
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
+        elif params.data_type == "longitudinal":
+            cmd = f"""
+            alleleflux-cmh-scores \\
+                --combined-file {input.pvalue_table} \\
+                --tp1-name {params.tp1_name} \\
+                --tp2-name {params.tp2_name} \\
+                --focus {wildcards.focus_tp} \\
+                --gtdb_taxonomy {input.gtdb_taxonomy} \\
+                --mag_id {wildcards.mag} \\
+                --threshold {params.pValue_threshold} \\
                 --out_fPath {output}
-            """)
+            """
+            logger.info(f"Executing: {cmd}")
+            try:
+                subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Command failed with exit code {e.returncode}")
+                raise e
 
 
 
@@ -142,9 +159,6 @@ rule combine_MAG_scores:
         mem_mb=get_mem_mb("combine_MAG_scores"),
         time=get_time("combine_MAG_scores"),
     run:
-        # setup_logging()
-        # logger = logging.getLogger(__name__)
-
         dfs = []
         for file in input.scores:
             logger.info(f"Reading {file}")
@@ -190,10 +204,8 @@ rule combine_MAG_scores_cmh:
         mem_mb=get_mem_mb("combine_MAG_scores_cmh"),
         time=get_time("combine_MAG_scores_cmh"),
     run:
-        # setup_logging()
-        # logger = logging.getLogger(__name__)
-
         dfs = []
+        insufficient_data_mags = []
         for file in input.scores:
             logger.info(f"Reading {file}")
             df = pd.read_csv(file, sep="\t")
@@ -201,7 +213,18 @@ rule combine_MAG_scores_cmh:
             if "focus_timepoint" in df.columns and df["focus_timepoint"].iloc[0] != wildcards.focus_tp:
                 raise ValueError(f"Mismatched focus timepoint in {file}: "
                                  f"expected {wildcards.focus_tp}, found {df['focus_timepoint'].iloc[0]}")
+            # Track MAGs with insufficient data (score=0 due to missing timepoint data)
+            if "total_sites_per_group_CMH" in df.columns and df["total_sites_per_group_CMH"].iloc[0] == 0:
+                mag_id = df["MAG_ID"].iloc[0] if "MAG_ID" in df.columns else file
+                insufficient_data_mags.append(mag_id)
             dfs.append(df)
+
+        if insufficient_data_mags:
+            logger.warning(
+                f"{len(insufficient_data_mags)} MAG(s) had insufficient CMH data "
+                f"(score=0) for {wildcards.timepoints}-{wildcards.groups} "
+                f"focus_tp={wildcards.focus_tp}: {insufficient_data_mags}"
+            )
 
         logger.info(
             f"Combining CMH scores for {wildcards.timepoints}-{wildcards.groups} "
@@ -238,13 +261,19 @@ rule taxa_scores:
     resources:
         mem_mb=get_mem_mb("taxa_scores"),
         time=get_time("taxa_scores"),
-    shell:
-        """
-        alleleflux-taxa-scores \
-            --input_df {input.concatenated} \
-            --group_by_column {wildcards.taxon} \
+    run:
+        cmd = f"""
+        alleleflux-taxa-scores \\
+            --input_df {input.concatenated} \\
+            --group_by_column {wildcards.taxon} \\
             --out_fPath {output} 
         """
+        logger.info(f"Executing: {cmd}")
+        try:
+            subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed with exit code {e.returncode}")
+            raise e
 
 
 rule taxa_scores_cmh:
@@ -269,10 +298,16 @@ rule taxa_scores_cmh:
     resources:
         mem_mb=get_mem_mb("taxa_scores_cmh"),
         time=get_time("taxa_scores_cmh"),
-    shell:
-        """
-        alleleflux-taxa-scores \
-            --input_df {input.concatenated} \
-            --group_by_column {wildcards.taxon} \
+    run:
+        cmd = f"""
+        alleleflux-taxa-scores \\
+            --input_df {input.concatenated} \\
+            --group_by_column {wildcards.taxon} \\
             --out_fPath {output} 
         """
+        logger.info(f"Executing: {cmd}")
+        try:
+            subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed with exit code {e.returncode}")
+            raise e

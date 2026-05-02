@@ -171,3 +171,8 @@ logs/
 .kilocode/*
 alleleflux/smk_workflow/config_*
 alleleflux_config*
+# Kilo configuration
+.kilo/
+
+# Visualization configs (generated/temporary)
+alleleflux/smk_workflow/visualization/visualization_config_*.yaml

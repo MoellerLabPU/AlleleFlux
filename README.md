@@ -1,12 +1,24 @@
 # AlleleFlux
 
-[![Bioconda](https://img.shields.io/conda/vn/bioconda/alleleflux.svg)](https://bioconda.github.io/recipes/alleleflux/README.html) [![Downloads](https://img.shields.io/conda/dn/bioconda/alleleflux.svg)](https://bioconda.github.io/recipes/alleleflux/README.html) [![Documentation Status](https://readthedocs.org/projects/alleleflux/badge/?version=latest)](https://alleleflux.readthedocs.io/en/latest/?badge=latest) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoellerLabPU/AlleleFlux) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/alleleflux?label=bioconda)](https://anaconda.org/bioconda/alleleflux)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Documentation Status](https://readthedocs.org/projects/alleleflux/badge/?version=latest)](https://alleleflux.readthedocs.io/en/latest/?badge=latest)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoellerLabPU/AlleleFlux)
 
-AlleleFlux is a bioinformatics toolkit for analyzing allele frequency changes in metagenomic time-series data. It identifies genomic targets of natural selection in microbial communities by calculating:
+**AlleleFlux** is a bioinformatics toolkit for analyzing allele frequency changes in metagenomic time-series data. While tools exist for tracking strain-level variation in microbial communities, there has been a gap in methods for systematically detecting natural selection from longitudinal metagenomics. AlleleFlux fills this gap by providing a reproducible, end-to-end pipeline that quantifies parallel and divergent evolutionary dynamics across microbial populations, enabling researchers to pinpoint genomic targets of selection directly from shotgun metagenomic data.
 
-- **Parallelism scores** — detect parallel allele frequency changes across replicates within groups
-- **Divergence scores** — quantify allele frequency divergence between experimental groups
-- **dN/dS ratios** — measure selection pressure on genes via non-synonymous to synonymous substitution rates
+## Features
+
+- **Single-timepoint and longitudinal study designs** -- flexible analysis for cross-sectional or time-series experiments
+- **Parallelism and divergence scoring** -- quantify parallel allele frequency changes across replicates and divergence between groups, with outlier gene detection
+- **Five statistical test types** -- two-sample paired/unpaired, single-sample, Linear Mixed Models (LMM), and Cochran-Mantel-Haenszel (CMH) tests
+- **dN/dS ratio calculation** -- measure selection pressure on genes via the Nei-Gojobori method with path averaging
+- **Automated quality control** -- coverage-based filtering and MAG eligibility determination
+- **Taxonomic aggregation** -- aggregate results from phylum to species using GTDB taxonomy
+- **Visualization workflow** -- generate allele frequency trajectory plots
+- **30+ standalone CLI tools** -- run individual analysis steps outside the workflow
+- **Snakemake-based workflow** -- reproducible, parallelized execution with SLURM/HPC support
+- **Bioconda and PyPI distribution** -- install via conda, pip, or from source
 
 These scores enable direct comparisons of evolutionary dynamics across taxa, genomes, and genes, helping identify loci under strong selection.
 
@@ -32,6 +44,20 @@ conda install -c conda-forge -c bioconda alleleflux
 
 # Activate the environment
 conda activate alleleflux
+```
+
+### Using environment.yml (Recommended for New Users)
+
+```bash
+# Create environment with all dependencies
+conda env create -f environment.yml
+conda activate alleleflux
+```
+
+### From PyPI
+
+```bash
+pip install alleleflux
 ```
 
 ### From Source
@@ -224,11 +250,11 @@ Input Files              Profile & QC           Statistical Analysis
 
 **Pipeline Steps:**
 
-1. **Profiling** — Extract allele frequencies from BAM files for each MAG
-2. **Quality Control** — Filter samples by coverage breadth; determine MAG eligibility
-3. **Statistical Testing** — Apply appropriate tests based on experimental design
-4. **Scoring** — Calculate parallelism/divergence scores and identify outlier genes
-5. **dN/dS Analysis** — Calculate evolutionary rates for genes under selection
+1. **Profiling** -- Extract allele frequencies from BAM files for each MAG
+2. **Quality Control** -- Filter samples by coverage breadth; determine MAG eligibility
+3. **Statistical Testing** -- Apply appropriate tests based on experimental design
+4. **Scoring** -- Calculate parallelism/divergence scores and identify outlier genes
+5. **dN/dS Analysis** -- Calculate evolutionary rates for genes under selection
 
 The workflow:
 
@@ -277,6 +303,12 @@ alleleflux-dnds-from-timepoints --help  # Calculate dN/dS ratios
 
 See [CLI Reference](https://alleleflux.readthedocs.io/en/latest/reference/cli_reference.html) for the complete list.
 
+## Citing AlleleFlux
+
+If you use AlleleFlux in your research, please cite:
+
+> Uppal, S. & Moeller, A.H. AlleleFlux: A bioinformatics toolkit for analyzing allele frequency dynamics in metagenomic data. GitHub: https://github.com/MoellerLabPU/AlleleFlux
+
 ## Documentation
 
 Full documentation: **[alleleflux.readthedocs.io](https://alleleflux.readthedocs.io/)**
@@ -293,3 +325,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 ## License
 
 AlleleFlux is licensed under the [GNU General Public License v3.0](LICENSE).
+
+## Acknowledgments
+
+AlleleFlux was developed at [Princeton University](https://www.princeton.edu/) by Siddhartha Uppal and Andrew Moeller in the [Moeller Lab](https://github.com/MoellerLabPU).

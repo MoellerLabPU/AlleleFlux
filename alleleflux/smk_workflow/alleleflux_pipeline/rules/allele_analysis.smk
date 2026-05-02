@@ -5,7 +5,7 @@ It generates allele frequency tables and optionally filters positions with zero
 frequency differences (constant positions) across samples.
 """
 
-rule analyze_alleles:
+rule allele_analysis:
     input:
         qc_file=os.path.join(
             OUTDIR,
