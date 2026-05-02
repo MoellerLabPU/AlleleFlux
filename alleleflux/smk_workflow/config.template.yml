@@ -150,8 +150,25 @@ resources:
 #     time: "08:00:00"
 #   qc:                            # Rule: qc (quality control)
 #     mem_per_job: "100G"
+#   allele_freq_cache:             # Rule: compute_allele_freq_per_timepoint
+#                                  # Stage 1: reads raw profile TSVs in parallel and writes
+#                                  # per-(MAG, gr_combo, timepoint) Parquet cache files.
+#                                  # Peak memory = all per-sample DataFrames held in memory
+#                                  # simultaneously before concat. Scales with samples ×
+#                                  # genome size. Default 16G covers most MAGs with ≤40
+#                                  # samples/timepoint; raise to 32G+ for large MAGs or
+#                                  # datasets with many samples per group.
+#     threads_per_job: 16
+#     mem_per_job: "16G"
+#     mem_step: "8G"               # Add 8G per retry for large MAGs
+#     time: "04:00:00"
 #   allele_analysis:               # Rule: allele_analysis
-#     mem_per_job: "32G"
+#                                  # Stage 2: reads two Parquet cache files and computes
+#                                  # per-subject diffs and mean changes. Parquet loads more
+#                                  # compactly than TSV; intermediate frames are explicitly
+#                                  # freed between steps. Lighter than Stage 1.
+#     mem_per_job: "8G"
+#     mem_step: "8G"
 #   statistical_tests:             # All statistical test rules:
 #                                  # two_sample_unpaired, two_sample_paired, lmm_analysis,
 #                                  # cmh_test, single_sample, lmm_analysis_across_time,

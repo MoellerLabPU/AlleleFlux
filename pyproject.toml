@@ -16,6 +16,7 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "pandas",
+    "pyarrow",
     "scipy",
     "matplotlib",
     "seaborn",
@@ -38,6 +39,7 @@ alleleflux = "alleleflux.cli:main"
 # Analysis scripts
 alleleflux-profile = "alleleflux.scripts.analysis.profile_mags:main"
 alleleflux-allele-freq = "alleleflux.scripts.analysis.allele_freq:main"
+alleleflux-cache-allele-freq = "alleleflux.scripts.analysis.allele_freq_cache:main"
 alleleflux-scores = "alleleflux.scripts.analysis.scores:main"
 alleleflux-taxa-scores = "alleleflux.scripts.analysis.taxa_scores:main"
 alleleflux-gene-scores = "alleleflux.scripts.analysis.gene_scores:main"

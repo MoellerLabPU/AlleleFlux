@@ -80,6 +80,16 @@ Global variables set in `shared/common.smk` and available to all rule files:
 
 Reference files (FASTA, Prodigal, MAG mapping) are wrapped with `ancient()` to prevent re-runs on timestamp changes.
 
+## After Refactoring: Keeping Rules Clean
+
+After any architectural change to a rule, verify:
+
+- Every `params:` entry is referenced in the `shell:` block (and vice versa).
+- Every `shell:` flag maps to a real, currently-used CLI argument in the target script — check the script's `argparse` definition.
+- Wildcard-dependent `params` use a `lambda wildcards:` — bare `{wildcards.X}` inside a `params:` string value is **not** expanded by Snakemake.
+- `data_type`-conditional flags (e.g. `--timepoint` only meaningful for `longitudinal`) should be conditionally passed via a lambda param and made `required=False` in the script, with validation in the branch that needs them.
+- Functions defined in a `.smk` file (e.g. `_cache_paths_for_combination`) are actually called by at least one rule input/param — orphaned helpers silently survive but never run.
+
 ## When Adding a New Rule
 
 1. Create a new `.smk` file in `rules/`

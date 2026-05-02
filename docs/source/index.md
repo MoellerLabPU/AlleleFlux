@@ -32,6 +32,7 @@ getting_started/quickstart.md
 
 usage/input_preparation.md
 usage/running_workflow.md
+usage/allele_freq_cache_architecture.md
 usage/visualization_guide.md
 usage/interpreting_results.md
 usage/dnds_analysis.md

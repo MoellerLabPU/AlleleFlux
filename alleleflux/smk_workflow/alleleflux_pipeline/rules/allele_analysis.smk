@@ -1,18 +1,81 @@
 """Allele frequency analysis rules.
 
-This module contains rules for analyzing allele frequencies from MAG profiles.
-It generates allele frequency tables and optionally filters positions with zero
-frequency differences (constant positions) across samples.
+Two-stage flow:
+1. ``compute_allele_freq_per_timepoint`` — runs once per (MAG, single timepoint)
+   and writes a Parquet cache file with per-sample allele frequencies for that
+   timepoint. Reused across every (timepoint_combination, group_combination)
+   that includes that timepoint.
+2. ``allele_analysis`` — runs once per (MAG, timepoint_combination, group_combination)
+   and computes the per-combination diff/aggregate outputs from the two (or one,
+   for single data) cache files.
+
+The previously-emitted ``{mag}_allele_frequency_longitudinal.tsv.gz`` is no
+longer produced; downstream rules read the Parquet cache files directly.
 """
+
+
+def _allele_analysis_cache_input(wildcards):
+    """Resolve the per-(gr_combo, timepoint) cache paths required for one combination."""
+    if DATA_TYPE == "longitudinal":
+        tps = wildcards.timepoints.split("_")
+    else:
+        tps = [wildcards.timepoints]
+    return [
+        get_allele_freq_cache_path(
+            mag_wildcard=wildcards.mag,
+            groups_wildcard=wildcards.groups,
+            timepoint_wildcard=tp,
+        )
+        for tp in tps
+    ]
+
+
+rule compute_allele_freq_per_timepoint:
+    input:
+        # Single canonical QC file for this (gr_combo, timepoint).
+        # Using ONE file (from the first tp_combo in config order that contains
+        # this timepoint) means Snakemake resolves the dependency as a normal
+        # qc + generate_metadata chain — no cross-combination checkpoint
+        # dependencies that might not exist yet.
+        qc_files=lambda wildcards: get_canonical_qc_file(
+            wildcards.mag, wildcards.timepoint, wildcards.groups
+        ),
+    output:
+        cache=os.path.join(
+            OUTDIR,
+            "allele_freq_cache",
+            "{mag}_{groups}_{timepoint}_allele_frequency.parquet",
+        ),
+    params:
+        data_type=DATA_TYPE,
+        # For longitudinal data the script filters the QC file's rows to this
+        # timepoint; for single data the QC file covers one timepoint already
+        # so --timepoint is not passed.
+        timepoint_arg=lambda wildcards: (
+            f"--timepoint {wildcards.timepoint}"
+            if DATA_TYPE == "longitudinal"
+            else ""
+        ),
+    threads: get_threads("allele_freq_cache")
+    retries: get_retries("allele_freq_cache")
+    resources:
+        mem_mb=get_mem_mb("allele_freq_cache"),
+        time=get_time("allele_freq_cache"),
+    shell:
+        """
+        alleleflux-cache-allele-freq \
+            --magID {wildcards.mag} \
+            --qc_files {input.qc_files} \
+            {params.timepoint_arg} \
+            --data_type {params.data_type} \
+            --output_path {output.cache} \
+            --cpus {threads}
+        """
+
 
 rule allele_analysis:
     input:
-        qc_file=os.path.join(
-            OUTDIR,
-            "QC",
-            "QC_{timepoints}-{groups}",
-            "{mag}_QC.tsv",
-        ),
+        cache_files=_allele_analysis_cache_input,
         eligibility_table=os.path.join(
             OUTDIR,
             "eligibility_table_{timepoints}-{groups}.tsv",
@@ -26,10 +89,8 @@ rule allele_analysis:
                 "{mag}_allele_frequency_single.tsv.gz"
                 if DATA_TYPE == "single"
                 else "{mag}_allele_frequency_changes_mean.tsv.gz"
-            )
+            ),
         ),
-        # Simplified conditional: disable_zero_diff_filtering check is sufficient
-        # since DATA_TYPE is already evaluated at module load time
         allele_freq_no_zero_diff=os.path.join(
             OUTDIR,
             "allele_analysis",
@@ -38,15 +99,8 @@ rule allele_analysis:
                 "{mag}_allele_frequency_no_constant.tsv.gz"
                 if DATA_TYPE == "single"
                 else "{mag}_allele_frequency_changes_no_zero-diff.tsv.gz"
-            )
+            ),
         ) if not config["quality_control"].get("disable_zero_diff_filtering", False) else [],
-
-        longitudinal_output=os.path.join(
-            OUTDIR,
-            "allele_analysis",
-            "allele_analysis_{timepoints}-{groups}",
-            "{mag}_allele_frequency_longitudinal.tsv.gz"
-        ) if DATA_TYPE == "longitudinal" else [],
     params:
         outDir=os.path.join(
             OUTDIR,
@@ -58,10 +112,9 @@ rule allele_analysis:
             if config["quality_control"].get("disable_zero_diff_filtering", False)
             else ""
         ),
-        # Use the global DATA_TYPE variable
         data_type=DATA_TYPE,
-
-    threads: get_threads("allele_analysis")
+        groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
+    threads: 1
     retries: get_retries("allele_analysis")
     resources:
         mem_mb=get_mem_mb("allele_analysis"),
@@ -70,11 +123,9 @@ rule allele_analysis:
         """
         alleleflux-allele-freq \
             --magID {wildcards.mag} \
-            --qc_file {input.qc_file} \
+            --cache_files {input.cache_files} \
             --data_type {params.data_type} \
-            --cpus {threads} \
             --output_dir {params.outDir} \
+            {params.groups_arg} \
             {params.disable_zero_diff_filtering}
         """
-
-

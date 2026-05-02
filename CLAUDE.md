@@ -270,6 +270,39 @@ These paths are only accessible from Della HPC nodes, not local machines.
 
 ---
 
+## After Refactoring: Dead Code Checklist
+
+After any architectural change, **always verify** that no dead code or orphaned arguments remain:
+
+### CLI scripts (`argparse`)
+
+- Every `parser.add_argument(...)` must be consumed somewhere in `main()` or a helper it calls.
+- Arguments that were added to match an old design (e.g. a union step that was replaced by a single canonical file) must be removed or made optional with an explicit note.
+- For `data_type`-conditional flags (e.g. `--timepoint` only meaningful for `longitudinal`), make the argument `required=False, default=None` and validate presence only in the branch that needs it.
+
+### Snakemake rules
+
+- Every `params:` entry must appear in the `shell:` block.
+- Every `shell:` flag must map to a real CLI argument in the script it calls.
+- Wildcard-dependent `params` must use a lambda — bare string interpolation of `{wildcards.X}` does not work inside `params:` values.
+
+### Functions / helpers
+
+- After changing a caller's contract (e.g. switching from multiple QC files to one), check whether the callee still does anything with the extra generality — if not, simplify it.
+- Search for all call sites of any renamed or removed function before deleting it.
+
+### Quick grep to run after a refactor
+
+```bash
+# Find argparse args defined but not referenced in the same file
+grep "add_argument" script.py | grep -oP '\"--\w+\"' | while read flag; do
+    name="${flag//\"/}"; name="${name//--/}"; name="${name//-/_}"
+    grep -q "args\.$name" script.py || echo "UNUSED: $flag"
+done
+```
+
+---
+
 ## Reference
 
 - Tests: `.github/instructions/tests.instructions.md`

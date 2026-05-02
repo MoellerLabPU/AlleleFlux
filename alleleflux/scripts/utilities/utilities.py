@@ -364,8 +364,60 @@ def parse_classification(classification_str):
     return taxon_dict
 
 
+def load_allele_freq_inputs(paths, usecols=None, dtype=None):
+    """Load one or more allele-frequency input files and concatenate.
+
+    Files ending in ``.parquet`` are read with :func:`pandas.read_parquet`
+    (using ``columns=usecols`` when provided); other extensions fall back to
+    :func:`pandas.read_csv` with TSV settings.
+
+    Parameters
+    ----------
+    paths : str or list of str
+        Single path or list of paths.
+    usecols : list of str, optional
+        Columns to keep on read.
+    dtype : dict, optional
+        Dtype map applied after read (always after read for parquet, since
+        parquet preserves dtypes from write).
+
+    Returns
+    -------
+    pandas.DataFrame
+    """
+    if isinstance(paths, str):
+        paths = [paths]
+
+    frames = []
+    for p in paths:
+        path_str = str(p)
+        if path_str.endswith(".parquet"):
+            logger.info(f"Reading parquet input {path_str}")
+            df = pd.read_parquet(
+                path_str,
+                columns=list(usecols) if usecols is not None else None,
+            )
+            if dtype:
+                cast = {c: t for c, t in dtype.items() if c in df.columns}
+                if cast:
+                    df = df.astype(cast)
+        else:
+            logger.info(f"Reading TSV input {path_str}")
+            df = pd.read_csv(
+                path_str,
+                sep="\t",
+                usecols=list(usecols) if usecols is not None else None,
+                dtype=dtype,
+            )
+        frames.append(df)
+
+    if len(frames) == 1:
+        return frames[0]
+    return pd.concat(frames, ignore_index=True)
+
+
 def load_and_filter_data(
-    input_df_path: str,
+    input_df_path,
     preprocessed_df_path: str,
     mag_id: str,
     dtype_map: dict,
@@ -375,7 +427,8 @@ def load_and_filter_data(
     Load raw allele count data and filter it to include only positions present in a preprocessed dataset.
 
     Parameters:
-        input_df_path (str): Path to the raw allele count data file (tab-separated values).
+        input_df_path (str or list of str): Path(s) to raw allele count data file(s)
+            (TSV.gz or Parquet). Multiple paths are concatenated.
         preprocessed_df_path (str): Path to the preprocessed positions file (tab-separated values).
         mag_id (str): Identifier for the metagenome-assembled genome (MAG), used for logging and error messages.
 
@@ -401,18 +454,14 @@ def load_and_filter_data(
 
     preprocessed_df.drop(columns=["group"], inplace=True)
 
-    # Read the raw allele count data
+    # Read the raw allele count data (TSV.gz or Parquet, single path or list).
     logger.info(f"Loading raw count data from {input_df_path}")
-    raw_counts_df = pd.read_csv(
+    raw_counts_df = load_allele_freq_inputs(
         input_df_path,
-        sep="\t",
-        usecols=dtype_map.keys(),
+        usecols=list(dtype_map.keys()),
         dtype=dtype_map,
-        index_col=["contig", "position"],
-        memory_map=True,
-        # low_memory=False,
-        # nrows=20000000,
     )
+    raw_counts_df = raw_counts_df.set_index(["contig", "position"])
     # Log basic row count quickly
     logger.info(f"Loaded {raw_counts_df.shape[0]:,} rows of raw count data.")
     # Detailed stats are debug level for performance

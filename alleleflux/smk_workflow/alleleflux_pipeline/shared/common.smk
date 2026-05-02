@@ -406,12 +406,118 @@ group_values = sorted(
 group_str_regex = "(_({}))?".format("|".join(group_values))
 
 # =============================================================================
+# Per-timepoint cache helpers
+# =============================================================================
+# The ``compute_allele_freq_per_timepoint`` rule writes one Parquet cache file
+# per (MAG, gr_combo, single timepoint).  Scoping the cache to gr_combo is
+# required by the checkpoint architecture: each (tp_combo, gr_combo) resolves
+# its eligibility_table checkpoint separately, so only the QC files for ONE
+# combination are guaranteed to exist when the cache is first needed.  By
+# keying the cache on gr_combo we can use a SINGLE canonical QC file (the
+# first tp_combo in config order that contains this timepoint) as the input,
+# which Snakemake resolves as a normal rule dependency — no cross-combination
+# QC gathering needed.
+#
+# Deduplication is within each gr_combo, across tp_combos: all tp_combos that
+# share the same (gr_combo, timepoint) reuse the same Parquet cache.  Cache files
+# are NOT shared across gr_combos — each gr_combo builds its own set.
+# For drido (15 tp_combos, 6 gr_combos, 8 unique timepoints):
+#   Before: 15 tp_combos × 6 gr_combos × 2 timepoints = 180 profile-read operations
+#   After:  8 unique timepoints × 6 gr_combos          =  48 cache-write jobs
+
+# unique_timepoints: ordered list of individual timepoints, each appearing exactly once.
+#
+# timepoints_labels contains combo labels like "5mo_10mo", "5mo_16mo", "8mo_10mo".
+# This loop splits each label into its constituent timepoints ("5mo", "10mo") and
+# collects them in first-appearance order using _seen_tps as a visited set.
+#
+# Example (drido config, 15 tp_combos):
+#   "5mo_10mo" → adds "5mo", "10mo"
+#   "5mo_16mo" → "5mo" already seen; adds "16mo"
+#   "8mo_10mo" → "10mo" already seen; adds "8mo"   ← 8mo appears last (Strategy C)
+#   Result: ["5mo", "10mo", "16mo", "22mo", "28mo", "34mo", "40mo", "8mo"]
+#
+# This list becomes the {timepoint} wildcard constraint — the single-timepoint
+# wildcard used in cache filenames, distinct from {timepoints} (the combo label).
+unique_timepoints = []
+_seen_tps = set()
+for tp_label in timepoints_labels:
+    if DATA_TYPE == "longitudinal":
+        parts = tp_label.split("_")  # "5mo_10mo" → ["5mo", "10mo"]
+    else:
+        parts = [tp_label]           # single data: label is already one timepoint
+    for tp in parts:
+        if tp not in _seen_tps:
+            _seen_tps.add(tp)
+            unique_timepoints.append(tp)
+
+# timepoint_gr_to_canonical_tp: maps (individual_timepoint, gr_combo) → the FIRST
+# tp_combo label in config order that contains that timepoint.
+#
+# WHAT THIS ACHIEVES (plain language):
+#   For each group combination, we build one Parquet cache file per timepoint.
+#   Profile TSVs for that timepoint are read exactly once per gr_combo — not once
+#   per tp_combo that happens to include it.  Every tp_combo that shares the same
+#   (gr_combo, timepoint) reads from the same cache instead of re-reading raw profiles.
+#
+#   Cache files are NOT shared across gr_combos.
+#   MAG1_1D_AL_5mo_allele_frequency.parquet  ← built once for 1D_AL
+#   MAG1_2D_AL_5mo_allele_frequency.parquet  ← built once for 2D_AL, separately
+#   These are independent because each gr_combo compares different sets of samples.
+#
+#   The deduplication is within each gr_combo, across tp_combos:
+#   drido example — "5mo" appears in 6 tp_combos (5mo_10mo, 5mo_16mo, …, 5mo_40mo).
+#   Without caching: 5mo profiles read 6 tp_combos × 6 gr_combos = 36 times per MAG.
+#   With caching:    5mo profiles read 1 time per gr_combo   × 6 gr_combos = 6 times.
+#
+# WHY THIS EXISTS — the checkpoint problem:
+#   Snakemake resolves the eligibility_table checkpoint one (tp_combo, gr_combo) at a
+#   time.  When the cache rule for "5mo" fires during the "5mo_10mo-1D_AL" combination,
+#   only QC_5mo_10mo-1D_AL/ exists on disk.  QC_5mo_16mo-1D_AL/ may not yet exist.
+#   The cache rule therefore cannot depend on QC files from other combinations.
+#
+#   The fix: use ONE canonical QC file per (gr_combo, timepoint) — the file from the
+#   first tp_combo (in config order) that contains that timepoint.  This file is built
+#   by a regular rule chain (qc → generate_metadata), not gated by any other
+#   combination's checkpoint, so it is always resolvable.
+#
+# HOW IT IS BUILT:
+#   Walk timepoints_labels in config order.  For each tp_label (e.g. "5mo_10mo"),
+#   split into individual timepoints.  For each (tp, gr_combo) pair not yet in the
+#   dict, record tp_label as its canonical source.  The guard
+#   `if key not in timepoint_gr_to_canonical_tp` means later tp_labels that also
+#   contain the same timepoint are ignored — first-seen wins.
+#
+# Example (drido, showing 1D_AL only — all 6 gr_combos behave identically):
+#   tp_label="5mo_10mo": ("5mo","1D_AL")→"5mo_10mo", ("10mo","1D_AL")→"5mo_10mo"
+#   tp_label="5mo_16mo": ("5mo","1D_AL") already set; ("16mo","1D_AL")→"5mo_16mo"
+#   tp_label="10mo_16mo": both already set → nothing added
+#   tp_label="8mo_10mo": ("8mo","1D_AL")→"8mo_10mo";  ("10mo","1D_AL") already set
+#
+# The resulting entry for ("5mo","1D_AL") is always "5mo_10mo" regardless of how
+# many later tp_combos also contain "5mo".
+#
+# See docs/source/usage/allele_freq_cache_architecture.md for the full walkthrough.
+timepoint_gr_to_canonical_tp = {}
+for tp_label in timepoints_labels:
+    if DATA_TYPE == "longitudinal":
+        parts = tp_label.split("_")  # "5mo_10mo" → ["5mo", "10mo"]
+    else:
+        parts = [tp_label]
+    for tp in parts:
+        for gr_label in groups_labels:
+            key = (tp, gr_label)
+            if key not in timepoint_gr_to_canonical_tp:
+                timepoint_gr_to_canonical_tp[key] = tp_label  # first in config order wins
+
+# =============================================================================
 # Wildcard Constraints
 # =============================================================================
 
 wildcard_constraints:
     groups=f"({'|'.join(groups_labels)})",
     timepoints=f"({'|'.join(timepoints_labels)})",
+    timepoint=f"({'|'.join(unique_timepoints)})",
     taxon="(" + "|".join(TAXONOMY_LEVELS) + "|domain)",
     test_type="(" + "|".join(ALL_TEST_TYPES) + "|)",
     sub_test="(MannWhitney|Wilcoxon|tTest|LMM|CMH|)",
@@ -757,24 +863,55 @@ def get_allele_analysis_input_path(mag_wildcard="{mag}", tp_wildcard="{timepoint
         return os.path.join(base_dir, f"{mag_wildcard}_allele_frequency_changes_mean.tsv.gz")
 
 
-def get_longitudinal_input_path(mag_wildcard="{mag}", tp_wildcard="{timepoints}", gr_wildcard="{groups}"):
-    """
-    Get the longitudinal allele frequency file path (full longitudinal data, not mean).
-    
-    Parameters:
-        mag_wildcard: MAG ID wildcard string (default: "{mag}")
-        tp_wildcard: Timepoints wildcard string (default: "{timepoints}")
-        gr_wildcard: Groups wildcard string (default: "{groups}")
-    
-    Returns:
-        str: Path to the longitudinal input file
+def get_allele_freq_cache_path(
+    mag_wildcard="{mag}",
+    groups_wildcard="{groups}",
+    timepoint_wildcard="{timepoint}",
+):
+    """Path to the per-(MAG, gr_combo, timepoint) allele-frequency Parquet cache file.
+
+    Cache is scoped to gr_combo (not just timepoint) so that the cache rule's
+    input can be a single canonical QC file from the same gr_combo — avoiding
+    cross-combination QC file dependencies that don't exist at checkpoint time.
     """
     return os.path.join(
         OUTDIR,
-        "allele_analysis",
-        f"allele_analysis_{tp_wildcard}-{gr_wildcard}",
-        f"{mag_wildcard}_allele_frequency_longitudinal.tsv.gz"
+        "allele_freq_cache",
+        f"{mag_wildcard}_{groups_wildcard}_{timepoint_wildcard}_allele_frequency.parquet",
     )
+
+
+def get_canonical_qc_file(mag_wildcard, timepoint, groups):
+    """Return the single canonical QC TSV path for a (timepoint, gr_combo) cache.
+
+    Selects the first tp_combo in config order that contains ``timepoint`` for
+    the given ``groups`` label.  This canonical QC file is the ONLY input to
+    ``compute_allele_freq_per_timepoint`` — Snakemake resolves it as a regular
+    rule dependency (``qc`` + ``generate_metadata``), so the DAG is valid
+    regardless of which combination's eligibility_table checkpoint fired first.
+
+    Why one file is sufficient
+    --------------------------
+    QC pass/fail for an individual sample depends only on that sample's per-MAG
+    breadth and coverage, not on which (tp_combo, gr_combo) triggered the QC
+    run.  So the set of passing samples at a given timepoint for a given
+    gr_combo is identical across all QC files that cover that (gr_combo,
+    timepoint) — any one of them is a correct input for the cache.
+    """
+    canonical_tp = timepoint_gr_to_canonical_tp.get((timepoint, groups))
+    if canonical_tp is None:
+        raise ValueError(
+            f"No tp_combo found for timepoint={timepoint!r}, groups={groups!r}. "
+            "Check that the timepoint and groups appear in the config."
+        )
+    return os.path.join(
+        OUTDIR,
+        "QC",
+        f"QC_{canonical_tp}-{groups}",
+        f"{mag_wildcard}_QC.tsv",
+    )
+
+
 
 
 def get_preprocessed_between_groups_path(mag_wildcard="{mag}", tp_wildcard="{timepoints}", gr_wildcard="{groups}"):

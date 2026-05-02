@@ -513,7 +513,7 @@ def build_mag_gene_trees(genes_df, mag_mapping_dict, mags_to_include=None):
               }
     """
     n_requested = len(mags_to_include) if mags_to_include is not None else "all"
-    logger.info(f"Pre-computing gene IntervalTree index for {n_requested} MAGs...")
+    logger.info(f"Pre-computing gene IntervalTree index for {n_requested:,} MAGs...")
     start_time = time.time()
 
     mag_trees = {}

@@ -2,11 +2,12 @@ name: alleleflux
 channels:
   - conda-forge
   - bioconda
-  - nodefaults # Do not use any otehr channel
+  - nodefaults # Do not use any other channel
 dependencies:
   - python
   - numpy
   - pandas
+  - pyarrow
   - scipy
   - matplotlib-base
   - statsmodels

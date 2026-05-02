@@ -93,6 +93,19 @@ rule single_sample:
             """
 
 
+def _cache_paths_for_combination(wildcards):
+    """Resolve the per-(gr_combo, timepoint) Parquet cache paths for one combination."""
+    tps = wildcards.timepoints.split("_") if DATA_TYPE == "longitudinal" else [wildcards.timepoints]
+    return [
+        get_allele_freq_cache_path(
+            mag_wildcard=wildcards.mag,
+            groups_wildcard=wildcards.groups,
+            timepoint_wildcard=tp,
+        )
+        for tp in tps
+    ]
+
+
 rule lmm_analysis_across_time:
     input:
         input_df=(
@@ -103,7 +116,7 @@ rule lmm_analysis_across_time:
                 "{mag}_allele_frequency_changes_no_zero-diff.tsv.gz",
             )
             if not config["quality_control"].get("disable_zero_diff_filtering", False)
-            else get_longitudinal_input_path()
+            else _cache_paths_for_combination
         ),
         preprocessed_df=(
             get_preprocessed_within_groups_path()
@@ -127,6 +140,7 @@ rule lmm_analysis_across_time:
             if not config["quality_control"].get("disable_zero_diff_filtering", False)
             else "column"
         ),
+        groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
         preprocessed_flag=(
             "--preprocessed_df"
             if config["statistics"].get("preprocess_within_groups", False)
@@ -146,6 +160,7 @@ rule lmm_analysis_across_time:
             --data_type across_time \
             --group_to_analyze {wildcards.group} \
             --input_time_format {params.input_time_format} \
+            {params.groups_arg} \
             --cpus {threads} \
             --min_sample_num {params.min_sample_num} \
             {params.preprocessed_flag} {input.preprocessed_df}
@@ -154,7 +169,7 @@ rule lmm_analysis_across_time:
 
 rule cmh_test_across_time:
     input:
-        input_df=get_longitudinal_input_path(),
+        input_df=_cache_paths_for_combination,
         preprocessed_df=(
             get_preprocessed_within_groups_path()
             if config["statistics"].get("preprocess_within_groups", False)
@@ -172,6 +187,7 @@ rule cmh_test_across_time:
         outDir=os.path.join(
             OUTDIR, "significance_tests", "cmh_across_time_{timepoints}-{groups}"
         ),
+        groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
         preprocessed_flag=(
             "--preprocessed_df"
             if config["statistics"].get("preprocess_within_groups", False)
@@ -190,6 +206,7 @@ rule cmh_test_across_time:
             --output_dir {params.outDir} \
             --data_type across_time \
             --group {wildcards.group} \
+            {params.groups_arg} \
             --cpus {threads} \
             --min_sample_num {params.min_sample_num} \
             {params.preprocessed_flag} {input.preprocessed_df}

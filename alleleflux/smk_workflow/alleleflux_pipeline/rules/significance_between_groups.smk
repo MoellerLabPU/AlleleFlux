@@ -10,26 +10,38 @@ between experimental groups:
 """
 
 
+def _cache_paths_for_combination_between(wildcards):
+    """Resolve the per-(gr_combo, timepoint) Parquet cache paths for one combination."""
+    tps = wildcards.timepoints.split("_") if DATA_TYPE == "longitudinal" else [wildcards.timepoints]
+    return [
+        get_allele_freq_cache_path(
+            mag_wildcard=wildcards.mag,
+            groups_wildcard=wildcards.groups,
+            timepoint_wildcard=tp,
+        )
+        for tp in tps
+    ]
+
+
 def get_between_group_inputs(test_type=None):
     """Get the appropriate input file path for between-group statistical tests.
-    
+
     Uses helper functions from common.smk for centralized path construction.
-    
+
     Parameters:
         test_type: Optional test type. If "cmh" with longitudinal data,
-                   returns the full longitudinal file instead of mean changes.
-    
+                   returns the per-timepoint cache files (replaces longitudinal).
+
     Returns:
-        str: Path to the appropriate input file with Snakemake wildcards.
+        str or callable: Path (or input function returning a list of paths) for the rule input.
     """
-    # CMH test needs full longitudinal data (not mean changes)
+    # CMH test needs per-sample/per-timepoint data (not mean changes)
     if test_type == "cmh" and DATA_TYPE == "longitudinal":
-        # For CMH don't use the preprocessed file
-        return get_longitudinal_input_path()
-    
+        return _cache_paths_for_combination_between
+
     # Check if preprocessing is enabled
     preprocess_enabled = config["statistics"].get("preprocess_between_groups", False)
-    
+
     if preprocess_enabled:
         return get_preprocessed_between_groups_path()
     else:
@@ -177,7 +189,7 @@ rule cmh_test:
             )
             if config["statistics"].get("preprocess_between_groups", True) and DATA_TYPE == "longitudinal"
             else [],
-    
+
     output:
         os.path.join(
             OUTDIR,
@@ -191,6 +203,7 @@ rule cmh_test:
             OUTDIR, "significance_tests", "cmh_{timepoints}-{groups}"
         ),
         data_type=DATA_TYPE,
+        groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
         # Conditionally include the preprocessed file argument.
         preprocessed_flag=(
             ("--preprocessed_df")
@@ -209,9 +222,10 @@ rule cmh_test:
             --min_sample_num {params.min_sample_num} \
             --mag_id {wildcards.mag} \
             --data_type {params.data_type} \
+            {params.groups_arg} \
             --cpus {threads} \
             --output_dir {params.outDir} \
             {params.preprocessed_flag} {input.preprocessed_df}
-            
+
         """
 

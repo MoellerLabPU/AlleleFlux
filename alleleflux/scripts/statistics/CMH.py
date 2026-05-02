@@ -33,7 +33,10 @@ from rpy2.robjects.packages import importr
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
-from alleleflux.scripts.utilities.utilities import load_and_filter_data
+from alleleflux.scripts.utilities.utilities import (
+    load_allele_freq_inputs,
+    load_and_filter_data,
+)
 
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
 
@@ -446,8 +449,25 @@ def main() -> None:
     parser.add_argument(
         "--input_df",
         required=True,
-        help="Path to input allele frequency dataframe. For single timepoint data, preprocessed_df from preprocess_two_sample.py can be used for --input_df.",
+        nargs="+",
+        help=(
+            "Path(s) to input allele frequency dataframe(s). "
+            "Accepts one or more files; if multiple are given they are concatenated. "
+            "Files ending in .parquet are read with pd.read_parquet, otherwise as TSV. "
+            "For single timepoint data, preprocessed_df from preprocess_two_sample.py can be used for --input_df."
+        ),
         type=str,
+    )
+    parser.add_argument(
+        "--groups",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional list of group names to keep. When the input cache contains samples "
+            "from groups not in the current analysis (e.g. multiple group_combinations sharing "
+            "a timepoint cache), restrict to these groups before testing."
+        ),
     )
     parser.add_argument(
         "--preprocessed_df",
@@ -507,12 +527,13 @@ def main() -> None:
         logger.info(
             "Datatype set to single. Loading input dataframe without any filtering."
         )
-        df = pd.read_csv(
+        df = load_allele_freq_inputs(
             args.input_df,
-            sep="\t",
-            usecols=dtype_map.keys(),
+            usecols=list(dtype_map.keys()),
             dtype=dtype_map,
         )
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         tp_results = run_cmh_tests(
             df=df,
@@ -546,12 +567,13 @@ def main() -> None:
             logger.info(
                 "Datatype set to across_time. No preprocessed dataframe provided. Using input_df directly."
             )
-            df = pd.read_csv(
+            df = load_allele_freq_inputs(
                 args.input_df,
-                sep="\t",
-                usecols=dtype_map.keys(),
+                usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         # Process the group across timepoints
         group_results = run_cmh_tests_across_time(
@@ -577,12 +599,13 @@ def main() -> None:
             logger.info(
                 "Datatype set to longitudinal. No preprocessed dataframe provided. Using input_df directly."
             )
-            df = pd.read_csv(
+            df = load_allele_freq_inputs(
                 args.input_df,
-                sep="\t",
-                usecols=dtype_map.keys(),
+                usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         timepoints = df["time"].unique()
         if len(timepoints) != 2:

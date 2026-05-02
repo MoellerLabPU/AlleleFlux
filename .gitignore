@@ -171,3 +171,6 @@ logs/
 .kilocode/*
 alleleflux/smk_workflow/config_*
 alleleflux_config*
+.kilo/
+.claude/
+.github/prompts/
