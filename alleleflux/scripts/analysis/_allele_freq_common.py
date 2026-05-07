@@ -280,7 +280,7 @@ def build_metadata_from_qc(qc_df):
     for _, row in qc_df.iterrows():
         sample_id = str(row["sample_id"])
         meta = {
-            "group": row["group"],
+            "group": str(row["group"]),
             "subjectID": row["subjectID"],
             "replicate": row["replicate"],
             "breadth": row["breadth"],

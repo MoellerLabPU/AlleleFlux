@@ -31,10 +31,11 @@ What changed from the original ``allele_freq.py``
   in this combination when the same cache file is shared across multiple
   group combinations (e.g. ``1D`` and ``AL`` caches share a timepoint).
 
-Outputs produced (unchanged from original)
-------------------------------------------
+Outputs produced
+----------------
 Longitudinal:
-  - ``{mag}_allele_frequency_changes.tsv.gz``          — per-subject diffs
+  - ``{mag}_allele_frequency_changes.parquet``         — per-subject diffs
+    (Parquet/Snappy; archival only — not consumed by downstream rules)
   - ``{mag}_allele_frequency_changes_no_zero-diff.tsv.gz`` — diffs excluding
     positions where the summed diff across all samples is zero (optional)
   - ``{mag}_allele_frequency_changes_mean.tsv.gz``     — mean diffs per
@@ -60,6 +61,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -78,11 +80,9 @@ logger = logging.getLogger(__name__)
 def load_cache_files(cache_paths):
     """Read one or two Stage-1 Parquet cache files into a single DataFrame.
 
-    Previously this step was ``pd.read_csv(longitudinal_file, sep="\\t")``.
-    Parquet is used here because:
-    - Columnar layout allows downstream steps to load only needed columns.
-    - Snappy decompression is several times faster than gzip for large files.
-    - No schema inference overhead on each read (types are stored in metadata).
+    When two paths are supplied (longitudinal), both files are read
+    concurrently via ThreadPoolExecutor — Parquet I/O releases the GIL so
+    the reads overlap in wall-clock time.
 
     Parameters
     ----------
@@ -94,88 +94,56 @@ def load_cache_files(cache_paths):
     -------
     pd.DataFrame
         Concatenated frame with all samples across all supplied cache files.
+        For longitudinal data the first cache file's timepoint appears first
+        in the frame, preserving the tp1/tp2 ordering used by
+        ``calculate_allele_frequency_changes``.
     """
-    frames = []
-    for p in cache_paths:
+    def _read(p):
         logger.info(f"Reading cache file {p}")
-        frames.append(pd.read_parquet(p))
+        return pd.read_parquet(p)
+
+    if len(cache_paths) == 1:
+        frames = [_read(cache_paths[0])]
+    else:
+        with ThreadPoolExecutor(max_workers=len(cache_paths)) as ex:
+            frames = list(ex.map(_read, cache_paths))
+
     df = pd.concat(frames, ignore_index=True)
     logger.info(f"Loaded {len(df):,} rows from {len(cache_paths)} cache file(s).")
     return df
 
 
 # ---------------------------------------------------------------------------
-# Longitudinal helpers  (unchanged logic from original allele_freq.py)
+# Longitudinal helpers
 # ---------------------------------------------------------------------------
 
-def split_into_per_sample(df):
-    """Split the concatenated cache DataFrame into per-sample frames.
+def calculate_allele_frequency_changes(allele_df, output_dir, mag_id):
+    """Compute per-position allele-frequency diffs via a single vectorized merge.
 
-    The cache file holds all samples for a timepoint; for longitudinal diff
-    computation we need to process each sample independently before merging
-    timepoints within a subject.
+    Replaces the original per-subject loop (N sequential ``pd.merge`` calls)
+    with one global inner join on
+    (subjectID, contig, gene_id, position, replicate, group).  The subjectID
+    key prevents cross-subject pairing, so the result is identical to the
+    loop but computed in a single C-level hash join.
 
-    Returns a list rather than a generator so the caller can ``del df`` and
-    free memory before the list is consumed.
-    """
-    return [g for _, g in df.groupby("sample_id", sort=False)]
-
-
-def create_data_dict(data_list):
-    """Index per-sample frames by (subjectID, timepoint).
-
-    Returns
-    -------
-    dict
-        ``{subjectID: {timepoint: DataFrame}}``.  Used by
-        ``calculate_allele_frequency_changes`` to pair the two timepoints
-        for each subject.
-
-    Raises
-    ------
-    ValueError
-        If a single-sample frame contains more than one subjectID or
-        more than one timepoint (indicates a data-integrity problem in the
-        cache file).
-    """
-    data_dict = {}
-    for df in data_list:
-        subject_ids = df["subjectID"].unique()
-        if len(subject_ids) != 1:
-            raise ValueError(
-                f"Multiple subjectIDs found in DataFrame for sample {df['sample_id'].iloc[0]}"
-            )
-        subjectID = subject_ids[0]
-        timepoints = df["time"].unique()
-        if len(timepoints) != 1:
-            raise ValueError(
-                f"Multiple timepoints found in DataFrame for sample {df['sample_id'].iloc[0]}"
-            )
-        timepoint = timepoints[0]
-
-        if subjectID not in data_dict:
-            data_dict[subjectID] = {}
-        data_dict[subjectID][timepoint] = df
-    return data_dict
-
-
-def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
-    """Compute per-position allele-frequency diffs between the two timepoints.
-
-    For each subject that has data at both timepoints, merges the two
-    timepoint frames on (subjectID, contig, gene_id, position, replicate,
-    group) and subtracts timepoint-1 frequencies from timepoint-2 frequencies.
+    Timepoint ordering is preserved from the cache-file concatenation order:
+    the first cache file supplied to ``load_cache_files`` becomes
+    ``timepoint_1`` (reference), the second becomes ``timepoint_2`` (later).
+    Snakemake passes cache files in tp1/tp2 order, so this matches the
+    combination label (e.g. ``5mo_10mo``).
 
     Column naming convention for diffs (defined by ``NUCLEOTIDES``):
         ``{nuc}_diff = {nuc}_{timepoint_2} - {nuc}_{timepoint_1}``
 
-    Also writes the intermediate ``_allele_frequency_changes.tsv.gz`` — a
-    per-subject, per-position diff table (one row per subject × position).
+    Writes ``{mag}_allele_frequency_changes.parquet`` (Parquet/Snappy) as an
+    archival artifact.  No downstream Snakemake rule reads this file; Parquet
+    is used because it is significantly faster to write than gzip TSV for a
+    table of this width and row count.
 
     Parameters
     ----------
-    data_dict : dict
-        Output of ``create_data_dict``.
+    allele_df : pd.DataFrame
+        Concatenated output of ``load_cache_files`` (both timepoints).
     output_dir : str
         Directory for the output file.
     mag_id : str
@@ -184,113 +152,82 @@ def calculate_allele_frequency_changes(data_dict, output_dir, mag_id):
     Returns
     -------
     pd.DataFrame
-        The concatenated per-subject diff table.  Passed to
+        Per-subject, per-position diff table passed to
         ``filter_constant_positions`` and then ``get_mean_change``.
     """
-    logger.info("Identifying unique timepoints.")
-
-    unique_timepoints = set()
-    for subject_data in data_dict.values():
-        unique_timepoints.update(subject_data.keys())
-    if len(unique_timepoints) != 2:
+    # unique() preserves first-occurrence order, so timepoint_1 is the
+    # timepoint from the first cache file (the earlier / reference timepoint).
+    timepoints = allele_df["time"].unique()
+    if len(timepoints) != 2:
         raise ValueError(
-            f"Expected exactly 2 unique timepoints, found {len(unique_timepoints)}."
+            f"Expected exactly 2 unique timepoints, found {len(timepoints)}."
         )
-
-    timepoint_1, timepoint_2 = unique_timepoints
-
+    timepoint_1, timepoint_2 = timepoints
     logger.info(
-        f"Calculating change in allele frequency between {timepoint_1} and "
-        f"{timepoint_2} for each position between the same subjectID."
+        f"Calculating allele frequency changes between {timepoint_1} and {timepoint_2}."
     )
 
-    # Identify subjects present at only one timepoint and log them as warnings.
-    subjectIDs_timepoint1 = {
-        s for s in data_dict if timepoint_1 in data_dict[s]
-    }
-    subjectIDs_timepoint2 = {
-        s for s in data_dict if timepoint_2 in data_dict[s]
-    }
+    drop_cols = ["time", "sample_id"]
+    df_tp1 = allele_df[allele_df["time"] == timepoint_1].drop(columns=drop_cols, errors="raise")
+    df_tp2 = allele_df[allele_df["time"] == timepoint_2].drop(columns=drop_cols, errors="raise")
 
-    if diff := subjectIDs_timepoint1 - subjectIDs_timepoint2:
+    subjects_tp1 = set(df_tp1["subjectID"].unique())
+    subjects_tp2 = set(df_tp2["subjectID"].unique())
+    if diff := subjects_tp1 - subjects_tp2:
         logger.warning(
             f"SubjectIDs only in '{timepoint_1}' (no match at '{timepoint_2}'): {diff}"
         )
-    if diff := subjectIDs_timepoint2 - subjectIDs_timepoint1:
+    if diff := subjects_tp2 - subjects_tp1:
         logger.warning(
             f"SubjectIDs only in '{timepoint_2}' (no match at '{timepoint_1}'): {diff}"
         )
 
-    common_subjectIDs = [
-        s for s in data_dict
-        if timepoint_1 in data_dict[s] and timepoint_2 in data_dict[s]
-    ]
+    merged_df = pd.merge(
+        df_tp1,
+        df_tp2,
+        on=["subjectID", "contig", "gene_id", "position", "replicate", "group"],
+        suffixes=(f"_{timepoint_1}", f"_{timepoint_2}"),
+        how="inner",
+    )
+    del df_tp1, df_tp2
+    gc.collect()
 
-    if not common_subjectIDs:
-        raise ValueError(
-            f"No common subjectIDs found between {timepoint_1} and {timepoint_2}."
+    if merged_df.empty:
+        logger.error(
+            f"No matching positions found across timepoints {timepoint_1} and {timepoint_2}."
         )
-    logger.info(f"Common subjectIDs: {common_subjectIDs}")
-
-    results = []
-    for subjectID in common_subjectIDs:
-        df_timepoint1 = data_dict[subjectID][timepoint_1]
-        df_timepoint2 = data_dict[subjectID][timepoint_2]
-
-        # Inner join: only positions present at both timepoints are kept.
-        # Suffixes encode the timepoint in the merged column names so
-        # diff calculation is unambiguous.
-        merged_df = pd.merge(
-            df_timepoint1,
-            df_timepoint2,
-            on=["subjectID", "contig", "gene_id", "position", "replicate", "group"],
-            suffixes=(f"_{timepoint_1}", f"_{timepoint_2}"),
-            how="inner",
-        )
-
-        if merged_df.empty:
-            logger.warning(f"No matching positions found for subjectID {subjectID}.")
-            continue
-
-        # Compute frequency diff for each nucleotide.
-        # NUCLEOTIDES is imported from _allele_freq_common to stay in sync
-        # with the column names written by Stage 1 (calculate_frequencies).
-        for nuc in NUCLEOTIDES:
-            merged_df[f"{nuc}_diff"] = (
-                merged_df[f"{nuc}_{timepoint_2}"] - merged_df[f"{nuc}_{timepoint_1}"]
-            )
-
-        # Combined coverage is used by downstream CMH/LMM tests.
-        merged_df["total_coverage_combined"] = (
-            merged_df[f"total_coverage_{timepoint_1}"]
-            + merged_df[f"total_coverage_{timepoint_2}"]
-        )
-
-        columns_to_keep = (
-            ["subjectID", "gene_id", "contig", "position", "replicate", "group"]
-            + [f"total_coverage_{timepoint_1}", f"total_coverage_{timepoint_2}",
-               "total_coverage_combined"]
-            + [f"{nuc}_{timepoint_1}" for nuc in NUCLEOTIDES]
-            + [f"{nuc}_{timepoint_2}" for nuc in NUCLEOTIDES]
-            + [f"{nuc}_diff" for nuc in NUCLEOTIDES]
-        )
-        results.append(merged_df[columns_to_keep])
-
-    if not results:
-        logger.error("No allele frequency changes calculated.")
         sys.exit(42)
 
-    allele_changes = pd.concat(results, ignore_index=True)
+    for nuc in NUCLEOTIDES:
+        merged_df[f"{nuc}_diff"] = (
+            merged_df[f"{nuc}_{timepoint_2}"] - merged_df[f"{nuc}_{timepoint_1}"]
+        )
+    merged_df["total_coverage_combined"] = (
+        merged_df[f"total_coverage_{timepoint_1}"]
+        + merged_df[f"total_coverage_{timepoint_2}"]
+    )
 
-    allele_changes.to_csv(
-        os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.tsv.gz"),
-        sep="\t",
+    columns_to_keep = (
+        ["subjectID", "gene_id", "contig", "position", "replicate", "group"]
+        + [f"total_coverage_{timepoint_1}", f"total_coverage_{timepoint_2}",
+           "total_coverage_combined"]
+        + [f"{nuc}_{timepoint_1}" for nuc in NUCLEOTIDES]
+        + [f"{nuc}_{timepoint_2}" for nuc in NUCLEOTIDES]
+        + [f"{nuc}_diff" for nuc in NUCLEOTIDES]
+    )
+    allele_changes = merged_df[columns_to_keep].copy()
+    del merged_df
+    gc.collect()
+
+    allele_changes.to_parquet(
+        os.path.join(output_dir, f"{mag_id}_allele_frequency_changes.parquet"),
+        engine="pyarrow",
+        compression="snappy",
         index=False,
-        compression="gzip",
     )
     logger.info(
         f"Allele frequency changes saved to "
-        f"{output_dir}/{mag_id}_allele_frequency_changes.tsv.gz"
+        f"{output_dir}/{mag_id}_allele_frequency_changes.parquet"
     )
     return allele_changes
 
@@ -504,30 +441,15 @@ def process_longitudinal_data(allele_df, output_dir, mag_id, disable_filtering):
 
     Steps
     -----
-    1. Split the concatenated cache frame back into per-sample frames
-       (``split_into_per_sample``).
-    2. Index frames by (subjectID, timepoint) for pairwise diff
-       (``create_data_dict``).
-    3. Compute per-position frequency diffs between the two timepoints
+    1. Compute per-position frequency diffs via a single vectorized merge
        (``calculate_allele_frequency_changes``).
-    4. Optionally filter zero-diff positions (``filter_constant_positions``).
-    5. Compute per-(position, group, replicate) mean diffs
+    2. Optionally filter zero-diff positions (``filter_constant_positions``).
+    3. Compute per-(position, group, replicate) mean diffs
        (``get_mean_change``).
-
-    Memory management: intermediate DataFrames are deleted and
-    ``gc.collect()`` is called at each step to keep the peak footprint low.
-    The cache holds both timepoints in one frame, which is larger than the
-    old single-timepoint longitudinal file, so explicit cleanup is important.
     """
-    data_list = split_into_per_sample(allele_df)
-    del allele_df   # free the large concatenated cache frame
+    allele_changes = calculate_allele_frequency_changes(allele_df, output_dir, mag_id)
+    del allele_df
     gc.collect()
-
-    data_dict = create_data_dict(data_list)
-    del data_list
-    gc.collect()
-
-    allele_changes = calculate_allele_frequency_changes(data_dict, output_dir, mag_id)
 
     if not disable_filtering:
         logger.info("Filtering zero-diff positions for longitudinal data.")
@@ -628,8 +550,8 @@ def main():
     # 1. Load cache files
     # ------------------------------------------------------------------
     # For longitudinal data: the two files hold different timepoints.
-    # Both are concatenated; ``create_data_dict`` later splits them back
-    # by (subjectID, time) for pairwise diff computation.
+    # Both are concatenated; ``calculate_allele_frequency_changes`` later
+    # splits by timepoint and performs a single vectorized merge.
     allele_df = load_cache_files(args.cache_files)
 
     # ------------------------------------------------------------------
@@ -641,6 +563,7 @@ def main():
     # to avoid cross-group contamination.
     if args.groups:
         before = len(allele_df)
+        allele_df["group"] = allele_df["group"].astype(str)
         allele_df = allele_df[allele_df["group"].isin(args.groups)].copy()
         logger.info(
             f"Filtered cache to groups {args.groups}: "

@@ -30,7 +30,7 @@ def _allele_analysis_cache_input(wildcards):
     ]
 
 
-rule compute_allele_freq_per_timepoint:
+rule allele_freq_cache:
     input:
         # Single canonical QC file for this (gr_combo, timepoint).
         # Using ONE file (from the first tp_combo in config order that contains

@@ -818,10 +818,11 @@ def parse_metadata_for_timepoint_pairs(timepoints_label, groups_label):
         if len(ancestral_samples) == 1 and len(derived_samples) == 1:
             sample_pairs.append((subject, ancestral_samples[0], derived_samples[0]))
         else:
-            logger.warning(
-                f"Skipping subject {subject}: found {len(ancestral_samples)} ancestral "
-                f"and {len(derived_samples)} derived samples"
-            )
+            # logger.warning(
+            #     f"Skipping subject {subject}: found {len(ancestral_samples)} ancestral "
+            #     f"and {len(derived_samples)} derived samples"
+            # )
+            pass
     
     return sample_pairs
 

@@ -262,17 +262,21 @@ def main():
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Write to a temp file first, then rename atomically.  If the job is
+    # killed mid-write (SLURM SIGTERM/SIGKILL), the partial file sits at the
+    # .tmp path and the final output path is never created, so Snakemake
+    # correctly sees the output as missing and reruns the job on the next
+    # invocation.  Writing directly to output_path would leave a corrupt
+    # file that Snakemake treats as a valid completed output.
+    tmp_path = output_path.with_suffix(".parquet.tmp")
     logger.info(f"Writing {len(combined):,} rows to {output_path}")
-    # Parquet with Snappy compression:
-    #   - column-oriented → fast for downstream queries that select a subset of columns
-    #   - Snappy is fast to decompress (better wall-clock than gzip for large reads)
-    #   - typically 30–50% smaller on disk than gzipped TSV for this data
     combined.to_parquet(
-        output_path,
+        tmp_path,
         engine="pyarrow",
         compression="snappy",
         index=False,
     )
+    tmp_path.rename(output_path)
 
     logger.info(f"Total time: {time.time() - start_time:.2f} seconds")
 
