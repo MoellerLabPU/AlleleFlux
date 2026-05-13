@@ -4,6 +4,14 @@
 :alt: Documentation Status
 :target: https://alleleflux.readthedocs.io/en/latest/?badge=latest
 ```
+```{image} https://deepwiki.com/badge.svg
+:alt: Ask DeepWiki
+:target: https://deepwiki.com/MoellerLabPU/AlleleFlux
+```
+
+:::{tip} 💬 Ask questions with AI
+Prefer chatting over browsing? Ask any question about AlleleFlux — installation, configuration, pipeline internals, or interpreting results — on **[DeepWiki](https://deepwiki.com/MoellerLabPU/AlleleFlux)**. It indexes this repository and the documentation, and cites sources.
+:::
 
 ## Overview
 
