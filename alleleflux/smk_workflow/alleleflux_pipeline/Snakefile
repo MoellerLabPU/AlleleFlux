@@ -98,9 +98,54 @@ def get_final_pipeline_outputs(wildcards):
 
     return final_targets
 
+# 3. Eager Upstream Targets
+# These are concrete file paths that Snakemake can resolve immediately
+# on the first DAG evaluation — no checkpoint needed.  Listing them here
+# ensures ALL metadata, QC, and eligibility jobs are submitted to SLURM
+# in parallel, rather than being discovered one-at-a-time as each
+# eligibility_table checkpoint fires.
+#
+# Without this, the loop in get_final_pipeline_outputs() blocks at the
+# first missing checkpoint and Snakemake only plans 1 combination at a
+# time — making the pre-checkpoint stage effectively serial.
+def get_upstream_targets(wildcards):
+    targets = []
+    # Metadata + QC: one per unique timepoints combination (group-independent
+    # after 2A).  Target the per-rule sentinel — see common.smk for why we
+    # gate on a sentinel file rather than the directory itself.
+    for tp in timepoints_labels:
+        targets.append(metadata_sentinel(tp))
+        targets.append(qc_sentinel(tp))
+    # Eligibility + preprocessing eligibility: one per (timepoints, groups) combination
+    preprocess_between = config["statistics"].get("preprocess_between_groups", False)
+    preprocess_within  = config["statistics"].get("preprocess_within_groups", False)
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            # QC-based eligibility (always present)
+            targets.append(
+                os.path.join(OUTDIR, f"eligibility_table_{tp}-{gr}.tsv")
+            )
+            # Preprocessing eligibility — gates stat tests.
+            # Listing these here means all 18 are submitted in one batch
+            # once allele_analysis finishes, instead of one-at-a-time.
+            if preprocess_between:
+                targets.append(os.path.join(
+                    OUTDIR, "preprocessing_eligibility",
+                    f"preprocessing_eligibility_between_groups_{tp}-{gr}.tsv"
+                ))
+            if preprocess_within and DATA_TYPE == "longitudinal":
+                targets.append(os.path.join(
+                    OUTDIR, "preprocessing_eligibility",
+                    f"preprocessing_eligibility_within_groups_{tp}-{gr}.tsv"
+                ))
+    return targets
+
+
+
 # 4. Rule All (The Driver)
 localrules: all
 
 rule all:
     input:
-        get_final_pipeline_outputs
+        get_upstream_targets,
+        get_final_pipeline_outputs,

@@ -60,8 +60,13 @@ Input BAM files
 ```
 alleleflux/
 ├── scripts/
-│   ├── analysis/        # profile_mags.py, allele_freq.py, scores.py,
-│   │                    # gene_scores.py, taxa_scores.py, outliers_genes.py
+│   ├── analysis/
+│   │   ├── allele_frequency/    # allele_freq.py, allele_freq_cache.py,
+│   │   │                        # _allele_freq_common.py
+│   │   ├── scoring/             # scores.py, cmh_scores.py, gene_scores.py,
+│   │   │                        # taxa_scores.py, outliers_genes.py
+│   │   ├── profile_mags.py      # BAM pileup and gene mapping
+│   │   └── regional_contrast.py # Regional allele contrast
 │   ├── preprocessing/   # mag_metadata.py, quality_control.py,
 │   │                    # eligibility_table.py, preprocess_*.py
 │   ├── statistics/      # LMM.py, CMH.py, two_sample_paired/unpaired,
@@ -73,15 +78,22 @@ alleleflux/
 └── smk_workflow/
     └── alleleflux_pipeline/
         ├── Snakefile              # Unified entry point
-        ├── shared/common.smk      # Config parsing, resource helpers
+        ├── shared/common.smk      # Config parsing, resource helpers, cache helpers
         ├── shared/dynamic_targets.smk  # Checkpoint-aware target generation
-        └── rules/                 # 13 rule modules (one per pipeline stage)
+        └── rules/                 # Rule modules (one per pipeline stage)
 
 tests/                   # Mirror of alleleflux/scripts/ structure
 notebooks/               # Validation and benchmarking notebooks
 config.template.yml      # Pipeline config template
 environment.yml          # Conda environment spec
 ```
+
+**Pipeline optimization notes (2A/2B/2D):**
+- **QC scope**: `generate_metadata` and `qc` run once per `{timepoints}` (not per `{timepoints}-{groups}`). QC dirs at `QC/QC_{timepoints}/`.
+- **Eligibility**: `eligibility_table` still runs per `{timepoints}-{groups}`, reads group-independent QC dir, filters via `--groups`.
+- **Cache**: `allele_freq_cache` group-independent — `{mag}_{timepoint}_allele_frequency.parquet`. 6× fewer cache jobs for DRIDO.
+- **QC parallelism**: `quality_control.py` uses `ProcessPoolExecutor` for concurrent outer MAG loop.
+
 
 ---
 

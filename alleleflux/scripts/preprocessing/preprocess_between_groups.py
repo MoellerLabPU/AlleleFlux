@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import alleleflux.scripts.utilities.supress_warning as supress_warning
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import load_allele_freq_inputs
 
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
@@ -385,8 +386,7 @@ def main():
     args = parser.parse_args()
     start_time = time.time()
 
-    logger.info("Reading input file")
-    df = pd.read_csv(args.mean_changes_fPath, sep="\t", dtype={"gene_id": str})
+    df = load_allele_freq_inputs(args.mean_changes_fPath)
 
     # Group data by "contig" and "position" (including groups with NA keys).
     grouped = df.groupby(["contig", "position"], dropna=False)

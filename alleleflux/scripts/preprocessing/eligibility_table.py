@@ -3,6 +3,7 @@ import argparse
 import glob
 import logging
 import os
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -86,15 +87,21 @@ def process_data(df, unique_groups, mag_id, min_sample_num, data_type):
     return pivot.to_dict(orient="records")[0]
 
 
-def analyze_qc_files(qc_dir, min_sample_num, data_type):
+def analyze_qc_files(
+    qc_dir: str,
+    min_sample_num: int,
+    data_type: str,
+    groups: Optional[List[str]] = None,
+) -> pd.DataFrame:
     """
-    Analyzes quality control (QC) files in the specified directory and processes eligible
-    MAGs (Metagenome-Assembled Genomes) based on provided criteria.
+    Analyzes quality control (QC) files in the specified directory and processes
+    eligible MAGs based on provided criteria.
 
     The function performs the following steps:
         - Searches for files ending with "_QC.tsv" in the given qc_dir.
         - Reads each QC file as a DataFrame and skips it if empty.
         - Filters the DataFrame for records where "two_timepoints_passed" is True.
+        - If ``groups`` is provided, restricts the data to those two groups only.
         - Checks that the filtered data contains exactly two unique groups.
         - Processes the eligible data using the process_data function.
         - Aggregates the results from each eligible QC file into a single DataFrame.
@@ -102,15 +109,25 @@ def analyze_qc_files(qc_dir, min_sample_num, data_type):
     Parameters:
         qc_dir (str): The directory path containing the QC files.
         min_sample_num (int): The minimum number of samples required for eligibility.
-        data_type: The type of data used in processing (specifics depend on process_data implementation).
+        data_type: The type of data used in processing.
+        groups (list of str, optional): If provided, filter to exactly these two
+            group names before eligibility checks.  Required when the QC directory
+            covers more than two groups (2A refactor).
 
     Returns:
-        pandas.DataFrame: A DataFrame containing results from all MAGs that pass the eligibility criteria.
+        pandas.DataFrame: A DataFrame containing results from all MAGs that pass
+        the eligibility criteria.
 
     Raises:
         ValueError: If no QC files are found in the specified directory.
         ValueError: If no MAG passes the eligibility criteria.
     """
+    if groups is not None and len(groups) != 2:
+        raise ValueError(
+            f"--groups must specify exactly 2 group names for eligibility filtering, "
+            f"got {len(groups)}: {groups}"
+        )
+
     qc_files = glob.glob(os.path.join(qc_dir, "*_QC.tsv"))
     if not qc_files:
         raise ValueError(f"No QC files found in directory {qc_dir}")
@@ -127,11 +144,17 @@ def analyze_qc_files(qc_dir, min_sample_num, data_type):
 
         # Get the list of groups that passed the two timepoints check
         passed_df = df[df["two_timepoints_passed"]]
+
+        # Filter to the requested group pair (2A: QC dir now covers all groups)
+        if groups is not None:
+            passed_df = passed_df[passed_df["group"].isin(groups)]
+
         unique_groups = passed_df["group"].unique()
 
         if len(unique_groups) != 2:
             logger.warning(
-                f"MAG {mag_id}: Found {len(unique_groups)} groups; expected exactly 2. Skipping."
+                f"MAG {mag_id}: Found {len(unique_groups)} groups after filtering "
+                f"(expected exactly 2). Skipping."
             )
             continue
 
@@ -172,11 +195,20 @@ def main():
         default="longitudinal",
         help="Type of data: single timepoint or longitudinal",
     )
+    parser.add_argument(
+        "--groups",
+        nargs=2,
+        default=None,
+        metavar=("GROUP1", "GROUP2"),
+        help="Filter QC results to exactly these two group names before eligibility "
+             "checks. Required when the QC directory covers more than two groups "
+             "(2A refactor: per-timepoint QC covers all groups).",
+    )
 
     args = parser.parse_args()
 
     eligibility_table = analyze_qc_files(
-        args.qc_dir, args.min_sample_num, args.data_type
+        args.qc_dir, args.min_sample_num, args.data_type, groups=args.groups
     )
     eligibility_table.to_csv(args.output_file, sep="\t", index=False)
 

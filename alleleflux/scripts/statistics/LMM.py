@@ -119,14 +119,16 @@ def plan_csv_loading(dtype_map: Dict, input_time_format: str, df_path) -> Dict:
 
 
 def _load_input_for_suffix_conversion(df_source) -> pd.DataFrame:
-    """Helper: load a path/list-of-paths into a DataFrame for wide-to-long conversion."""
-    if isinstance(df_source, (list, tuple)):
+    """Helper: load a path/list-of-paths into a DataFrame for wide-to-long conversion.
+
+    Delegates to load_allele_freq_inputs() which detects .parquet vs TSV by
+    extension — the single source of truth for allele frequency I/O.
+    """
+    if isinstance(df_source, (list, tuple, str)):
         return load_allele_freq_inputs(df_source)
-    if isinstance(df_source, str):
-        if df_source.endswith(".parquet"):
-            return pd.read_parquet(df_source)
-        return pd.read_csv(df_source, sep="\t")
+    # Already a DataFrame — return a copy to avoid mutating the caller's frame.
     return df_source.copy()
+
 
 
 def convert_suffix_to_long(df_source) -> pd.DataFrame:

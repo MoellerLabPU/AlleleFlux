@@ -34,7 +34,10 @@ if not USE_EXISTING_PROFILES:
             prodigal=config["input"]["prodigal_path"],
             mag_mapping=config["input"]["mag_mapping_path"],
         output:
-            sampleDirs=directory(os.path.join(OUTDIR, "profiles", "{sample}")),
+            # Sentinel marker (see common.smk).  We deliberately avoid
+            # `directory()` so a kill mid-run does not erase already-written
+            # profile files and silently invalidate every downstream step.
+            sentinel=os.path.join(OUTDIR, "profiles", "{sample}", SENTINEL_PROFILE),
         threads: get_threads("profile")
         retries: get_retries("profile")
         resources:
@@ -62,4 +65,5 @@ if not USE_EXISTING_PROFILES:
                 --min-base-quality {params.min_base_quality} \
                 --min-mapping-quality {params.min_mapping_quality} \
                 --log-level {params.log_level}
+            touch {output.sentinel}
             """

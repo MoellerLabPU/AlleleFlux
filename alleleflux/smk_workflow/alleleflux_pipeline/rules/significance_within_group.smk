@@ -15,7 +15,7 @@ rule preprocess_within_groups:
             OUTDIR,
             "allele_analysis",
             "allele_analysis_{timepoints}-{groups}",
-            "{mag}_allele_frequency_changes_mean.tsv.gz",
+            "{mag}_allele_frequency_changes_mean.parquet",
         ),
     output:
         outPath=get_preprocessed_within_groups_path(),
@@ -61,7 +61,7 @@ rule single_sample:
                 OUTDIR,
                 "allele_analysis",
                 "allele_analysis_{timepoints}-{groups}",
-                "{mag}_allele_frequency_changes_mean.tsv.gz",
+                "{mag}_allele_frequency_changes_mean.parquet",
             )
         ),
     output:
@@ -113,7 +113,7 @@ rule lmm_analysis_across_time:
                 OUTDIR,
                 "allele_analysis",
                 "allele_analysis_{timepoints}-{groups}",
-                "{mag}_allele_frequency_changes_no_zero-diff.tsv.gz",
+                "{mag}_allele_frequency_changes_no_zero-diff.parquet",
             )
             if not config["quality_control"].get("disable_zero_diff_filtering", False)
             else _cache_paths_for_combination

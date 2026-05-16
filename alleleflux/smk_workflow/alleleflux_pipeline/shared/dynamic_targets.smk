@@ -664,16 +664,11 @@ def generate_dnds_analysis_targets(tp, gr):
     subject_pairs = parse_metadata_for_timepoint_pairs(tp, gr)
     subjects = [str(subject_id) for subject_id, _, _ in subject_pairs]
 
-    # A directory is created for each subject.
+    # A directory is created for each subject; we target its sentinel so
+    # Snakemake's notion of "done" matches a successful subprocess exit
+    # rather than the directory simply existing.
     for subject in subjects:
-        targets.append(
-            os.path.join(
-                OUTDIR,
-                "dnds_analysis",
-                f"{tp}-{gr}",
-                subject
-            )
-        )
+        targets.append(dnds_sentinel(tp, gr, subject))
     return targets
 
 # Test the following functions before uncommenting. They are not all 100% up to date and might need modification. Be careful.

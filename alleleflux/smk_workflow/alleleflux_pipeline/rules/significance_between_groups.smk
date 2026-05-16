@@ -11,13 +11,13 @@ between experimental groups:
 
 
 def _cache_paths_for_combination_between(wildcards):
-    """Resolve the per-(gr_combo, timepoint) Parquet cache paths for one combination."""
+    """Resolve the per-timepoint (group-independent) Parquet cache paths for one combination."""
     tps = wildcards.timepoints.split("_") if DATA_TYPE == "longitudinal" else [wildcards.timepoints]
     return [
         get_allele_freq_cache_path(
             mag_wildcard=wildcards.mag,
-            groups_wildcard=wildcards.groups,
             timepoint_wildcard=tp,
+            # groups_wildcard omitted — cache is now group-independent (2B)
         )
         for tp in tps
     ]
