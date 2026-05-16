@@ -20,15 +20,7 @@ extensions = [
     "sphinx_autodoc_typehints",
     "myst_parser",
     "sphinx_copybutton",
-    "sphinx_docsearch",
 ]
-
-# Algolia DocSearch — replaces Furo's built-in search.
-# The API key here is a public, search-only key (safe to commit).
-# Admin/write keys must never be committed.
-docsearch_app_id = "1GE88TCDZR"
-docsearch_api_key = "729199b57ea425c3a20f08ab430f005e"
-docsearch_index_name = "AlleleFlux docs"
 
 # Source suffix configuration for both RST and MyST Markdown
 source_suffix = {
