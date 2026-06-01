@@ -142,7 +142,12 @@ def load_input_table(
         raise FileNotFoundError(f"Input file not found: {path}")
 
     logger.info(f"Loading input from {path}")
-    df = pd.read_csv(path, sep="\t", dtype={"gene_id": str})
+    if path.suffix == ".parquet":
+        df = pd.read_parquet(path)
+        if "gene_id" in df.columns:
+            df["gene_id"] = df["gene_id"].astype(str)
+    else:
+        df = pd.read_csv(path, sep="\t", dtype={"gene_id": str})
 
     missing = set(required_cols + diff_cols) - set(df.columns)
     if missing:

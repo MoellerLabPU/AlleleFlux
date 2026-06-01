@@ -90,6 +90,7 @@ rule regional_contrast:
     resources:
         mem_mb=get_mem_mb("regional_contrast"),
         time=get_time("regional_contrast"),
+        runtime=get_runtime("regional_contrast"),
     shell:
         """
         alleleflux-regional-contrast \
@@ -142,6 +143,7 @@ rule regional_contrast_scores:
     resources:
         mem_mb=get_mem_mb("regional_contrast_scores"),
         time=get_time("regional_contrast_scores"),
+        runtime=get_runtime("regional_contrast_scores"),
     shell:
         """
         mkdir -p $(dirname {output.scores})
@@ -194,6 +196,7 @@ rule combine_regional_contrast_scores:
     resources:
         mem_mb=get_mem_mb("combine_regional_contrast_scores"),
         time=get_time("combine_regional_contrast_scores"),
+        runtime=get_runtime("combine_regional_contrast_scores"),
     run:
         dfs = []
         for file in input.scores:
@@ -269,6 +272,7 @@ rule regional_contrast_summary:
     resources:
         mem_mb=get_mem_mb("regional_contrast_summary"),
         time=get_time("regional_contrast_summary"),
+        runtime=get_runtime("regional_contrast_summary"),
     shell:
         """
         alleleflux-regional-contrast-summary \

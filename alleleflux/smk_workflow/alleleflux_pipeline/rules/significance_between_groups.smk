@@ -17,7 +17,6 @@ def _cache_paths_for_combination_between(wildcards):
         get_allele_freq_cache_path(
             mag_wildcard=wildcards.mag,
             timepoint_wildcard=tp,
-            # groups_wildcard omitted — cache is now group-independent (2B)
         )
         for tp in tps
     ]
@@ -69,6 +68,7 @@ rule preprocess_between_groups:
     resources:
         mem_mb=get_mem_mb("preprocess_between_groups"),
         time=get_time("preprocess_between_groups"),
+        runtime=get_runtime("preprocess_between_groups"),
     shell:
         """
         alleleflux-preprocess-between-groups \
@@ -103,6 +103,7 @@ rule two_sample_unpaired:
     resources:
         mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
     shell:
         """
         alleleflux-two-sample-unpaired \
@@ -135,6 +136,7 @@ rule two_sample_paired:
     resources:
         mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
     shell:
         """
         alleleflux-two-sample-paired \
@@ -167,6 +169,7 @@ rule lmm_analysis:
     resources:
         mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
     shell:
         """
         alleleflux-lmm \
@@ -214,6 +217,7 @@ rule cmh_test:
     retries: get_retries("statistical_tests")
     resources:
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
         mem_mb=get_mem_mb("statistical_tests"),
     shell:
         """

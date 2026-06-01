@@ -96,6 +96,7 @@ checkpoint preprocessing_eligibility_between_groups:
     resources:
         mem_mb=get_mem_mb("preprocessing_eligibility_between_groups"),
         time=get_time("preprocessing_eligibility_between_groups"),
+        runtime=get_runtime("preprocessing_eligibility_between_groups"),
     shell:
         """
         alleleflux-preprocessing-eligibility \
@@ -135,6 +136,7 @@ checkpoint preprocessing_eligibility_within_groups:
     resources:
         mem_mb=get_mem_mb("preprocessing_eligibility_within_groups"),
         time=get_time("preprocessing_eligibility_within_groups"),
+        runtime=get_runtime("preprocessing_eligibility_within_groups"),
     shell:
         """
         alleleflux-preprocessing-eligibility \

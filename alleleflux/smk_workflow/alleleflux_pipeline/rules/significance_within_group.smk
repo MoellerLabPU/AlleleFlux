@@ -40,6 +40,7 @@ rule preprocess_within_groups:
     resources:
         mem_mb=get_mem_mb("preprocess_within_groups"),
         time=get_time("preprocess_within_groups"),
+        runtime=get_runtime("preprocess_within_groups"),
     shell:
         """
         alleleflux-preprocess-within-group \
@@ -81,6 +82,7 @@ rule single_sample:
     resources:
         mem_mb=get_mem_mb("statistical_tests"),
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
     shell:
         """
         alleleflux-single-sample \
@@ -94,12 +96,11 @@ rule single_sample:
 
 
 def _cache_paths_for_combination(wildcards):
-    """Resolve the per-(gr_combo, timepoint) Parquet cache paths for one combination."""
+    """Resolve the per-timepoint (group-independent) Parquet cache paths for one combination."""
     tps = wildcards.timepoints.split("_") if DATA_TYPE == "longitudinal" else [wildcards.timepoints]
     return [
         get_allele_freq_cache_path(
             mag_wildcard=wildcards.mag,
-            groups_wildcard=wildcards.groups,
             timepoint_wildcard=tp,
         )
         for tp in tps
@@ -150,6 +151,7 @@ rule lmm_analysis_across_time:
     retries: get_retries("statistical_tests")
     resources:
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
         mem_mb=get_mem_mb("statistical_tests")
     shell:
         """
@@ -197,6 +199,7 @@ rule cmh_test_across_time:
     retries: get_retries("statistical_tests")
     resources:
         time=get_time("statistical_tests"),
+        runtime=get_runtime("statistical_tests"),
         mem_mb=get_mem_mb("statistical_tests"),
     shell:
         """

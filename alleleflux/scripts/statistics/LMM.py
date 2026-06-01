@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import statsmodels.formula.api as smf
 from tqdm import tqdm
 
@@ -109,7 +110,7 @@ def plan_csv_loading(dtype_map: Dict, input_time_format: str, df_path) -> Dict:
         # Inspect first file's header for suffixed frequency columns.
         sample_path = df_path[0] if isinstance(df_path, (list, tuple)) else df_path
         if str(sample_path).endswith(".parquet"):
-            header = pd.read_parquet(sample_path).columns
+            header = pq.read_schema(sample_path).names
         else:
             header = pd.read_csv(sample_path, sep="\t", nrows=0).columns
         for col in header:

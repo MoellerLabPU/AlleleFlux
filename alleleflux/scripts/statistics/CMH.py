@@ -517,8 +517,8 @@ def main() -> None:
         "contig": str,
         "gene_id": str,
         "position": int,
-        "group": str,  # Use category for group to save memory
-        "replicate": str,  # Use category for replicate to save memory
+        "group": "category",
+        "replicate": "category",
         **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
 

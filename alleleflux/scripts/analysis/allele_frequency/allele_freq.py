@@ -65,9 +65,11 @@ import logging
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 # NUCLEOTIDES is the single source of truth for frequency column names.
 # Stage 1 writes these columns; Stage 2 reads and diffs them.
@@ -111,7 +113,35 @@ _STAGE2_COLUMNS_SINGLE = [
 ]
 
 
-def load_cache_files(cache_paths, data_type):
+def _arrow_string_types_mapper(pa_type):
+    """Map pyarrow string types to ``pd.ArrowDtype`` (compact string storage).
+
+    Used by ``Table.to_pandas(types_mapper=...)`` in ``load_cache_files``.
+    Selective by design: only ``string`` / ``large_string`` columns are
+    rerouted to ``ArrowDtype``; everything else (int32, float32, categorical
+    from dictionary-encoded parquet) keeps its default numpy-backed mapping
+    so downstream pandas ops behave exactly as before.
+
+    Why this matters
+    ----------------
+    ``contig`` and ``gene_id`` are written to the parquet cache as plain
+    ``string`` (high cardinality per MAG — dictionary encoding would still
+    waste a per-row int code).  When pandas reads them with the default
+    backend it materialises each row as a Python ``str`` object: ~50 B/row
+    plus a pointer.  At 900M rows that's ~45 GB per string column.
+
+    ``ArrowDtype(string)`` stores the same data as one contiguous bytes
+    buffer plus an offsets array — ~24 B/row for typical contig/gene_id
+    names — and skips creating ~1.8 billion Python objects during the
+    parquet→pandas conversion (which was a major contributor to the OOM
+    kills observed on the heaviest DRIDO MAGs).
+    """
+    if pa.types.is_string(pa_type) or pa.types.is_large_string(pa_type):
+        return pd.ArrowDtype(pa_type)
+    return None  # default mapping (numpy-backed) for non-string types
+
+
+def load_cache_files(cache_paths, data_type, groups=None):
     """Read one or two Stage-1 Parquet cache files into a single DataFrame.
 
     Only the columns Stage 2 needs are read from disk via ``columns=``.
@@ -119,9 +149,34 @@ def load_cache_files(cache_paths, data_type):
     unread columns never enter memory — typically a 25–30 % reduction in
     both I/O and peak pandas footprint.
 
-    When two paths are supplied (longitudinal), both files are read
-    concurrently via ThreadPoolExecutor — Parquet I/O releases the GIL so
-    the reads overlap in wall-clock time.
+    Cache files are read **sequentially**, not concurrently.  The previous
+    ThreadPoolExecutor version doubled the conversion-time peak because
+    each per-file parquet→pandas conversion temporarily holds both the
+    Arrow buffers and the materialising pandas frame; when two run in
+    parallel both peaks coincide.  Sequential reads add a few seconds of
+    wall-clock time but cut the load-stage peak roughly in half on big
+    MAGs, which was the second contributor to OOM kills.
+
+    String columns (``contig``, ``gene_id``) are read as Arrow-backed
+    ``ArrowDtype(large_string)`` rather than the default ``string[python]``.
+    See ``_arrow_string_types_mapper`` for the rationale (~2× smaller in
+    memory, avoids creating ~1.8 B Python str objects).
+
+    The cast to ``large_string`` is critical at this scale.  The parquet
+    file stores ``contig`` / ``gene_id`` as plain ``string`` (int32
+    offsets).  At 300 M+ rows, the concatenated chunked-array string
+    buffer crosses the 2 GB int32 ceiling, and *any* downstream pandas op
+    that triggers ``pa.ChunkedArray.take()`` — boolean masking,
+    ``.reset_index``, ``.loc[mask]``, etc. — raises
+    ``pyarrow.lib.ArrowInvalid: offset overflow``.  Casting to
+    ``large_string`` (int64 offsets) per Arrow Table before ``to_pandas``
+    eliminates the overflow at every site for ~2.5 GB of extra offsets
+    storage — a trivial cost compared to the 45 GB ArrowDtype already
+    saves over object dtype.
+
+    When ``groups`` is supplied, the filter is applied at the Arrow Table
+    level before ``to_pandas()``.  Filtering pre-materialisation drops
+    peak memory by whatever fraction of rows belong to other groups.
 
     Parameters
     ----------
@@ -132,6 +187,10 @@ def load_cache_files(cache_paths, data_type):
         ``"single"`` or ``"longitudinal"``.  Selects the column keep-list:
         longitudinal drops A/C/G/T (raw counts unused by diff computation),
         single keeps them (downstream CMH expects them in the output).
+    groups : list of str, optional
+        If supplied, retain only rows whose ``group`` column is in this set.
+        Applied at the Arrow Table level (pre-pandas) for memory safety on
+        large MAGs.
 
     Returns
     -------
@@ -147,18 +206,73 @@ def load_cache_files(cache_paths, data_type):
         else _STAGE2_COLUMNS_SINGLE
     )
 
-    def _read(p):
+    frames = []
+    total_before = 0
+    total_after = 0
+    for p in cache_paths:
         logger.info(f"Reading cache file {p}")
-        return pd.read_parquet(p, columns=columns)
+        # Use pyarrow directly so we can plumb ``types_mapper`` through to
+        # to_pandas.  pd.read_parquet does not expose this hook.
+        table = pq.read_table(p, columns=columns)
+        if groups is not None:
+            before_rows = table.num_rows
+            total_before += before_rows
+            mask = pc.is_in(table.column("group"), value_set=pa.array(list(groups)))
+            table = table.filter(mask)
+            after_rows = table.num_rows
+            total_after += after_rows
+            logger.info(
+                f"Filtered {p} to groups {groups}: "
+                f"{before_rows:,} -> {after_rows:,} rows."
+            )
+            if after_rows == 0:
+                # Skip the to_pandas / append entirely; concat handles missing
+                # frames fine and the per-file empty case is logged above.
+                del table
+                continue
+        # Cast contig / gene_id from string (int32 offsets) to large_string
+        # (int64 offsets) so downstream pandas boolean masks on ArrowDtype
+        # columns don't overflow on 300M+-row frames.  Applied per file so
+        # each cast operates on a buffer well below the 2 GB int32 ceiling
+        # and is essentially free.
+        for col in ("contig", "gene_id"):
+            if col in table.column_names and pa.types.is_string(table.schema.field(col).type):
+                idx = table.column_names.index(col)
+                table = table.set_column(
+                    idx, col, table.column(col).cast(pa.large_string())
+                )
+        frames.append(
+            table.to_pandas(
+                types_mapper=_arrow_string_types_mapper,
+                # split_blocks + self_destruct frees Arrow buffers as
+                # pandas columns are built, halving the conversion peak.
+                split_blocks=True,
+                self_destruct=True,
+            )
+        )
+        # Drop the now-empty Arrow Table reference so its tiny remaining
+        # metadata can be collected.
+        del table
 
-    if len(cache_paths) == 1:
-        frames = [_read(cache_paths[0])]
+    if not frames:
+        # All cache files filtered to zero rows.  Return an empty frame with
+        # the expected columns so the caller's empty-check path fires
+        # cleanly.
+        df = pd.DataFrame(columns=columns)
     else:
-        with ThreadPoolExecutor(max_workers=len(cache_paths)) as ex:
-            frames = list(ex.map(_read, cache_paths))
-
-    df = pd.concat(frames, ignore_index=True)
-    logger.info(f"Loaded {len(df):,} rows from {len(cache_paths)} cache file(s).")
+        df = pd.concat(frames, ignore_index=True)
+    # Free the per-file frames as soon as concat is done.
+    del frames
+    gc.collect()
+    if groups is not None:
+        logger.info(
+            f"Loaded {len(df):,} rows from {len(cache_paths)} cache file(s) "
+            f"after group filter ({total_before:,} -> {total_after:,} total)."
+        )
+    else:
+        logger.info(
+            f"Loaded {len(df):,} rows from {len(cache_paths)} cache file(s)."
+        )
     return df
 
 
@@ -639,41 +753,26 @@ def main():
         )
 
     # ------------------------------------------------------------------
-    # 1. Load cache files
+    # 1. Load cache files (with optional group filter pushed into Arrow)
     # ------------------------------------------------------------------
     # For longitudinal data: the two files hold different timepoints.
     # Both are concatenated; ``calculate_allele_frequency_changes`` later
     # splits by timepoint and performs a single vectorized merge.
     # ``data_type`` controls which columns are loaded (longitudinal drops
     # raw A/C/G/T counts; see _STAGE2_COLUMNS_* above).
-    allele_df = load_cache_files(args.cache_files, args.data_type)
-
-    # ------------------------------------------------------------------
-    # 2. Optionally restrict to the groups in this combination
-    # ------------------------------------------------------------------
+    #
     # A Parquet cache file may hold samples from multiple groups (because
     # different group combinations share the same timepoint).  When this
-    # combination only involves a subset of groups, filter before diffing
-    # to avoid cross-group contamination.
-    if args.groups:
-        before = len(allele_df)
-        # Compare as strings so a categorical group column (from the new
-        # cache format) and numeric group values both match cleanly against
-        # args.groups (which is a list of strings from the CLI).  We cast a
-        # *view* via .astype(str) — the original column remains untouched
-        # so we can reapply the categorical dtype below without re-inferring
-        # from a fresh string column.
-        keep_mask = allele_df["group"].astype(str).isin(args.groups)
-        allele_df = allele_df[keep_mask].reset_index(drop=True)
-        logger.info(
-            f"Filtered cache to groups {args.groups}: "
-            f"{before:,} -> {len(allele_df):,} rows."
+    # combination only involves a subset of groups, the filter is applied
+    # at the Arrow Table level before to_pandas — filtering post-pandas on
+    # a 300M+-row frame triggers an int32 offset overflow inside pyarrow's
+    # ``take`` on the ArrowDtype string columns (contig / gene_id).
+    allele_df = load_cache_files(args.cache_files, args.data_type, groups=args.groups)
+    if args.groups and allele_df.empty:
+        logger.error(
+            f"No rows remain after filtering to groups {args.groups}. Exiting."
         )
-        if allele_df.empty:
-            logger.error(
-                f"No rows remain after filtering to groups {args.groups}. Exiting."
-            )
-            sys.exit(1)
+        sys.exit(1)
 
     # Apply / refresh categorical dtypes.  The new cache format already stores
     # these as dictionary-encoded (read back as categorical), but we still:

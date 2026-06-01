@@ -76,6 +76,7 @@ rule generate_metadata:
     resources:
         mem_mb=get_mem_mb("generate_metadata"),
         time=get_time("generate_metadata"),
+        runtime=get_runtime("generate_metadata"),
     shell:
         """
         alleleflux-metadata \

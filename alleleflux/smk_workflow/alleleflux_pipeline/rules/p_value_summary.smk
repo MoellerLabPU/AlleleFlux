@@ -17,19 +17,12 @@ def get_all_significance_test_results_for_summary(wildcards):
     test_type = wildcards.test_type
     timepoints = wildcards.timepoints
     groups = wildcards.groups
-    
-    # Check preprocessing config
-    preprocess_between = config["statistics"].get("preprocess_between_groups", False)
-    preprocess_within = config["statistics"].get("preprocess_within_groups", False)
+
+    # No defensive ``checkpoints.preprocessing_eligibility_*.get()`` call here:
+    # ``get_eligible_mags`` -> ``get_mags_by_preprocessing_eligibility`` performs
+    # that gating itself via ``.output.out_fPath``.  See shared/common.smk.
 
     if test_type in ['two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh']:
-        # Trigger preprocessing eligibility checkpoint if enabled
-        if preprocess_between:
-            checkpoints.preprocessing_eligibility_between_groups.get(
-                timepoints=timepoints,
-                groups=groups
-            )
-        
         mags = get_eligible_mags(timepoints, groups, test_type)
         for mag in mags:
             targets.append(
@@ -42,13 +35,6 @@ def get_all_significance_test_results_for_summary(wildcards):
             )
 
     elif test_type in ["single_sample",'lmm_across_time', 'cmh_across_time'] and DATA_TYPE == "longitudinal":
-        # Trigger preprocessing eligibility checkpoint if enabled
-        if preprocess_within:
-            checkpoints.preprocessing_eligibility_within_groups.get(
-                timepoints=timepoints,
-                groups=groups
-            )
-        
         sample_entries = get_eligible_mags(timepoints, groups, test_type)
         for mag, group in sample_entries:
             targets.append(
@@ -86,6 +72,7 @@ rule p_value_summary:
     resources:
         mem_mb=get_mem_mb("p_value_summary"),
         time=get_time("p_value_summary"),
+        runtime=get_runtime("p_value_summary"),
     shell:
         """
         alleleflux-p-value-summary \

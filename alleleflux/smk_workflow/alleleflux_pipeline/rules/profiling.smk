@@ -43,6 +43,7 @@ if not USE_EXISTING_PROFILES:
         resources:
             mem_mb=get_mem_mb("profile"),
             time=get_time("profile"),
+            runtime=get_runtime("profile"),
         params:
             outDir=os.path.join(OUTDIR, "profiles"),
             no_ignore_orphans="--no-ignore-orphans" if not config.get("profiling", {}).get("ignore_orphans", True) else "",

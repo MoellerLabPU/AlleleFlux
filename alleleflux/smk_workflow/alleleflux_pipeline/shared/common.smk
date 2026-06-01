@@ -284,8 +284,38 @@ def get_time(rule_name=None):
             return lambda wildcards, attempt: minutes_to_time_str(
                 base_mins + (attempt - 1) * step_mins
             )
-    
+
     return base_time
+
+
+def get_runtime(rule_name=None):
+    """Wall time in minutes (int), with retry scaling. Mirrors :func:`get_time`.
+
+    Used by the native ``snakemake-executor-plugin-slurm`` profile, which expects
+    ``runtime`` (integer minutes) — the canonical SLURM-plugin name for what
+    cluster-generic calls ``time`` (HH:MM:SS string).
+
+    Rules set BOTH ``time=get_time(...)`` (consumed by cluster-generic via
+    ``--time={resources.time}`` in its sbatch template) AND
+    ``runtime=get_runtime(...)`` (consumed by plugin-slurm). The unused
+    directive is ignored by the active executor; no per-profile rule files
+    needed.
+    """
+    if rule_name:
+        base_time = get_resource(rule_name, "time")
+    else:
+        base_time = config.get("resources", {}).get("time", "24:00:00")
+
+    base_mins = parse_time_to_minutes(base_time)
+    retries = _get_retries_for_rule(rule_name)
+    step_raw = _get_step_value(rule_name, "time_step", None)
+
+    if retries > 0 and step_raw:
+        step_mins = parse_time_to_minutes(step_raw)
+        if step_mins > 0:
+            return lambda wildcards, attempt: base_mins + (attempt - 1) * step_mins
+
+    return base_mins
 
 
 # =============================================================================
@@ -690,69 +720,63 @@ def _get_single_sample_entries(timepoints, groups):
 
 def get_mags_by_preprocessing_eligibility(timepoints, groups, test_type, group=None):
     """
-    Read the preprocessing eligibility file for a given timepoint-group combination and 
-    return a list of MAG IDs that have sufficient positions after preprocessing.
-    
-    This function is used AFTER the preprocessing_eligibility checkpoint runs to determine
-    which MAGs should proceed to statistical tests.
+    Return MAG IDs eligible for ``test_type`` after preprocessing.
+
+    Uses the canonical Snakemake checkpoint idiom — ``checkpoints.X.get(...).output``
+    — to force Snakemake to materialise the eligibility file on disk before
+    this function reads it.  This is what makes the function safe to call
+    from target-generator functions during DAG planning: if the file does
+    not yet exist, the ``.output`` access raises
+    ``IncompleteCheckpointException``, which Snakemake catches and re-
+    evaluates the DAG after the checkpoint job has run.  A plain
+    ``pd.read_csv`` on a manually-constructed path does NOT do this and
+    would crash with ``FileNotFoundError`` on cold-start runs whenever the
+    output file is eager-listed elsewhere in the DAG.
 
     Parameters:
         timepoints (str): The timepoints label (e.g., "pre_post")
         groups (str): The groups label (e.g., "fat_control")
-        test_type (str):
-            - "two_sample_unpaired": Return MAGs eligible for unpaired two-sample tests
-            - "two_sample_paired": Return MAGs eligible for paired two-sample tests
-            - "lmm": Return MAGs eligible for LMM analysis
-            - "cmh": Return MAGs eligible for CMH analysis
-            - "single_sample": Return MAGs eligible for single-sample test (requires group param)
-            - "lmm_across_time": Return MAGs eligible for LMM across-time (requires group param)
-            - "cmh_across_time": Return MAGs eligible for CMH across-time (requires group param)
-        group (str, optional): Required for single_sample, lmm_across_time, cmh_across_time tests
-    
+        test_type (str): One of
+            "two_sample_unpaired" / "two_sample_paired" / "lmm" / "cmh"
+              — between-group tests, gated on ``preprocessing_eligibility_between_groups``
+            "single_sample" / "lmm_across_time" / "cmh_across_time"
+              — within-group tests, gated on ``preprocessing_eligibility_within_groups``
+              (require ``group``)
+        group (str, optional): Required for the within-group test types.
+
     Returns:
-        list: MAG IDs that are eligible for the specified test type
-    
-    Raises:
-        FileNotFoundError: If the preprocessing eligibility file does not exist
+        list[str]: MAG IDs eligible for the specified test type.
     """
-    # Determine which eligibility file to read based on test type
-    # Map test types to the actual eligibility columns:
-    #   - two_sample_unpaired, lmm -> two_sample_unpaired_eligible
-    #   - two_sample_paired, cmh -> two_sample_paired_eligible
-    #   - single_sample, lmm_across_time, cmh_across_time -> single_sample_eligible_{group}
+    # Resolve the eligibility file via the canonical Snakemake checkpoint idiom.
+    # Accessing ``.output.out_fPath`` on a checkpoint that hasn't completed
+    # raises IncompleteCheckpointException, which Snakemake catches and uses
+    # to trigger a DAG re-evaluation after the checkpoint job runs.  This is
+    # what makes the function safe to call during DAG planning — and why we
+    # don't need an explicit os.path.exists guard or a manual path build.
     if test_type in ["two_sample_unpaired", "two_sample_paired", "lmm", "cmh"]:
-        eligibility_file = os.path.join(
-            OUTDIR, "preprocessing_eligibility", 
-            f"preprocessing_eligibility_between_groups_{timepoints}-{groups}.tsv"
+        # LMM uses the unpaired eligibility column; CMH uses paired.
+        eligible_column = (
+            "two_sample_unpaired_eligible"
+            if test_type in ["two_sample_unpaired", "lmm"]
+            else "two_sample_paired_eligible"
         )
-        # Map LMM to unpaired eligibility, CMH to paired eligibility
-        if test_type in ["two_sample_unpaired", "lmm"]:
-            eligible_column = "two_sample_unpaired_eligible"
-        else:  # two_sample_paired, cmh
-            eligible_column = "two_sample_paired_eligible"
+        eligibility_file = checkpoints.preprocessing_eligibility_between_groups.get(
+            timepoints=timepoints, groups=groups
+        ).output.out_fPath
     elif test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
         if group is None:
             raise ValueError(f"group parameter is required for test_type '{test_type}'")
-        eligibility_file = os.path.join(
-            OUTDIR, "preprocessing_eligibility",
-            f"preprocessing_eligibility_within_groups_{timepoints}-{groups}.tsv"
-        )
-        # All within-group tests use single_sample_eligible
         eligible_column = f"single_sample_eligible_{group}"
+        eligibility_file = checkpoints.preprocessing_eligibility_within_groups.get(
+            timepoints=timepoints, groups=groups
+        ).output.out_fPath
     else:
         raise ValueError(
             f"Unknown test type: {test_type}. "
             "Use 'two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh', "
             "'single_sample', 'lmm_across_time', or 'cmh_across_time'."
         )
-    
-    # Error if file doesn't exist - preprocessing must not have run
-    if not os.path.exists(eligibility_file):
-        raise FileNotFoundError(
-            f"Preprocessing eligibility file not found: {eligibility_file}. "
-            f"Ensure preprocessing is enabled and the preprocessing_eligibility checkpoint has run."
-        )
-    
+
     df = pd.read_csv(eligibility_file, sep="\t")
     
     if eligible_column not in df.columns:
@@ -885,18 +909,14 @@ def get_allele_analysis_input_path(mag_wildcard="{mag}", tp_wildcard="{timepoint
 def get_allele_freq_cache_path(
     mag_wildcard="{mag}",
     timepoint_wildcard="{timepoint}",
-    # groups_wildcard is kept as a no-op kwarg for backward compatibility with
-    # any callers that still pass it.  Cache is now group-independent (2B).
-    groups_wildcard=None,
 ):
     """Path to the per-(MAG, timepoint) allele-frequency Parquet cache file.
 
-    Cache is now group-independent (2B refactor): one file per (MAG, timepoint),
-    not per (MAG, gr_combo, timepoint).  This reduces cache-write jobs from
-    8 × 6 gr_combos = 48 → 8 for DRIDO.
-
-    The cache rule input is the canonical QC file from the single per-timepoint
-    QC directory (also group-independent after 2A refactor).
+    The cache is group-independent (2B refactor): one file per (MAG, timepoint),
+    reused across every (timepoint_combination, group_combination) pair that
+    includes that timepoint.  The cache rule input is the canonical QC file
+    from the single per-timepoint QC directory (also group-independent after
+    the 2A refactor).
     """
     return os.path.join(
         OUTDIR,

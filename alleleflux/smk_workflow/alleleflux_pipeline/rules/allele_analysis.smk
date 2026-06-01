@@ -25,7 +25,6 @@ def _allele_analysis_cache_input(wildcards):
         get_allele_freq_cache_path(
             mag_wildcard=wildcards.mag,
             timepoint_wildcard=tp,
-            # groups_wildcard omitted — cache is now group-independent (2B)
         )
         for tp in tps
     ]
@@ -63,6 +62,7 @@ rule allele_freq_cache:
     resources:
         mem_mb=get_mem_mb("allele_freq_cache"),
         time=get_time("allele_freq_cache"),
+        runtime=get_runtime("allele_freq_cache"),
     shell:
         """
         alleleflux-cache-allele-freq \
@@ -130,6 +130,7 @@ rule allele_analysis:
     resources:
         mem_mb=get_mem_mb("allele_analysis"),
         time=get_time("allele_analysis"),
+        runtime=get_runtime("allele_analysis"),
     shell:
         """
         alleleflux-allele-freq \

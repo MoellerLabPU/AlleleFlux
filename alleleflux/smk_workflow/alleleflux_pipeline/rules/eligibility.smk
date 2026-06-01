@@ -32,6 +32,7 @@ checkpoint eligibility_table:
     retries: get_retries("eligibility_table")
     resources:
         time=get_time("eligibility_table"),
+        runtime=get_runtime("eligibility_table"),
     shell:
         """
         alleleflux-eligibility \

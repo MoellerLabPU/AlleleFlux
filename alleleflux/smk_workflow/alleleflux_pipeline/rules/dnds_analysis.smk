@@ -51,6 +51,7 @@ rule dnds_from_timepoints:
     retries: get_retries("dnds_from_timepoints")
     resources:
         time=get_time("dnds_from_timepoints"),
+        runtime=get_runtime("dnds_from_timepoints"),
         mem_mb=get_mem_mb("dnds_from_timepoints"),
     threads: get_threads("dnds_from_timepoints")
     run:

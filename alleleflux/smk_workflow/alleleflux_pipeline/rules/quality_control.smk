@@ -44,6 +44,7 @@ rule qc:
     retries: get_retries("qc")
     resources:
         time=get_time("qc"),
+        runtime=get_runtime("qc"),
         mem_mb=get_mem_mb("qc"),
     shell:
         """
