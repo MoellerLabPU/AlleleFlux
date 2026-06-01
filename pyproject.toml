@@ -111,4 +111,9 @@ alleleflux = [
 
 [tool.isort]
 profile = "black"
-line_length = 88 
+line_length = 88
+
+[tool.pytest.ini_options]
+markers = [
+    "regression: end-to-end regression test (slow; runs the full pipeline)",
+] 

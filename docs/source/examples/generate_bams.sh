@@ -35,8 +35,19 @@
 #
 # Usage
 # -----
-#   cd docs/source/examples/example_data
-#   bash generate_bams.sh
+#   cd docs/source/examples
+#   bash generate_bams.sh                          # default: example_data_longitudinal/
+#   bash generate_bams.sh --data-dir my_test_data  # use a freshly-generated dataset
+#
+# This script lives alongside generate_synthetic_data.py in docs/source/examples/.
+# By default it reads the bundled reference at docs/source/examples/example_data_longitudinal/
+# and writes BAMs into example_data_longitudinal/bams/. Pass --data-dir <path>
+# to target a different dataset (e.g. example_data_single/ or one produced ad-hoc
+# by generate_synthetic_data.py).
+#
+# The --data-dir directory must contain reference/combined_mags.fasta; the BAMs
+# will be written into <data-dir>/bams/. Path can be absolute or relative to the
+# current working directory.
 #
 # Approximate runtime: < 5 seconds for the bundled 7 kb reference
 
@@ -44,10 +55,48 @@ set -euo pipefail   # exit on any error, treat unset vars as errors, propagate p
 
 # Resolve the directory this script lives in regardless of where it is called from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REF="$SCRIPT_DIR/reference/combined_mags.fasta"
-OUTDIR="$SCRIPT_DIR/bams"
+DATA_DIR="$SCRIPT_DIR/example_data_longitudinal"   # default; overridable via --data-dir
 
-echo "[generate_bams] Working in: $SCRIPT_DIR"
+# ---- Argument parsing --------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --data-dir)
+            if [[ -z "${2:-}" ]]; then
+                echo "ERROR: --data-dir requires a path argument" >&2
+                exit 1
+            fi
+            # Resolve to absolute so subsequent paths stay anchored even if the
+            # user passes a relative arg from a cwd we don't know about.
+            DATA_DIR="$(cd "$2" 2>/dev/null && pwd || true)"
+            if [[ -z "$DATA_DIR" ]]; then
+                echo "ERROR: --data-dir path does not exist: $2" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        -h|--help)
+            sed -n '2,52p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            echo "Usage: bash generate_bams.sh [--data-dir <dir>]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+REF="$DATA_DIR/reference/combined_mags.fasta"
+OUTDIR="$DATA_DIR/bams"
+
+if [[ ! -f "$REF" ]]; then
+    echo "ERROR: reference FASTA not found at $REF" >&2
+    echo "Make sure the data directory contains reference/combined_mags.fasta" >&2
+    exit 1
+fi
+
+echo "[generate_bams] Script dir: $SCRIPT_DIR"
+echo "[generate_bams] Data dir:   $DATA_DIR"
 
 # ---- Dependency check --------------------------------------------------------
 for cmd in wgsim bwa samtools; do
@@ -75,44 +124,53 @@ fi
 
 # ---- Compute number of read pairs for ~50× coverage -------------------------
 # Formula: N_pairs = (target_coverage × genome_size) / (2 × read_length)
-#          = (50 × TOTAL_BP) / (2 × 100)  = TOTAL_BP / 4
+#          = (50 × TOTAL_BP) / (2 × 150)  = TOTAL_BP / 6
 #
-# Example: reference is ~7,173 bp → N_pairs = 7173 / 4 ≈ 1,793 pairs per sample
-# At 100 bp per read: 1793 × 2 × 100 = 358,600 bp → 358,600 / 7,173 ≈ 50×
+# Read length is 150 bp to match the most common Illumina NovaSeq output
+# (2×150 paired-end). NovaSeq X Plus can produce 2×100 or 2×250, but 2×150
+# is the de facto standard for whole-genome and metagenomic sequencing.
+#
+# Example: reference is ~7,173 bp → N_pairs = 7173 / 6 ≈ 1,195 pairs per sample
+# At 150 bp per read: 1195 × 2 × 150 = 358,500 bp → 358,500 / 7,173 ≈ 50×
 TOTAL_BP=$(awk '{s+=$2} END {print s}' "$REF.fai")
-N_PAIRS=$(( (50 * TOTAL_BP) / 200 ))
+N_PAIRS=$(( (50 * TOTAL_BP) / 300 ))
 echo "[generate_bams] Reference: ${TOTAL_BP} bp | Read pairs per sample: ${N_PAIRS} (~50×)"
 
-# ---- Sample → seed mapping ---------------------------------------------------
-# Using a fixed seed per sample makes the BAMs fully reproducible. Different
-# seeds produce different random read sets (different coverage fluctuations,
-# different sequencing errors) while keeping the same underlying genome.
-declare -A SEEDS=(
-    [control_subj1_pre]=1
-    [control_subj1_post]=2
-    [control_subj2_pre]=3
-    [control_subj2_post]=4
-    [treatment_subj3_pre]=5
-    [treatment_subj3_post]=6
-    [treatment_subj4_pre]=7
-    [treatment_subj4_post]=8
-)
+# ---- Sample list (derived from metadata, not hardcoded) ----------------------
+# Sample IDs and ordering come from <data-dir>/metadata/sample_metadata.tsv so
+# this script works on ANY dataset produced by generate_synthetic_data.py, not
+# just the bundled 8-sample longitudinal default. Seeds are assigned by row
+# order (1, 2, 3, ...) which is deterministic — the generator always writes
+# samples in the same order for a given config, so BAMs stay reproducible
+# across reruns.
+META="$DATA_DIR/metadata/sample_metadata.tsv"
+if [[ ! -f "$META" ]]; then
+    echo "ERROR: metadata file not found at $META" >&2
+    echo "Run generate_synthetic_data.py first to produce it." >&2
+    exit 1
+fi
+SAMPLES=()
+while IFS=$'\t' read -r sample_id _; do
+    SAMPLES+=("$sample_id")
+done < <(tail -n +2 "$META")
+echo "[generate_bams] Samples: ${#SAMPLES[@]} (from metadata)"
 
 # Use a temp directory for intermediate FASTQ files; clean up automatically on exit.
 TMPDIR_LOCAL=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_LOCAL"' EXIT
 
 # ---- Main loop: simulate → align → sort → index -----------------------------
-for SAMPLE in "${!SEEDS[@]}"; do
-    SEED="${SEEDS[$SAMPLE]}"
+SEED=0
+for SAMPLE in "${SAMPLES[@]}"; do
+    SEED=$((SEED + 1))   # 1-indexed, monotonic, reproducible
     BAM="$OUTDIR/${SAMPLE}.bam"
     echo "[generate_bams] $SAMPLE (seed=$SEED)"
 
     # Step 1 — wgsim: simulate paired-end reads from the reference
     #   -e 0.005  base error rate 0.5% (controls substitution frequency)
     #   -N        number of read pairs
-    #   -1 100    read 1 length = 100 bp
-    #   -2 100    read 2 length = 100 bp
+    #   -1 150    read 1 length = 150 bp  (Illumina NovaSeq 2×150 standard)
+    #   -2 150    read 2 length = 150 bp
     #   -r 0.001  SNP mutation rate (additional variants beyond the reference)
     #   -R 0.0    indel fraction = 0 (no indels, keeps alignment simple)
     #   -X 0.0    indel extension probability = 0
@@ -121,11 +179,12 @@ for SAMPLE in "${!SEEDS[@]}"; do
     # Output: r1.fq and r2.fq in the temp directory.
     # Note: wgsim assigns Phred quality ~23 to all bases regardless of error rate.
     # This is below the default alleleflux-profile threshold of 30, which is why
-    # config_with_bams.yml sets min_base_quality: 0 for this synthetic dataset.
+    # the BAM-mode configs (config_with_bams_*.yml) set min_base_quality: 0
+    # for this synthetic dataset.
     wgsim \
         -e 0.005 \
         -N "$N_PAIRS" \
-        -1 100 -2 100 \
+        -1 150 -2 150 \
         -r 0.001 -R 0.0 -X 0.0 \
         -S "$SEED" \
         "$REF" \
@@ -152,5 +211,13 @@ for SAMPLE in "${!SEEDS[@]}"; do
 done
 
 echo "[generate_bams] Done. BAMs written to: $OUTDIR"
+# Closing tip — list the BAM-flavor config(s) that exist in the data dir.
+# Both bundled datasets (example_data_longitudinal/, example_data_single/) and
+# any ad-hoc generate_synthetic_data.py output write a ``config_with_bams_*.yml``
+# we can point the user at directly.
 echo "[generate_bams] Run the full pipeline with:"
-echo "  alleleflux run --config config_with_bams.yml --threads 4"
+for cfg in "$DATA_DIR"/config_with_bams_*.yml; do
+    if [[ -f "$cfg" ]]; then
+        echo "  alleleflux run --config $cfg --threads 4"
+    fi
+done

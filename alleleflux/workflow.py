@@ -12,6 +12,7 @@ import logging
 import multiprocessing
 import os
 import re
+import signal
 import subprocess
 import sys
 from datetime import datetime
@@ -231,14 +232,19 @@ def run_snakemake(cmd: str, logfile: Path = None) -> int:
     log_handle = open(logfile, "w") if logfile else None
 
     try:
-        # Run snakemake with real-time output streaming
-        # Using shell=True following SnakePipes/Atlas pattern
+        # shell=True spawns `bash -c <cmd>`, so the immediate child is bash and
+        # snakemake is its grandchild. preexec_fn=os.setsid puts bash into a new
+        # session/process group with PGID == bash's PID, so a single
+        # os.killpg(process.pid, sig) reaches bash + snakemake + any further
+        # descendants atomically — without this, terminate() only kills bash
+        # and snakemake is orphaned to init.
         process = subprocess.Popen(
             cmd,
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            preexec_fn=os.setsid,
         )
 
         # Stream output line by line
@@ -254,20 +260,45 @@ def run_snakemake(cmd: str, logfile: Path = None) -> int:
         return process.returncode
 
     except KeyboardInterrupt:
-        # Handle Ctrl+C gracefully - let snakemake clean up
+        # Handle Ctrl+C with escalating signals: SIGINT (graceful) → SIGTERM
+        # (urgent) → SIGKILL (uncatchable). Each step has a bounded timeout, so
+        # a snakemake stuck in a non-interruptible sbatch RPC can't strand us in
+        # an infinite wait (the original bug — `process.wait()` after `terminate()`
+        # blocked forever when SIGTERM was ignored, leaving an orphan driver
+        # alive on the login node that kept resubmitting jobs after `scancel`).
         logger.warning("\nInterrupted by user. Waiting for snakemake to clean up...")
         if log_handle:
             log_handle.write("\nInterrupted by user (KeyboardInterrupt)\n")
             log_handle.flush()
 
-        # Snakemake receives SIGINT automatically since it's in the same process group
-        # Wait for it to finish its cleanup
-        try:
-            process.wait(timeout=30)  # Give snakemake 30 seconds to clean up
-        except subprocess.TimeoutExpired:
-            logger.warning("Snakemake cleanup timed out. Terminating...")
-            process.terminate()
-            process.wait()
+        # Because we put the child in its own session (preexec_fn=os.setsid),
+        # the terminal's Ctrl+C does NOT reach snakemake automatically — we
+        # must forward SIGINT explicitly to give it a chance to gracefully
+        # cancel its in-flight SLURM jobs.
+        for sig, label, grace_seconds in (
+            (signal.SIGINT, "SIGINT (graceful)", 30),
+            (signal.SIGTERM, "SIGTERM (urgent)", 10),
+            (signal.SIGKILL, "SIGKILL (uncatchable)", 5),
+        ):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                break  # already dead
+            try:
+                process.wait(timeout=grace_seconds)
+                break  # exited cleanly under this signal
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"{label} did not stop snakemake within {grace_seconds}s; escalating..."
+                )
+        else:
+            # Loop fell through without break — even SIGKILL didn't reap it.
+            # This should be impossible on Linux (SIGKILL is uncatchable), but
+            # if it ever happens the user needs to know to investigate manually.
+            logger.error(
+                f"Failed to stop snakemake process group (PGID={process.pid}). "
+                "Check for zombie processes with `pgrep -u $USER snakemake`."
+            )
 
         logger.info("Workflow interrupted. You can resume with the same command.")
         return 130  # Standard exit code for SIGINT
