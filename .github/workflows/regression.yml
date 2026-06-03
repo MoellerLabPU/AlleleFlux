@@ -80,6 +80,11 @@ jobs:
         # crash, not a clean failure.  Reinstall here to make sure.
         run: pip install -e . --no-deps
 
+      - name: Install test dependencies
+        # pytest isn't in environment.yml (it's a dev-only dep), so install it
+        # explicitly here.  Same pattern unit-tests.yml uses.
+        run: pip install pytest pytest-cov
+
       - name: Confirm tooling
         # NOTE: avoid piping CLI output through `head` here.  GHA's default
         # bash runs with `pipefail`, and Python CLIs (alleleflux) treat a
