@@ -1,19 +1,23 @@
 # AlleleFlux Configuration (Generated)
 # =====================================
+# Paths are RELATIVE to this config's directory (example_data_<dt>/).
+# Run the pipeline from inside example_data_<dt>/ so they resolve correctly:
+#   cd docs/source/examples/example_data_single
+#   alleleflux run --config config_generated_single.yml
 
 run_name: "generated_test"
 
 input:
-  fasta_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/reference/combined_mags.fasta"
-  prodigal_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/reference/prodigal_genes.fna"
-  metadata_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/metadata/sample_metadata.tsv"
-  gtdb_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/reference/gtdbtk_taxonomy.tsv"
-  mag_mapping_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/reference/mag_mapping.tsv"
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/sample_metadata.tsv"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
   # Use the pre-generated profiles directly — skips the profiling step.
-  profiles_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/profiles"
+  profiles_path: "profiles"
 
 output:
-  root_dir: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/output"
+  root_dir: "./output"
 
 log_level: "INFO"
 

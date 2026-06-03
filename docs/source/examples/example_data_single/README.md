@@ -2,10 +2,14 @@
 
 Seed: 42 | MAGs: 2 | Samples: 8 (single)
 
+All paths in the configs and metadata are RELATIVE to this directory.
+`cd` into this directory before running the pipeline.
+
 ## Option A — pre-generated profiles (fastest)
 
 ```bash
-alleleflux run --config /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/config_generated_single.yml
+cd /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single
+alleleflux run --config config_generated_single.yml
 ```
 
 ## Option B — full pipeline from BAMs (requires wgsim + bwa)
@@ -15,5 +19,6 @@ alleleflux run --config /home/su2806/AlleleFlux-dev/docs/source/examples/example
 bash generate_bams.sh --data-dir /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single
 
 # 2. Run the pipeline (includes profiling step)
-alleleflux run --config /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single/config_with_bams_single.yml
+cd /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_single
+alleleflux run --config config_with_bams_single.yml
 ```

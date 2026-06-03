@@ -1,22 +1,27 @@
 # AlleleFlux Configuration (Generated, BAM mode)
 # =================================================
+# Paths are RELATIVE to this config's directory (example_data_<dt>/).
 # This config runs the FULL pipeline starting from BAM files — the
 # profiling step is NOT skipped. Generate the BAMs first with:
 #
-#   bash generate_bams.sh --data-dir /home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal
+#   bash generate_bams.sh --data-dir example_data_longitudinal
+#
+# Then run the pipeline from inside example_data_<dt>/:
+#   cd docs/source/examples/example_data_longitudinal
+#   alleleflux run --config config_with_bams_longitudinal.yml
 
 run_name: "generated_test_bams"
 
 input:
-  fasta_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/reference/combined_mags.fasta"
-  prodigal_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/reference/prodigal_genes.fna"
-  metadata_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/metadata/sample_metadata_bams.tsv"
-  gtdb_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/reference/gtdbtk_taxonomy.tsv"
-  mag_mapping_path: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/reference/mag_mapping.tsv"
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/sample_metadata_bams.tsv"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
   # profiles_path intentionally omitted — pipeline profiles directly from BAMs.
 
 output:
-  root_dir: "/home/su2806/AlleleFlux-dev/docs/source/examples/example_data_longitudinal/output_bams"
+  root_dir: "./output_bams"
 
 log_level: "INFO"
 
@@ -66,7 +71,7 @@ statistics:
   preprocess_between_groups: True
   preprocess_within_groups: True
   max_zero_count: 2
-  p_value_threshold: 0.1
+  p_value_threshold: 0.05
   fdr_group_by_mag_id: False
   min_positions_after_preprocess: 1
 

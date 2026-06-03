@@ -424,24 +424,24 @@ def write_metadata(
 
     Rather than baking either convention into this function, the caller passes
     a `path_resolver(sample) -> Path` callable that yields the right path. Two
-    typical call sites:
+    typical call sites — both passing **relative** paths anchored at the
+    dataset's example_dir (so they resolve against the pipeline's cwd, which
+    by convention is set to example_dir):
 
-        write_metadata(..., path_resolver=lambda s: profiles_dir / s["sample_id"])
-        write_metadata(..., path_resolver=lambda s: bams_dir / f"{s['sample_id']}.bam")
+        write_metadata(..., path_resolver=lambda s: Path("profiles") / s["sample_id"])
+        write_metadata(..., path_resolver=lambda s: Path("bams") / f"{s['sample_id']}.bam")
 
-    Paths are written ABSOLUTE (path_resolver(...).resolve()) so the user can
-    run the pipeline from any cwd. AlleleFlux validates bam_path with
-    os.path.exists() relative to the workflow cwd (which defaults to the user's
-    shell cwd, not output_dir); relative paths only resolve correctly if the
-    user happens to be inside output_dir when they invoke ``alleleflux run``.
-    Absolute paths sidestep that landmine and stay consistent with the absolute
-    paths already written into the config. Trade-off: if the dataset directory
-    is moved, the metadata and config must both be regenerated.
+    Paths are written AS-GIVEN (no ``.resolve()``).  The README + the
+    regression test both ``cd`` into example_dir before running the
+    pipeline, so relative-to-example_dir paths resolve correctly.  This makes
+    the bundled dataset portable across machines (CI runners, contributor
+    laptops, HPC clusters) without re-running the generator — which the
+    earlier absolute-path design forbade.
     """
     with open(output_path, "w") as f:
         f.write("sample_id\tbam_path\tsubjectID\tgroup\treplicate\ttime\n")
         for sample in samples:
-            bam_path = path_resolver(sample).resolve()
+            bam_path = path_resolver(sample)
             f.write(
                 f"{sample['sample_id']}\t{bam_path}\t{sample['subjectID']}\t"
                 f"{sample['group']}\t{sample['replicate']}\t{sample['time']}\n"
@@ -725,13 +725,17 @@ def write_config(
         header = (
             "# AlleleFlux Configuration (Generated)\n"
             "# =====================================\n"
+            "# Paths are RELATIVE to this config's directory (example_data_<dt>/).\n"
+            "# Run the pipeline from inside example_data_<dt>/ so they resolve correctly:\n"
+            "#   cd docs/source/examples/example_data_" + data_type + "\n"
+            "#   alleleflux run --config " + f"config_generated_{data_type}.yml\n"
         )
         run_name = "generated_test"
         metadata_filename = "sample_metadata.tsv"
         # profiles_path line is present in profile mode.
         profiles_line = (
             f'  # Use the pre-generated profiles directly — skips the profiling step.\n'
-            f'  profiles_path: "{output_dir}/profiles"'
+            f'  profiles_path: "profiles"'
         )
         output_subdir = "output"
         # 30 is the default upstream threshold; works for real sequencing data.
@@ -742,10 +746,15 @@ def write_config(
         header = (
             "# AlleleFlux Configuration (Generated, BAM mode)\n"
             "# =================================================\n"
+            "# Paths are RELATIVE to this config's directory (example_data_<dt>/).\n"
             "# This config runs the FULL pipeline starting from BAM files — the\n"
             "# profiling step is NOT skipped. Generate the BAMs first with:\n"
             "#\n"
-            f"#   bash generate_bams.sh --data-dir {output_dir}\n"
+            f"#   bash generate_bams.sh --data-dir example_data_{data_type}\n"
+            "#\n"
+            "# Then run the pipeline from inside example_data_<dt>/:\n"
+            f"#   cd docs/source/examples/example_data_{data_type}\n"
+            f"#   alleleflux run --config config_with_bams_{data_type}.yml\n"
         )
         run_name = "generated_test_bams"
         metadata_filename = "sample_metadata_bams.tsv"
@@ -763,15 +772,15 @@ def write_config(
 run_name: "{run_name}"
 
 input:
-  fasta_path: "{output_dir}/reference/combined_mags.fasta"
-  prodigal_path: "{output_dir}/reference/prodigal_genes.fna"
-  metadata_path: "{output_dir}/metadata/{metadata_filename}"
-  gtdb_path: "{output_dir}/reference/gtdbtk_taxonomy.tsv"
-  mag_mapping_path: "{output_dir}/reference/mag_mapping.tsv"
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/{metadata_filename}"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
 {profiles_line}
 
 output:
-  root_dir: "{output_dir}/{output_subdir}"
+  root_dir: "./{output_subdir}"
 
 log_level: "INFO"
 
@@ -949,22 +958,24 @@ def main():
     )
 
     profiles_dir = output_dir / "profiles"
-    bams_dir = output_dir / "bams"   # BAMs themselves are generated by generate_bams.sh
-    # Profile-mode metadata: bam_path points at the per-sample profile directory.
+    # Profile-mode metadata: bam_path points at the per-sample profile directory,
+    # written RELATIVE to example_dir so the dataset is portable.  Pipeline
+    # convention is to cd into example_dir before invoking, so "profiles/<id>"
+    # resolves correctly against cwd.
     write_metadata(
         samples,
         output_dir / "metadata" / "sample_metadata.tsv",
-        path_resolver=lambda s: profiles_dir / s["sample_id"],
+        path_resolver=lambda s: Path("profiles") / s["sample_id"],
     )
-    # BAM-mode metadata: bam_path points at <output_dir>/bams/{sample}.bam.
-    # The BAMs don't exist yet (user runs generate_bams.sh after this); the file
-    # is written eagerly so the BAM-mode config can reference it without a
-    # second invocation. The pipeline validates BAM existence at runtime, not
-    # at file-write time.
+    # BAM-mode metadata: bam_path points at bams/<sample>.bam, relative to
+    # example_dir (same convention as the profile-mode metadata above).  BAMs
+    # don't exist yet (user runs generate_bams.sh after this); the file is
+    # written eagerly so the BAM-mode config can reference it without a second
+    # invocation.  The pipeline validates BAM existence at runtime.
     write_metadata(
         samples,
         output_dir / "metadata" / "sample_metadata_bams.tsv",
-        path_resolver=lambda s: bams_dir / f"{s['sample_id']}.bam",
+        path_resolver=lambda s: Path("bams") / f"{s['sample_id']}.bam",
     )
 
     # --- Profiles (the slow step for large datasets) --------------------
@@ -994,29 +1005,42 @@ def main():
     )
 
     # Write a minimal README next to the generated data showing BOTH run paths.
+    # Configs use relative paths anchored at example_dir, so the pipeline must
+    # be invoked from inside this directory (or with cwd set to it).
+    config_basename = config_path.name
+    config_bams_basename = config_bams_path.name
     readme = (
         f"# Generated AlleleFlux Test Data\n\n"
         f"Seed: {args.seed} | MAGs: {args.num_mags} | "
         f"Samples: {len(samples)} ({args.data_type})\n\n"
+        f"All paths in the configs and metadata are RELATIVE to this directory.\n"
+        f"`cd` into this directory before running the pipeline.\n\n"
         f"## Option A — pre-generated profiles (fastest)\n\n"
-        f"```bash\nalleleflux run --config {config_path}\n```\n\n"
+        f"```bash\n"
+        f"cd {output_dir}\n"
+        f"alleleflux run --config {config_basename}\n"
+        f"```\n\n"
         f"## Option B — full pipeline from BAMs (requires wgsim + bwa)\n\n"
         f"```bash\n"
         f"# 1. Generate BAMs from the reference (one-time)\n"
         f"bash generate_bams.sh --data-dir {output_dir}\n\n"
         f"# 2. Run the pipeline (includes profiling step)\n"
-        f"alleleflux run --config {config_bams_path}\n"
+        f"cd {output_dir}\n"
+        f"alleleflux run --config {config_bams_basename}\n"
         f"```\n"
     )
     (output_dir / "README.md").write_text(readme)
 
     total_size = sum(f.stat().st_size for f in output_dir.rglob("*") if f.is_file())
     logger.info(f"Done. Total size: {total_size / 1024:.1f} KB")
-    logger.info(f"Run with pre-generated profiles: alleleflux run --config {config_path}")
+    logger.info(
+        f"Run with pre-generated profiles: "
+        f"cd {output_dir} && alleleflux run --config {config_basename}"
+    )
     logger.info(
         f"Or generate BAMs + run full pipeline: "
         f"bash generate_bams.sh --data-dir {output_dir} && "
-        f"alleleflux run --config {config_bams_path}"
+        f"cd {output_dir} && alleleflux run --config {config_bams_basename}"
     )
 
 
