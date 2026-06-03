@@ -78,7 +78,7 @@ All 6 group combinations read from these same 4 files.
 ## Stage 1: Writing the Cache
 
 **Script:** `alleleflux-cache-allele-freq`
-([`scripts/analysis/allele_frequency/allele_freq_cache.py`](../../alleleflux/scripts/analysis/allele_frequency/allele_freq_cache.py))
+([`scripts/analysis/allele_frequency/allele_freq_cache.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq_cache.py))
 
 **Invoked once per `(MAG, timepoint)`.** There is no groups argument.
 
@@ -118,7 +118,7 @@ Stage 1 cache job can load it directly to get the full sample list.
 ## Stage 2: Filtering to a Group Combination
 
 **Script:** `alleleflux-allele-freq`
-([`scripts/analysis/allele_frequency/allele_freq.py`](../../alleleflux/scripts/analysis/allele_frequency/allele_freq.py))
+([`scripts/analysis/allele_frequency/allele_freq.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq.py))
 
 **Invoked once per `(MAG, tp_combo, gr_combo)`.** Receives `--groups` to filter the cache.
 
@@ -337,8 +337,8 @@ aggregating. It does not use `load_allele_freq_inputs` for the concatenation ste
 
 | File | Role |
 |---|---|
-| [`shared/common.smk`](../../alleleflux/smk_workflow/alleleflux_pipeline/shared/common.smk) | `timepoint_to_canonical_tp`, `get_canonical_qc_file`, `get_allele_freq_cache_path` |
-| [`rules/allele_analysis.smk`](../../alleleflux/smk_workflow/alleleflux_pipeline/rules/allele_analysis.smk) | `allele_freq_cache` rule (Stage 1), `allele_analysis` rule (Stage 2) |
-| [`scripts/analysis/allele_frequency/allele_freq_cache.py`](../../alleleflux/scripts/analysis/allele_frequency/allele_freq_cache.py) | Stage 1: reads profiles for all groups at one timepoint, writes Parquet |
-| [`scripts/analysis/allele_frequency/allele_freq.py`](../../alleleflux/scripts/analysis/allele_frequency/allele_freq.py) | Stage 2: loads cache, applies `--groups` filter, computes diffs |
-| [`scripts/utilities/utilities.py`](../../alleleflux/scripts/utilities/utilities.py) | `load_allele_freq_inputs` — Parquet/TSV format detection for downstream consumers |
+| [`shared/common.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/shared/common.smk) | `timepoint_to_canonical_tp`, `get_canonical_qc_file`, `get_allele_freq_cache_path` |
+| [`rules/allele_analysis.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/rules/allele_analysis.smk) | `allele_freq_cache` rule (Stage 1), `allele_analysis` rule (Stage 2) |
+| [`scripts/analysis/allele_frequency/allele_freq_cache.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq_cache.py) | Stage 1: reads profiles for all groups at one timepoint, writes Parquet |
+| [`scripts/analysis/allele_frequency/allele_freq.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq.py) | Stage 2: loads cache, applies `--groups` filter, computes diffs |
+| [`scripts/utilities/utilities.py`](../../../alleleflux/scripts/utilities/utilities.py) | `load_allele_freq_inputs` — Parquet/TSV format detection for downstream consumers |
