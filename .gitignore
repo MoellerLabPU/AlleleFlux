@@ -183,3 +183,13 @@ alleleflux/smk_workflow/visualization/visualization_config_*.yaml
 docs/source/examples/example_data_*/output_bams/
 docs/source/examples/example_data_*/output/
 docs/source/examples/example_data_*/config_runtime_*.yml
+tests/regression/__pycache__*
+
+# bwa / samtools index files for the bundled FASTA.  Regenerated idempotently
+# by generate_bams.sh from combined_mags.fasta, so safe to gitignore — saves
+# ~hundreds of KB per scenario from cluttering the tree.  Pattern matches
+# .amb / .ann / .bwt / .pac / .sa / .fai but NOT combined_mags.fasta itself.
+docs/source/examples/example_data_*/reference/combined_mags.fasta.*
+
+# Personal optimization notes — scratch doc kept local, not for the repo.
+OPTIMIZATION_CHANGES.md
