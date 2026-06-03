@@ -81,8 +81,13 @@ jobs:
         run: pip install -e . --no-deps
 
       - name: Confirm tooling
+        # NOTE: avoid piping CLI output through `head` here.  GHA's default
+        # bash runs with `pipefail`, and Python CLIs (alleleflux) treat a
+        # closed pipe as an uncaught BrokenPipeError → exit 1 → step fails.
+        # Plain `which` / `--version` are safer: no pipes, no SIGPIPE drama.
         run: |
-          alleleflux --help | head -5
+          which alleleflux
+          alleleflux --version
           which samtools
           python --version
 
