@@ -73,17 +73,13 @@ jobs:
           auto-activate-base: false
           use-mamba: true
 
-      - name: Install AlleleFlux (editable, belt-and-suspenders)
-        # environment.yml already does `pip install -e .` via its pip block,
-        # but Snakemake rules invoke CLI entry points via subprocess and a
-        # missing `alleleflux` on PATH manifests as a confusing pipeline
-        # crash, not a clean failure.  Reinstall here to make sure.
-        run: pip install -e . --no-deps
-
-      - name: Install test dependencies
-        # pytest isn't in environment.yml (it's a dev-only dep), so install it
-        # explicitly here.  Same pattern unit-tests.yml uses.
-        run: pip install pytest pytest-cov
+      - name: Install AlleleFlux + test extras
+        # The `[test]` extra (defined in pyproject.toml's optional-dependencies)
+        # pulls in pytest + pytest-cov.  Belt-and-suspenders reinstall since
+        # environment.yml already does `pip install -e .` via its pip block —
+        # but a missing `alleleflux` on PATH manifests as a confusing pipeline
+        # crash, not a clean failure, so we make sure here.
+        run: pip install -e ".[test]"
 
       - name: Confirm tooling
         # NOTE: avoid piping CLI output through `head` here.  GHA's default

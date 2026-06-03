@@ -33,6 +33,19 @@ dependencies = [
     "pyyaml",
 ]
 
+[project.optional-dependencies]
+# Test dependencies — installed via `pip install -e ".[test]"`.
+# Kept out of `dependencies` and environment.yml so production / end-user
+# installs don't pull pytest in.  CI workflows + local test runs use this.
+test = [
+    "pytest",
+    "pytest-cov",
+]
+# Dev convenience extra: bundles test plus any future linters/formatters.
+dev = [
+    "AlleleFlux[test]",
+]
+
 [project.scripts]
 alleleflux = "alleleflux.cli:main"
 

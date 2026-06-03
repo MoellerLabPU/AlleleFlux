@@ -48,8 +48,9 @@ jobs:
           auto-activate-base: false
           use-mamba: true
 
-      - name: Install test dependencies
-        run: pip install pytest pytest-cov
+      - name: Install AlleleFlux + test extras
+        # Pulls pytest/pytest-cov via pyproject.toml's [test] extra.
+        run: pip install -e ".[test]"
 
       - name: Run unit tests (regression excluded)
         # -m "not regression" excludes the slow end-to-end suite — that
