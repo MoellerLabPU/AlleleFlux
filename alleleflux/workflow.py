@@ -8,6 +8,7 @@ output streaming. It is separate from the CLI to maintain clean
 separation of concerns.
 """
 
+import copy
 import logging
 import multiprocessing
 import os
@@ -221,6 +222,21 @@ def validate_config(config_path: Path) -> dict:
                 )
         logger.info(f"Reusing profiles/QC/allele-freq cache from: {reuse_from}")
 
+    # A permuted (null) run MUST reuse an existing real run — otherwise each
+    # permutation would rebuild the whole (expensive) cache from scratch, which
+    # defeats the entire purpose.  Enforce reuse_from when permutation is on.
+    permutation = config.get("permutation", {})
+    if permutation.get("enabled"):
+        if not reuse_from:
+            logger.error(
+                "permutation.enabled is true but input.reuse_from is not set. "
+                "A permuted run reuses a completed real run's profiles/QC/cache; "
+                "point input.reuse_from at that run's data-type output dir "
+                "(e.g. .../alleleflux_output_1/longitudinal)."
+            )
+            sys.exit(1)
+        logger.info("Permutation (null) run enabled.")
+
     return config
 
 
@@ -391,6 +407,157 @@ def build_snakemake_command(
     return " ".join(cmd_parts)
 
 
+# =============================================================================
+# Permutation (null) orchestration
+# =============================================================================
+
+
+def _resolve_permutation_seeds(perm_config: dict) -> List[int]:
+    """Resolve the list of permutation seeds from the ``permutation`` config.
+
+    Precedence: an explicit ``seeds`` list wins; else ``n_permutations`` expands
+    to ``1..N``; else a single permutation with seed ``1``.
+    """
+    seeds = perm_config.get("seeds")
+    if seeds:
+        return [int(s) for s in seeds]
+    n = int(perm_config.get("n_permutations", 1))
+    return list(range(1, n + 1))
+
+
+def run_permutations(
+    config: dict,
+    working_dir: str,
+    jobs: Optional[int] = None,
+    threads: Optional[int] = None,
+    memory: Optional[str] = None,
+    profile: Optional[str] = None,
+    dry_run: bool = False,
+    extra_args: Optional[List[str]] = None,
+    version: str = "unknown",
+) -> int:
+    """Fan out N per-comparison-pair permuted (null) runs that reuse a real run.
+
+    For each seed, generate one permuted metadata sheet per
+    ``groups_combinations`` entry (via ``alleleflux-permute-metadata``,
+    restricted to that pair), write a per-seed *leaf* config, and run the
+    group-dependent tail through :func:`execute_workflow`.  The leaf config sets
+    ``permutation.permuted_metadata_dir`` so it does NOT re-orchestrate, and
+    inherits ``input.reuse_from`` so profiling/QC/cache are reused.
+
+    Layout (under the orchestrating config's ``output.root_dir``)::
+
+        <root>/<output_subdir>/perm_<seed>/
+            permuted_metadata/permuted_metadata_<treatment>_<control>.tsv
+            config_perm_<seed>.yml
+            <data_type>/...                      # scores, stats, eligibility
+
+    Returns the worst (max) leaf exit code; stops early on the first failure.
+    """
+    perm = config["permutation"]
+    seeds = _resolve_permutation_seeds(perm)
+    unit = perm.get("unit", "subjectID")
+    block = perm.get("block")
+    swaps = perm.get("swaps")
+    subdir = perm.get("output_subdir", "permuted")
+
+    wd = Path(working_dir)
+
+    # Resolve the base output and the original metadata relative to working_dir
+    # so the permute subprocess and leaf configs use unambiguous absolute paths.
+    base_output = Path(config["output"]["root_dir"])
+    if not base_output.is_absolute():
+        base_output = (wd / base_output).resolve()
+
+    orig_md = Path(config["input"]["metadata_path"])
+    if not orig_md.is_absolute():
+        orig_md = (wd / orig_md).resolve()
+
+    pairs = [
+        (g["treatment"], g["control"])
+        for g in config["analysis"]["groups_combinations"]
+    ]
+
+    logger.info("=" * 60)
+    logger.info(
+        f"PERMUTATION ORCHESTRATION — {len(seeds)} permutation(s) × "
+        f"{len(pairs)} comparison pair(s)"
+    )
+    logger.info(
+        f"  unit={unit}  block={block}  "
+        f"swaps={'half (default)' if swaps is None else swaps}  seeds={seeds}"
+    )
+    logger.info(f"  reuse_from={config['input'].get('reuse_from')}")
+    logger.info("=" * 60)
+
+    exit_codes = []
+    for idx, seed in enumerate(seeds, start=1):
+        seed_dir = base_output / subdir / f"perm_{seed}"
+        md_dir = seed_dir / "permuted_metadata"
+        md_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"[permutation {idx}/{len(seeds)}] seed={seed} → {seed_dir}")
+
+        # 1. One permuted sheet per comparison pair (only that pair's labels move).
+        for treatment, control in pairs:
+            out_tsv = md_dir / f"permuted_metadata_{treatment}_{control}.tsv"
+            cmd = [
+                "alleleflux-permute-metadata",
+                "--input", str(orig_md),
+                "--output", str(out_tsv),
+                "--unit", unit,
+                "--groups", treatment, control,
+                "--seed", str(seed),
+            ]
+            if block:
+                cmd += ["--block", block]
+            if swaps is not None:
+                cmd += ["--swaps", str(swaps)]
+            logger.info(f"  permuting {treatment} vs {control} → {out_tsv.name}")
+            subprocess.run(cmd, check=True)
+
+        # 2. Per-seed leaf config: permuted_metadata_dir set ⇒ no re-orchestration.
+        leaf = copy.deepcopy(config)
+        leaf["output"]["root_dir"] = str(seed_dir)
+        leaf.setdefault("permutation", {})
+        leaf["permutation"]["enabled"] = True
+        leaf["permutation"]["permuted_metadata_dir"] = str(md_dir)
+        # A divergence null only needs the between-group comparison, so skip the
+        # within-group / across-time tests by default (saves compute).  The user
+        # can force them back on with analysis.run_within_group_tests: true.
+        leaf.setdefault("analysis", {}).setdefault("run_within_group_tests", False)
+
+        leaf_path = seed_dir / f"config_perm_{seed}.yml"
+        with open(leaf_path, "w") as f:
+            yaml.safe_dump(leaf, f, sort_keys=False)
+
+        # 3. Run the group-dependent tail for this permutation.
+        rc = execute_workflow(
+            config_file=str(leaf_path),
+            working_dir=working_dir,
+            jobs=jobs,
+            threads=threads,
+            memory=memory,
+            profile=profile,
+            dry_run=dry_run,
+            extra_args=extra_args,
+            version=version,
+        )
+        exit_codes.append(rc)
+        if rc != 0:
+            logger.error(
+                f"Permutation seed={seed} failed (exit {rc}); stopping orchestration."
+            )
+            break
+
+    logger.info("=" * 60)
+    ran = len(exit_codes)
+    ok = sum(1 for c in exit_codes if c == 0)
+    logger.info(f"PERMUTATION ORCHESTRATION done: {ok}/{ran} permutation(s) succeeded.")
+    logger.info("=" * 60)
+    return max(exit_codes) if exit_codes else 0
+
+
 def execute_workflow(
     config_file: str,
     working_dir: str = ".",
@@ -442,6 +609,25 @@ def execute_workflow(
         logger.info("Unlocking working directory...")
         unlock_cmd = f"snakemake --snakefile {snakefile} --configfile {config_path.resolve()} --directory {working_dir} --unlock"
         return run_snakemake(unlock_cmd)
+
+    # Permutation orchestration.  When permutation is enabled and this is not
+    # already a per-seed *leaf* run (a leaf carries permutation.permuted_metadata_dir),
+    # fan out into N per-comparison-pair permuted runs that reuse the real run's
+    # artifacts.  Each leaf re-enters execute_workflow with permuted_metadata_dir
+    # set, so it skips this block and runs the normal (group-dependent) pipeline.
+    permutation = config.get("permutation", {})
+    if permutation.get("enabled") and not permutation.get("permuted_metadata_dir"):
+        return run_permutations(
+            config=config,
+            working_dir=working_dir,
+            jobs=jobs,
+            threads=threads,
+            memory=memory,
+            profile=profile,
+            dry_run=dry_run,
+            extra_args=extra_args,
+            version=version,
+        )
 
     # Get output directory from config for logging
     output_dir = Path(config.get("output", {}).get("root_dir", working_dir))

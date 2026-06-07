@@ -19,6 +19,12 @@ input:
   profiles_path: ""               # Optional: Path to pre-existing profiles directory
                                   # If provided, profiling step is skipped and these profiles are used
                                   # Useful for rerunning analysis with different parameters
+  reuse_from: ""                  # Optional: a completed run's data-type output dir
+                                  # (e.g. .../alleleflux_output_1/longitudinal). Reuses that run's
+                                  # profiles + QC + allele-frequency cache and recomputes only the
+                                  # group-dependent tail. REQUIRED for permuted/null runs (see the
+                                  # `permutation:` section). When set, profiles default to
+                                  # <reuse_from>/profiles unless profiles_path is given explicitly.
 
 # Output Directory
 # ----------------
@@ -41,6 +47,10 @@ analysis:
   use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
   use_regional_contrast: True     # Regional contrast: detect genes/windows with differential allele-frequency evolution
                                   # Only applicable to longitudinal data; runs on raw allele-frequency changes (no preprocessing)
+  run_within_group_tests: True    # When False, skip the WITHIN-group / across-time tests
+                                  # (single_sample, lmm_across_time, cmh_across_time) and keep only the
+                                  # between-group comparison. Permuted/null runs default this to False
+                                  # (a divergence null only needs the between-group test).
   use_gene_scores: False           # Compute gene-level significance scores (alleleflux-gene-scores); requires Prodigal annotations
   use_outlier_detection: False     # Detect outlier genes by comparing gene vs MAG scores (alleleflux-outliers); requires use_gene_scores: True
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
@@ -67,6 +77,29 @@ analysis:
   groups_combinations:
     - treatment: "treatment"      # Name of the treatment group as it appears in metadata
       control: "control"          # Name of the control group as it appears in metadata
+
+# Permutation (null / control) runs
+# ----------------------------------
+# Optional. Builds a permutation null for the divergence score by shuffling group
+# labels and re-running ONLY the group-dependent tail, reusing the real run's
+# profiles/QC/allele-frequency cache. REQUIRES input.reuse_from (a completed run).
+# One permuted metadata sheet is generated per groups_combinations pair, per seed,
+# and outputs land under <output.root_dir>/<output_subdir>/perm_<seed>/.
+# Labels are shuffled at the --unit level (counts preserved); only `group` changes.
+permutation:
+  enabled: False                  # Master switch. When True, this run produces permuted nulls
+                                  # (it does NOT run the real pipeline — point reuse_from at that).
+  unit: "subjectID"               # Randomization unit whose group assignment is shuffled.
+                                  # Use "subjectID" for independent subjects; a cage/plot column
+                                  # when subjects share a single-group unit (e.g. unit: "cage").
+  block: ""                       # Optional matched-pair stratum to swap WITHIN (e.g. "replicate"
+                                  # for diet cages-per-replicate or soil samples-per-plot). Each block
+                                  # must hold exactly two units, one per group. Leave "" for a global swap.
+  swaps: null                     # Number of unit-pairs to swap per pair (or blocks to flip with `block`).
+                                  # null/omitted -> half the available pairs (a solid default null).
+  n_permutations: 1               # How many permutations (seeds 1..N). Ignored if `seeds` is given.
+  # seeds: [1, 2, 3]              # Explicit seed list (overrides n_permutations) for a reproducible null set.
+  output_subdir: "permuted"       # Subdir under output.root_dir for the per-seed permuted runs.
 
 # Quality Control Parameters
 # --------------------------

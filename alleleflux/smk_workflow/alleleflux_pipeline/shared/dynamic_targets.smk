@@ -15,14 +15,36 @@ checkpoint has been evaluated to ensure the DAG is properly updated.
 """
 
 
+# Within-group (across-time) test types — gated by analysis.run_within_group_tests.
+WITHIN_GROUP_TYPES = ("single_sample", "lmm_across_time", "cmh_across_time")
+
+
+def _run_within_group_tests():
+    """Whether within-group / across-time tests should run.
+
+    Default True.  Permuted (null) runs set this False — the divergence null
+    only needs the between-group comparison, so single-sample and across-time
+    tests (which measure within-group change over time) are wasted compute.
+    Also useful as a standalone knob for non-permuted runs.
+    """
+    return config["analysis"].get("run_within_group_tests", True)
+
+
 def get_enabled_test_types():
+    within = _run_within_group_tests()
     enabled = []
     if config["analysis"].get("use_significance_tests", True):
-        enabled.extend(["two_sample_unpaired", "two_sample_paired", "single_sample"])
+        enabled.extend(["two_sample_unpaired", "two_sample_paired"])
+        if within:
+            enabled.append("single_sample")
     if config["analysis"].get("use_lmm", True):
-        enabled.extend(["lmm", "lmm_across_time"])
+        enabled.append("lmm")
+        if within:
+            enabled.append("lmm_across_time")
     if config["analysis"].get("use_cmh", True):
-        enabled.extend(["cmh", "cmh_across_time"])
+        enabled.append("cmh")
+        if within:
+            enabled.append("cmh_across_time")
     return enabled
 
 
@@ -58,8 +80,13 @@ def get_eligible_mags(tp, gr, test_type):
             return _get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
     
     elif test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
+        # Within-group tests disabled (e.g. permuted/null run): suppress every
+        # target for these types from every generator via this single chokepoint.
+        if not _run_within_group_tests():
+            return []
+
         preprocess_enabled = config["statistics"].get("preprocess_within_groups", False)
-        
+
         # First get all QC-eligible entries
         sample_entries = _get_single_sample_entries(tp, gr)
         
