@@ -142,6 +142,8 @@ rule lmm_analysis_across_time:
             else "column"
         ),
         groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
+        # Permuted (null) run: relabel the reused cache from the per-pair sheet.
+        permuted_metadata=lambda wildcards: permuted_metadata_flag(wildcards.groups),
         preprocessed_flag=(
             "--preprocessed_df"
             if config["statistics"].get("preprocess_within_groups", False)
@@ -163,6 +165,7 @@ rule lmm_analysis_across_time:
             --group_to_analyze {wildcards.group} \
             --input_time_format {params.input_time_format} \
             {params.groups_arg} \
+            {params.permuted_metadata} \
             --cpus {threads} \
             --min_sample_num {params.min_sample_num} \
             {params.preprocessed_flag} {input.preprocessed_df}
@@ -190,6 +193,8 @@ rule cmh_test_across_time:
             OUTDIR, "significance_tests", "cmh_across_time_{timepoints}-{groups}"
         ),
         groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
+        # Permuted (null) run: relabel the reused cache from the per-pair sheet.
+        permuted_metadata=lambda wildcards: permuted_metadata_flag(wildcards.groups),
         preprocessed_flag=(
             "--preprocessed_df"
             if config["statistics"].get("preprocess_within_groups", False)
@@ -210,6 +215,7 @@ rule cmh_test_across_time:
             --data_type across_time \
             --group {wildcards.group} \
             {params.groups_arg} \
+            {params.permuted_metadata} \
             --cpus {threads} \
             --min_sample_num {params.min_sample_num} \
             {params.preprocessed_flag} {input.preprocessed_df}

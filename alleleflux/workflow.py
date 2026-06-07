@@ -202,6 +202,25 @@ def validate_config(config_path: Path) -> dict:
             "No existing profiles specified - profiling will run from BAM files."
         )
 
+    # Validate optional reuse_from (permuted/null run reusing a real run's
+    # group-independent artifacts: profiles, QC, allele-freq cache).
+    reuse_from = input_config.get("reuse_from", "")
+    if reuse_from:
+        if not os.path.isdir(reuse_from):
+            logger.error(
+                f"Specified reuse_from does not exist or is not a directory: {reuse_from}"
+            )
+            sys.exit(1)
+        # Warn (don't hard-fail) if the expected reusable subdirs are missing —
+        # the run will simply rebuild whatever isn't found.
+        for sub in ("QC", "allele_freq_cache"):
+            if not os.path.isdir(os.path.join(reuse_from, sub)):
+                logger.warning(
+                    f"reuse_from is missing expected subdir '{sub}/': "
+                    f"{os.path.join(reuse_from, sub)}. That stage will be rebuilt."
+                )
+        logger.info(f"Reusing profiles/QC/allele-freq cache from: {reuse_from}")
+
     return config
 
 

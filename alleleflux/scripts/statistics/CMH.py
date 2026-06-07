@@ -36,6 +36,7 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
     load_allele_freq_inputs,
     load_and_filter_data,
+    relabel_groups_from_metadata,
 )
 
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
@@ -499,6 +500,17 @@ def main() -> None:
         type=str,
     )
     parser.add_argument(
+        "--permuted_metadata",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to a permuted metadata TSV (null/control run).  When "
+            "given, group labels are re-derived from this sheet (joined on "
+            "sample_id) right after the cache is loaded, before group filtering "
+            "and testing.  Omit for a normal run."
+        ),
+    )
+    parser.add_argument(
         "--cpus",
         help="Number of processors to use.",
         default=cpu_count(),
@@ -521,6 +533,10 @@ def main() -> None:
         "replicate": "category",
         **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
+    # Permuted run: ensure the per-sample join key is read so the cache can be
+    # relabeled (the usecols-based loaders below would otherwise drop it).
+    if args.permuted_metadata:
+        dtype_map["sample_id"] = str
 
     # Load and possibly filter data
     if args.data_type == "single":
@@ -532,6 +548,10 @@ def main() -> None:
             usecols=list(dtype_map.keys()),
             dtype=dtype_map,
         )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
         if args.groups:
             df = df[df["group"].isin(args.groups)].copy()
 
@@ -572,6 +592,10 @@ def main() -> None:
                 usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
         if args.groups:
             df = df[df["group"].isin(args.groups)].copy()
 
@@ -604,6 +628,10 @@ def main() -> None:
                 usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
         if args.groups:
             df = df[df["group"].isin(args.groups)].copy()
 

@@ -207,6 +207,8 @@ rule cmh_test:
         ),
         data_type=DATA_TYPE,
         groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
+        # Permuted (null) run: relabel the reused cache from the per-pair sheet.
+        permuted_metadata=lambda wildcards: permuted_metadata_flag(wildcards.groups),
         # Conditionally include the preprocessed file argument.
         preprocessed_flag=(
             ("--preprocessed_df")
@@ -227,6 +229,7 @@ rule cmh_test:
             --mag_id {wildcards.mag} \
             --data_type {params.data_type} \
             {params.groups_arg} \
+            {params.permuted_metadata} \
             --cpus {threads} \
             --output_dir {params.outDir} \
             {params.preprocessed_flag} {input.preprocessed_df}

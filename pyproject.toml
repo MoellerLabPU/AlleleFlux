@@ -65,6 +65,7 @@ alleleflux-regional-contrast-summary = "alleleflux.scripts.preprocessing.regiona
 alleleflux-metadata = "alleleflux.scripts.preprocessing.mag_metadata:main"
 alleleflux-qc = "alleleflux.scripts.preprocessing.quality_control:main"
 alleleflux-eligibility = "alleleflux.scripts.preprocessing.eligibility_table:main"
+alleleflux-permute-metadata = "alleleflux.scripts.preprocessing.permute_metadata:main"
 alleleflux-preprocess-between-groups = "alleleflux.scripts.preprocessing.preprocess_between_groups:main"
 alleleflux-preprocess-within-group = "alleleflux.scripts.preprocessing.preprocess_within_group:main"
 alleleflux-preprocessing-eligibility = "alleleflux.scripts.preprocessing.preprocessing_eligibility:main"

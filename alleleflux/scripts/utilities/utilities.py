@@ -2,6 +2,7 @@
 import logging
 from collections import defaultdict
 from functools import reduce
+from pathlib import Path
 
 import pandas as pd
 from Bio import SeqIO
@@ -497,3 +498,95 @@ def load_and_filter_data(
         f"{len(filtered_counts_df.groupby(['contig', 'position'], dropna=False)):,} unique positions remaining after filtering."
     )
     return filtered_counts_df
+
+
+def relabel_groups_from_metadata(df, permuted_metadata, key="sample_id"):
+    """Overwrite the ``group`` column in ``df`` from a permuted metadata sheet.
+
+    This is the in-memory seam of AlleleFlux's reuse-based null/permutation
+    feature.  A permuted run **reuses** the real run's profiles / QC / allele-
+    frequency cache, which still carry the *original* ``group`` labels.  Each
+    group-dependent consumer (Stage-2 ``allele_freq``, ``eligibility``, ``CMH``,
+    ``LMM`` across-time) calls this right after loading to re-derive the
+    *permuted* group from the run's permuted metadata — joined on ``key``
+    (``sample_id``) — before any group-dependent computation.  The expensive
+    group-independent numbers (frequencies, coverage) are reused verbatim while
+    the labels reflect the permutation.
+
+    **Only ``group`` is overwritten.**  AlleleFlux's permutation
+    (``permute_metadata.py``) relabels group assignments *only* — ``subjectID``,
+    ``replicate``, ``sample_id`` and ``bam_path`` always stay tied to their
+    original rows.  We therefore deliberately leave those columns untouched:
+    rewriting an identity-valued ``subjectID`` would needlessly re-coerce its
+    dtype (e.g. a numeric subjectID → ``str``), which could silently break the
+    longitudinal merge key in Stage-2 that pairs timepoints on ``subjectID``.
+
+    Rows whose ``key`` is absent from the metadata keep their existing group
+    (logged).  The function is **idempotent** (applying the same metadata twice
+    is a no-op) and preserves categorical dtype on ``group``.
+
+    The join key and the replacement group values are cast to ``str`` on both
+    sides to dodge the numeric-group coercion trap (e.g. DRIDO groups ``20`` /
+    ``40`` sniffing as int64 on TSV read) that would otherwise silently fail to
+    match the string group names used everywhere downstream.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The just-loaded frame to relabel **in place**.  Must contain ``key`` and
+        ``group`` for relabeling to occur; if ``key`` is missing (e.g. an
+        already-aggregated Stage-2 output that dropped ``sample_id``), the frame
+        is returned unchanged with a warning — such inputs are already
+        relabeled upstream.
+    permuted_metadata : str | pathlib.Path | pd.DataFrame
+        The permuted metadata sheet (path to a TSV, or an in-memory frame).
+    key : str, default "sample_id"
+        The per-sample join column linking ``df`` rows to metadata rows.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``df`` with the ``group`` column relabeled (same object; mutated in place).
+    """
+    if key not in df.columns:
+        logger.warning(
+            f"relabel_groups_from_metadata: key '{key}' not in dataframe columns "
+            f"{list(df.columns)}; returning unchanged (input is already relabeled "
+            "or lacks the per-sample key)."
+        )
+        return df
+    if "group" not in df.columns:
+        logger.warning(
+            "relabel_groups_from_metadata: no 'group' column in dataframe; "
+            "returning unchanged."
+        )
+        return df
+
+    if isinstance(permuted_metadata, (str, Path)):
+        logger.info(f"Relabeling groups from permuted metadata: {permuted_metadata}")
+        meta = pd.read_csv(permuted_metadata, sep="\t")
+    else:
+        meta = permuted_metadata
+
+    for col in (key, "group"):
+        if col not in meta.columns:
+            raise ValueError(
+                f"Permuted metadata is missing the required column '{col}'. "
+                f"Present columns: {list(meta.columns)}."
+            )
+
+    # Build {sample_id -> permuted group} as strings (str-cast both sides for a
+    # dtype-agnostic match), then map onto df's rows.
+    group_map = dict(zip(meta[key].astype(str), meta["group"].astype(str)))
+    mapped = df[key].astype(str).map(group_map)
+    missing = sorted(df.loc[mapped.isna(), key].astype(str).unique())
+    if missing:
+        raise ValueError(
+            f"relabel_groups_from_metadata: {len(missing)} sample(s) in the "
+            f"dataframe have no entry in the permuted metadata — the permuted "
+            f"sheet must cover every sample. Missing: {missing}"
+        )
+    was_categorical = isinstance(df["group"].dtype, pd.CategoricalDtype)
+    df["group"] = mapped.astype("category") if was_categorical else mapped
+    logger.info("Relabeled 'group' from permuted metadata.")
+    return df

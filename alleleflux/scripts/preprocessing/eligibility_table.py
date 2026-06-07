@@ -8,9 +8,41 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
+from alleleflux.scripts.preprocessing.quality_control import (
+    add_subject_count_per_group,
+    count_paired_replicates,
+)
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import relabel_groups_from_metadata
 
 logger = logging.getLogger(__name__)
+
+# Group-dependent QC count columns recomputed after a permutation relabel.
+_GROUP_COUNT_COLS = (
+    "subjects_per_group",
+    "replicates_per_group",
+    "paired_replicates_per_group",
+)
+
+
+def _relabel_and_recount(df, permuted_metadata):
+    """Relabel a per-MAG QC frame's group for a permuted run, then recompute counts.
+
+    QC's breadth/coverage **and** ``two_timepoints_passed`` are group-independent
+    (the permutation moves only group labels — never ``subjectID``/``time``/
+    coverage), so they are reused as-is.  Only the three group-dependent count
+    columns (``subjects_per_group`` / ``replicates_per_group`` /
+    ``paired_replicates_per_group``) change.  We relabel ``group`` from the
+    permuted metadata (joined on ``sample_id``), then re-derive just those counts
+    with the same functions ``quality_control.py`` used originally — so
+    eligibility sees exactly what a from-scratch QC on the permuted labels would
+    produce, with no profile reads.
+    """
+    df = relabel_groups_from_metadata(df, permuted_metadata)
+    df = df.drop(columns=[c for c in _GROUP_COUNT_COLS if c in df.columns])
+    df = add_subject_count_per_group(df)
+    df = count_paired_replicates(df)
+    return df
 
 
 def process_data(df, unique_groups, mag_id, min_sample_num, data_type):
@@ -92,6 +124,7 @@ def analyze_qc_files(
     min_sample_num: int,
     data_type: str,
     groups: Optional[List[str]] = None,
+    permuted_metadata: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Analyzes quality control (QC) files in the specified directory and processes
@@ -141,6 +174,11 @@ def analyze_qc_files(
         if df.empty:
             logger.warning(f"QC file {qc_file} is empty. Skipping MAG {mag_id}.")
             continue
+
+        # Permuted (null) run: relabel this reused QC frame and recompute its
+        # group-dependent counts before any eligibility logic runs.
+        if permuted_metadata:
+            df = _relabel_and_recount(df, permuted_metadata)
 
         # Get the list of groups that passed the two timepoints check
         passed_df = df[df["two_timepoints_passed"]]
@@ -204,11 +242,27 @@ def main():
              "checks. Required when the QC directory covers more than two groups "
              "(2A refactor: per-timepoint QC covers all groups).",
     )
+    parser.add_argument(
+        "--permuted_metadata",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to a permuted metadata TSV (null/control run).  When "
+            "given, each reused QC frame's group/subjectID/replicate labels are "
+            "re-derived from this sheet (joined on sample_id) and the per-group "
+            "replicate counts are recomputed before eligibility — no profile "
+            "reads.  Omit for a normal run."
+        ),
+    )
 
     args = parser.parse_args()
 
     eligibility_table = analyze_qc_files(
-        args.qc_dir, args.min_sample_num, args.data_type, groups=args.groups
+        args.qc_dir,
+        args.min_sample_num,
+        args.data_type,
+        groups=args.groups,
+        permuted_metadata=args.permuted_metadata,
     )
     eligibility_table.to_csv(args.output_file, sep="\t", index=False)
 

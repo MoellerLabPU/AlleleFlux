@@ -375,9 +375,58 @@ if DATA_TYPE == "single":
 elif DATA_TYPE == "longitudinal":
     OUTDIR = os.path.join(OUTDIR, "longitudinal")
 
+# =============================================================================
+# Artifact reuse for permuted / null runs (reuse_from)
+# =============================================================================
+# A permuted (null) run reuses the real run's *group-independent* expensive
+# artifacts — profiles, QC breadth/coverage, and the allele-frequency cache —
+# and only recomputes the group-dependent tail (eligibility -> Stage 2 -> stats
+# -> scores) on relabeled data.  ``input.reuse_from`` points at the real run's
+# data-type output dir (e.g. ``.../alleleflux_output_1/longitudinal``).  When
+# set, the cache/QC/metadata path helpers below resolve to that external dir, so
+# the profiling/metadata/QC/cache rules drop out of the DAG exactly the way
+# USE_EXISTING_PROFILES already drops the profiling rule.  When unset,
+# REUSE_DIR == OUTDIR, so non-reuse behaviour is byte-for-byte unchanged.
+REUSE_FROM = config["input"].get("reuse_from", "")
+USE_REUSE = bool(REUSE_FROM)
+if USE_REUSE and not os.path.isdir(REUSE_FROM):
+    raise ValueError(
+        f"input.reuse_from is set but is not a directory: {REUSE_FROM}"
+    )
+REUSE_DIR = REUSE_FROM if USE_REUSE else OUTDIR
+if USE_REUSE:
+    logger.info(f"Reusing profiles/QC/allele-freq cache from: {REUSE_DIR}")
+
+
+def permuted_metadata_flag(groups_label):
+    """Return the ``--permuted_metadata`` CLI flag for a group pair, or ``""``.
+
+    Permuted (null) runs relabel the reused cache/QC **in memory** from a
+    per-comparison-pair permuted metadata sheet (see
+    ``alleleflux-permute-metadata`` and ``relabel_groups_from_metadata``).  The
+    pipeline writes one sheet per ``groups_combinations`` entry into
+    ``permutation.permuted_metadata_dir`` named
+    ``permuted_metadata_<groups_label>.tsv`` (e.g. ``permuted_metadata_1D_AL.tsv``).
+    Group-dependent rules pass this flag to their CLI so each consumer re-derives
+    the permuted labels at load time.  Returns ``""`` (no flag) when permutation
+    is disabled or no sheet is configured, so non-permuted runs are unaffected.
+    """
+    perm = config.get("permutation", {})
+    if not perm.get("enabled", False):
+        return ""
+    metadata_dir = perm.get("permuted_metadata_dir", "")
+    if not metadata_dir:
+        return ""
+    path = os.path.join(metadata_dir, f"permuted_metadata_{groups_label}.tsv")
+    return f"--permuted_metadata {path}"
+
 # Profile reuse configuration
-# If profiles_path is specified and exists, use existing profiles instead of generating new ones
+# If profiles_path is specified and exists, use existing profiles instead of
+# generating new ones.  A reuse_from run defaults profiles to <reuse_from>/profiles
+# when profiles_path is not explicitly set (explicit profiles_path still wins).
 EXISTING_PROFILES_PATH = config["input"].get("profiles_path", "")
+if not EXISTING_PROFILES_PATH and USE_REUSE:
+    EXISTING_PROFILES_PATH = os.path.join(REUSE_FROM, "profiles")
 USE_EXISTING_PROFILES = bool(EXISTING_PROFILES_PATH and os.path.isdir(EXISTING_PROFILES_PATH))
 PROFILES_DIR = EXISTING_PROFILES_PATH if USE_EXISTING_PROFILES else os.path.join(OUTDIR, "profiles")
 
@@ -415,15 +464,23 @@ def profile_sentinel(sample):
 
 
 def metadata_sentinel(timepoints):
-    """Path to the sentinel marker for a per-timepoint inputMetadata directory."""
+    """Path to the sentinel marker for a per-timepoint inputMetadata directory.
+
+    Resolves under REUSE_DIR so a reuse_from run reads the real run's existing
+    sentinel (already on disk) and the generate_metadata rule drops from the DAG.
+    """
     return os.path.join(
-        OUTDIR, "inputMetadata", f"inputMetadata_{timepoints}", SENTINEL_METADATA
+        REUSE_DIR, "inputMetadata", f"inputMetadata_{timepoints}", SENTINEL_METADATA
     )
 
 
 def qc_sentinel(timepoints):
-    """Path to the sentinel marker for a per-timepoint QC directory."""
-    return os.path.join(OUTDIR, "QC", f"QC_{timepoints}", SENTINEL_QC)
+    """Path to the sentinel marker for a per-timepoint QC directory.
+
+    Resolves under REUSE_DIR so a reuse_from run reads the real run's existing
+    QC sentinel and the quality_control rule drops from the DAG.
+    """
+    return os.path.join(REUSE_DIR, "QC", f"QC_{timepoints}", SENTINEL_QC)
 
 
 def dnds_sentinel(timepoints, groups, subject_id):
@@ -919,7 +976,7 @@ def get_allele_freq_cache_path(
     the 2A refactor).
     """
     return os.path.join(
-        OUTDIR,
+        REUSE_DIR,
         "allele_freq_cache",
         timepoint_wildcard,
         f"{mag_wildcard}_{timepoint_wildcard}_allele_frequency.parquet",
@@ -945,7 +1002,7 @@ def get_canonical_qc_file(mag_wildcard, timepoint):
             "Check that the timepoint appears in the config."
         )
     return os.path.join(
-        OUTDIR,
+        REUSE_DIR,
         "QC",
         f"QC_{canonical_tp}",
         f"{mag_wildcard}_QC.tsv",

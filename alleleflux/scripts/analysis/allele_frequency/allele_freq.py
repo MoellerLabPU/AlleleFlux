@@ -75,6 +75,7 @@ import pyarrow.parquet as pq
 # Stage 1 writes these columns; Stage 2 reads and diffs them.
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import NUCLEOTIDES
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.utilities import relabel_groups_from_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ def _arrow_string_types_mapper(pa_type):
     return None  # default mapping (numpy-backed) for non-string types
 
 
-def load_cache_files(cache_paths, data_type, groups=None):
+def load_cache_files(cache_paths, data_type, groups=None, permuted_metadata=None):
     """Read one or two Stage-1 Parquet cache files into a single DataFrame.
 
     Only the columns Stage 2 needs are read from disk via ``columns=``.
@@ -205,6 +206,13 @@ def load_cache_files(cache_paths, data_type, groups=None):
         if data_type == "longitudinal"
         else _STAGE2_COLUMNS_SINGLE
     )
+    # Permuted (null) runs reuse the real run's cache, which carries the
+    # ORIGINAL group labels.  To relabel in memory we need the per-sample join
+    # key.  ``sample_id`` is otherwise dropped from the Stage-2 read (see the
+    # _STAGE2_COLUMNS_* rationale), so add it back here (new list — never mutate
+    # the module-level constant) and drop it again right after relabeling.
+    if permuted_metadata and "sample_id" not in columns:
+        columns = columns + ["sample_id"]
 
     frames = []
     total_before = 0
@@ -264,6 +272,19 @@ def load_cache_files(cache_paths, data_type, groups=None):
     # Free the per-file frames as soon as concat is done.
     del frames
     gc.collect()
+
+    # Permuted run: relabel the group column from the per-comparison-pair
+    # permuted metadata, joined on sample_id.  The Arrow ``groups`` filter above
+    # ran on the ORIGINAL labels, which is correct under per-pair permutation:
+    # a sample never leaves its pair's group union, so filtering on original
+    # labels yields the same rows as filtering on permuted ones — we just relabel
+    # within that set.  sample_id was only needed for the join, so drop it after
+    # to restore the exact schema downstream expects.
+    if permuted_metadata and not df.empty:
+        df = relabel_groups_from_metadata(df, permuted_metadata)
+        if "sample_id" in df.columns:
+            df = df.drop(columns=["sample_id"])
+
     if groups is not None:
         logger.info(
             f"Loaded {len(df):,} rows from {len(cache_paths)} cache file(s) "
@@ -707,6 +728,18 @@ def main():
         ),
     )
     parser.add_argument(
+        "--permuted_metadata",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to a permuted metadata TSV (null/control run).  When "
+            "given, the group label is re-derived from this sheet by "
+            "joining the reused cache on sample_id before the diff is computed — "
+            "so the real run's allele-frequency cache is reused while the labels "
+            "reflect the permutation.  Omit for a normal run."
+        ),
+    )
+    parser.add_argument(
         "--disable_zero_diff_filtering",
         dest="disable_filtering",
         action="store_true",
@@ -767,7 +800,12 @@ def main():
     # at the Arrow Table level before to_pandas — filtering post-pandas on
     # a 300M+-row frame triggers an int32 offset overflow inside pyarrow's
     # ``take`` on the ArrowDtype string columns (contig / gene_id).
-    allele_df = load_cache_files(args.cache_files, args.data_type, groups=args.groups)
+    allele_df = load_cache_files(
+        args.cache_files,
+        args.data_type,
+        groups=args.groups,
+        permuted_metadata=args.permuted_metadata,
+    )
     if args.groups and allele_df.empty:
         logger.error(
             f"No rows remain after filtering to groups {args.groups}. Exiting."

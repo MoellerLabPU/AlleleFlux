@@ -26,9 +26,13 @@ checkpoint eligibility_table:
     params:
         min_sample_num=config["quality_control"]["min_sample_num"],
         data_type=DATA_TYPE,
-        # Filter QC results to the specific group pair for this combination
+        # Filter QC results to the specific group pair for this combination.
+        # REUSE_DIR == OUTDIR normally; for a reuse_from (permuted) run it points
+        # at the real run's QC dir so this checkpoint reads the existing QC.
         groups_args=lambda wildcards: wildcards.groups.replace("_", " "),
-        qc_dir=os.path.join(OUTDIR, "QC", "QC_{timepoints}"),
+        qc_dir=os.path.join(REUSE_DIR, "QC", "QC_{timepoints}"),
+        # Permuted (null) run: relabel the reused QC + recompute counts per pair.
+        permuted_metadata=lambda wildcards: permuted_metadata_flag(wildcards.groups),
     retries: get_retries("eligibility_table")
     resources:
         time=get_time("eligibility_table"),
@@ -40,5 +44,6 @@ checkpoint eligibility_table:
             --min_sample_num {params.min_sample_num} \
             --output_file {output.out_fPath} \
             --data_type {params.data_type} \
-            --groups {params.groups_args}
+            --groups {params.groups_args} \
+            {params.permuted_metadata}
         """

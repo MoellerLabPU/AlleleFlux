@@ -125,6 +125,9 @@ rule allele_analysis:
         ),
         data_type=DATA_TYPE,
         groups_arg=lambda wildcards: "--groups " + " ".join(wildcards.groups.split("_")),
+        # Permuted (null) run: relabel the reused cache from the per-pair sheet.
+        # Empty string for a normal run (no behaviour change).
+        permuted_metadata=lambda wildcards: permuted_metadata_flag(wildcards.groups),
     threads: 1
     retries: get_retries("allele_analysis")
     resources:
@@ -139,6 +142,7 @@ rule allele_analysis:
             --data_type {params.data_type} \
             --output_dir {params.outDir} \
             {params.groups_arg} \
+            {params.permuted_metadata} \
             {params.disable_zero_diff_filtering} \
             {params.save_archival_changes}
         """

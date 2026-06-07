@@ -17,6 +17,7 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
     load_allele_freq_inputs,
     load_and_filter_data,
+    relabel_groups_from_metadata,
 )
 
 # --- Constants ---
@@ -713,6 +714,17 @@ def main():
         default="column",
     )
     parser.add_argument(
+        "--permuted_metadata",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to a permuted metadata TSV (null/control run).  When "
+            "given, group labels are re-derived from this sheet (joined on "
+            "sample_id) right after the cache is loaded, before any group "
+            "filtering or modeling.  Omit for a normal run."
+        ),
+    )
+    parser.add_argument(
         "--min_sample_num",
         type=int,
         default=4,
@@ -745,6 +757,10 @@ def main():
         "group": "category",
         "replicate": "category",
     }
+    # Permuted run: ensure the per-sample join key is read so the cache can be
+    # relabeled (the usecols-based loaders below would otherwise drop it).
+    if args.permuted_metadata:
+        dtype_map["sample_id"] = str
 
     # Conditional data loading strategy.
     if args.preprocessed_df and args.data_type == "across_time":
@@ -785,6 +801,14 @@ def main():
 
     # Ensure expected categorical columns regardless of loading path
     df = _ensure_categorical(df, ["group", "replicate", "time"])
+
+    # Permuted run: re-derive group labels from the permuted sheet before any
+    # group filtering/modeling.  No-op (helper warns) when sample_id is absent —
+    # e.g. an already-relabeled Stage-2 suffix input.
+    if args.permuted_metadata:
+        df = relabel_groups_from_metadata(df, args.permuted_metadata)
+        if "sample_id" in df.columns:
+            df = df.drop(columns=["sample_id"])
 
     if args.groups:
         df = df[df["group"].isin(args.groups)].copy()
