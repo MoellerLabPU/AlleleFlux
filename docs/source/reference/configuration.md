@@ -77,6 +77,7 @@ Core analysis settings.
 | `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
 | `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel tests for stratified categorical analysis. Best for detecting consistent directional changes. |
+| `use_dnds` | `true` | Enable dN/dS (Nei-Gojobori) evolutionary-rate analysis. **Longitudinal data only.** Set to `false` to skip the dN/dS step entirely (its parameters live under the top-level [`dnds`](#dnds) section). |
 | `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
 | `groups_combinations` | Required | List of group pairs to compare (see below). |
 
@@ -226,6 +227,10 @@ statistics:
 
 Parameters for dN/dS (synonymous/non-synonymous) ratio calculations.
 
+:::{note}
+dN/dS analysis is **only applicable to longitudinal data** (`data_type: longitudinal`). To turn it on or off, use the [`analysis.use_dnds`](#analysis) toggle (defaults to `true`); the parameters below are read only when that toggle is enabled.
+:::
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `p_value_column` | `q_value` | Column name to use for significance in dN/dS calculations. |
@@ -365,6 +370,7 @@ analysis:
   use_lmm: true
   use_significance_tests: true
   use_cmh: true
+  use_dnds: true
   timepoints_combinations:
     - timepoint: [pre, post]
       focus: post

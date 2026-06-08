@@ -659,6 +659,10 @@ def generate_dnds_analysis_targets(tp, gr):
     if DATA_TYPE != "longitudinal":
         return targets
 
+    # Honour the opt-out flag; defaults to True (run by default)
+    if not config["analysis"].get("use_dnds", True):
+        return targets
+
     # Map dN/dS test type to base eligibility test type using shared helper.
     eligibility_test_type = get_base_test_type(DN_DS_TEST_TYPE)
 

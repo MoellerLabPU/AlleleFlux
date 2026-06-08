@@ -47,6 +47,9 @@ analysis:
   use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
   use_regional_contrast: True     # Regional contrast: detect genes/windows with differential allele-frequency evolution
                                   # Only applicable to longitudinal data; runs on raw allele-frequency changes (no preprocessing)
+  use_dnds: True                  # dN/dS (Nei-Gojobori) evolutionary-rate analysis on significant sites
+                                  # Only applicable to longitudinal data; set False to skip the dN/dS step entirely
+                                  # (parameters live under the top-level `dnds:` section below)
   run_within_group_tests: True    # When False, skip the WITHIN-group / across-time tests
                                   # (single_sample, lmm_across_time, cmh_across_time) and keep only the
                                   # between-group comparison. Permuted/null runs default this to False

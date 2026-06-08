@@ -337,7 +337,10 @@ ALL_TEST_TYPES = BETWEEN_GROUP_TEST_TYPES + WITHIN_GROUP_TEST_TYPES
 # Define the global data_type variable to be used across all Snakemake files
 DATA_TYPE = config["analysis"]["data_type"]
 OUTDIR = config["output"]["root_dir"]
-DN_DS_TEST_TYPE = config["dnds"]["dn_ds_test_type"]
+# Read defensively so a config with ``use_dnds: False`` (and no ``dnds:`` section)
+# still parses.  This value is only consumed when dN/dS targets are generated,
+# i.e. when ``use_dnds`` is True — in which case the ``dnds:`` section is expected.
+DN_DS_TEST_TYPE = config.get("dnds", {}).get("dn_ds_test_type", "two_sample_paired_tTest")
 
 
 def get_base_test_type(test_type):
