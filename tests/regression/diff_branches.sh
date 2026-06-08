@@ -170,6 +170,25 @@ CANDIDATE_CONFIG="${CANDIDATE_CONFIG:-$CANDIDATE_CONFIG_DEFAULT}"
 BASELINE_ENV="${BASELINE_ENV:-alleleflux-main}"
 CANDIDATE_ENV="${CANDIDATE_ENV:-alleleflux-head}"
 
+# --- Safety guard: never target the user's daily envs ----------------------
+# Each `pip install -e .` rewrites the TARGET env's editable MAPPING to a /tmp
+# worktree (absolute path, last-writer-wins, persistent).  The daily
+# `alleleflux` / `alleleflux-dev` envs back live SLURM jobs and must never be
+# repointed.  Refuse to run if either side resolves to a protected env — this
+# makes "dedicated throwaway envs only" an enforced invariant, not a comment.
+PROTECTED_ENVS=("alleleflux" "alleleflux-dev")
+for _candidate_env in "$BASELINE_ENV" "$CANDIDATE_ENV"; do
+    for _protected in "${PROTECTED_ENVS[@]}"; do
+        if [[ "$_candidate_env" == "$_protected" ]]; then
+            echo "ERROR: refusing to install into protected env '$_candidate_env'." >&2
+            echo "       This script must target dedicated throwaway envs only" >&2
+            echo "       (default: alleleflux-main / alleleflux-head). Repoint" >&2
+            echo "       BASELINE_ENV / CANDIDATE_ENV to a non-protected env." >&2
+            exit 2
+        fi
+    done
+done
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TMP_BASELINE="/tmp/alleleflux-diff-baseline"
 TMP_CANDIDATE="/tmp/alleleflux-diff-candidate"
@@ -177,6 +196,28 @@ TMP_CANDIDATE="/tmp/alleleflux-diff-candidate"
 # --- Env bootstrap ---------------------------------------------------------
 # Make sure conda is on PATH for non-interactive shells.
 module load anaconda3/2025.12 2>/dev/null || true
+
+# --- Pre-flight: dedicated envs must already exist -------------------------
+# Fail early with an actionable message instead of a cryptic conda error
+# mid-run.  Only the envs this invocation will actually install into are
+# required (capture-golden mode never touches the candidate env).  Capture
+# `conda env list` into a variable first, then grep a here-string — piping
+# straight into `grep -q` under `set -o pipefail` risks a SIGPIPE on conda
+# that would be misread as "env missing".
+assert_env_exists() {
+    local env_name="$1"
+    local env_list
+    env_list="$(conda env list)"
+    if ! grep -qE "^${env_name}[[:space:]]" <<<"$env_list"; then
+        echo "ERROR: conda env '$env_name' not found. Create it once with:" >&2
+        echo "       conda create --name $env_name --clone alleleflux" >&2
+        exit 2
+    fi
+}
+assert_env_exists "$BASELINE_ENV"
+if [[ "$CAPTURE_GOLDEN" -ne 1 ]]; then
+    assert_env_exists "$CANDIDATE_ENV"
+fi
 
 # --- Cleanup ---------------------------------------------------------------
 cleanup_worktrees() {
@@ -187,7 +228,32 @@ cleanup_worktrees() {
     git -C "$REPO_ROOT" worktree remove -f "$TMP_BASELINE" 2>/dev/null || true
     git -C "$REPO_ROOT" worktree remove -f "$TMP_CANDIDATE" 2>/dev/null || true
 }
-trap cleanup_worktrees EXIT
+
+# Track which dedicated envs we've started mutating, so the exit trap only
+# restores the ones we actually touched.  Armed (set to 1) at each install
+# site, BEFORE the install runs.
+RESTORE_BASELINE=0
+RESTORE_CANDIDATE=0
+
+# Single exit handler.  Restores any dedicated env we installed into back to
+# $REPO_ROOT FIRST, then removes the worktrees.  Crucially this runs on ANY
+# exit — success, error, or Ctrl-C — so an interrupted run can never leave a
+# dedicated env's editable install pointing at a /tmp worktree that cleanup
+# is about to delete (the original "hijacked + vanished" failure mode).
+# $? is preserved across the trap: nothing here calls `exit`, and every
+# command is `|| true`, so the script's real exit code survives.
+on_exit() {
+    if [[ "$RESTORE_BASELINE" -eq 1 ]]; then
+        echo "[cleanup] Restoring $BASELINE_ENV -> $REPO_ROOT"
+        ( cd "$REPO_ROOT" && conda run -n "$BASELINE_ENV" pip install -e . >/dev/null 2>&1 ) || true
+    fi
+    if [[ "$RESTORE_CANDIDATE" -eq 1 ]]; then
+        echo "[cleanup] Restoring $CANDIDATE_ENV -> $REPO_ROOT"
+        ( cd "$REPO_ROOT" && conda run -n "$CANDIDATE_ENV" pip install -e . >/dev/null 2>&1 ) || true
+    fi
+    cleanup_worktrees
+}
+trap on_exit EXIT
 
 # --- Helpers ---------------------------------------------------------------
 
@@ -293,6 +359,7 @@ fi
 cleanup_worktrees
 git -C "$REPO_ROOT" worktree add "$TMP_BASELINE" "$BASELINE_REF"
 overlay_example_data "$TMP_BASELINE"  "baseline"
+RESTORE_BASELINE=1   # arm restore: we're about to mutate $BASELINE_ENV
 run_pipeline       "$TMP_BASELINE"  "$BASELINE_CONFIG"  "$BASELINE_ENV"  "baseline"
 
 BASELINE_OUT_ROOT=$(
@@ -323,15 +390,14 @@ _copy_golden_payload(src, dst)
 print(f'Copied tracked files into {dst}')
 "
     CAPTURE_EXIT=$?
-    echo
-    echo "Restoring $BASELINE_ENV install to point at $REPO_ROOT"
-    (cd "$REPO_ROOT" && conda run -n "$BASELINE_ENV" pip install -e . >/dev/null) || true
+    # Dedicated-env restore to $REPO_ROOT is handled by the on_exit trap.
     exit $CAPTURE_EXIT
 fi
 
 # --- Compare mode: also run candidate side, then diff. ---------------------
 git -C "$REPO_ROOT" worktree add "$TMP_CANDIDATE" "$CANDIDATE_REF"
 overlay_example_data "$TMP_CANDIDATE" "candidate"
+RESTORE_CANDIDATE=1   # arm restore: we're about to mutate $CANDIDATE_ENV
 run_pipeline       "$TMP_CANDIDATE" "$CANDIDATE_CONFIG" "$CANDIDATE_ENV" "candidate"
 
 CANDIDATE_OUT_ROOT=$(
@@ -360,9 +426,9 @@ DIFF_EXIT=0
         --candidate "$CANDIDATE_DATA_OUT" ) || DIFF_EXIT=$?
 
 # --- Restore ---------------------------------------------------------------
-echo
-echo "Restoring envs to point at $REPO_ROOT"
-(cd "$REPO_ROOT" && conda run -n "$CANDIDATE_ENV" pip install -e . >/dev/null) || true
-(cd "$REPO_ROOT" && conda run -n "$BASELINE_ENV"  pip install -e . >/dev/null) || true
+# Dedicated-env restore to $REPO_ROOT is handled by the on_exit trap, which
+# fires on ANY exit (success, error, Ctrl-C).  A mid-run crash therefore can
+# never leave a dedicated env's editable install pointing at a /tmp worktree
+# that cleanup is about to delete — the original hijack-and-vanish bug.
 
 exit $DIFF_EXIT
