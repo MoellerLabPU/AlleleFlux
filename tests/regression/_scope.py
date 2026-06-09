@@ -6,13 +6,19 @@ reference, and both must apply the **same** contract or they disagree:
 * ``test_pipeline_e2e.py`` (via ``conftest.SCENARIOS``) — snapshot-based.
 * ``_diff_outputs.py`` (via ``diff_branches.sh``) — live cross-branch.
 
-This module is that single source of truth.  It lives here — not in
-``compare.py`` (which stays a generic, AlleleFlux-agnostic oracle) and not in
-``conftest.py`` (which imports pytest, and ``_diff_outputs`` must not) — so both
-importers stay clean.
+This module is that single source of truth for the whole comparison contract:
+the file-selection scope (``STAT_COMPARE_ONLY`` / ``STAT_ALLOW_GOLDEN_ONLY`` /
+the per-scenario ``exclude_substrings``), the float tolerances, AND the
+column-level rules (``SIGN_INSENSITIVE_SUBSTRINGS`` / ``IGNORE_VALUE_SUBSTRINGS``).
+``compare.py`` imports the column-rules from here rather than hard-coding
+AlleleFlux column names, so its mechanism stays generic and all AlleleFlux
+comparison knowledge sits in one file.  It lives here — not in ``conftest.py``
+(which imports pytest, and ``compare`` / ``_diff_outputs`` must not) — and this
+module itself imports nothing beyond ``__future__``, so every importer stays
+clean.
 
 The goal: verify the branch produces the same *science* as main while ignoring
-intentional structural drift.  Rationale per prefix below.
+intentional structural drift.  Rationale per prefix / list below.
 """
 
 from __future__ import annotations
@@ -56,6 +62,39 @@ STAT_ALLOW_GOLDEN_ONLY = ["scores/processed/combined"]
 # same float precision.
 STAT_RTOL = 1e-5
 STAT_ATOL = 1e-3
+
+# --- How to compare specific columns --------------------------------------
+# These two lists are the column-level half of the contract: they tell the
+# comparator how to treat named columns whose raw values are non-deterministic
+# run-to-run.  They live here (not hard-coded in compare.py) so all AlleleFlux
+# comparison knowledge sits in one place; compare.py imports them and both the
+# pytest e2e and the live ``_diff_outputs`` tool apply the identical rules.
+
+# Substrings identifying allele-frequency *derivative* columns, compared on
+# ABSOLUTE value.  The pipeline has an upstream non-determinism that flips the
+# sign of pre-vs-post differences depending on sample iteration order, so a
+# column can be (+0.5, -0.5) on one run and (-0.5, +0.5) on the next.  Magnitude
+# must still match — this is sign-insensitive, NOT magnitude-insensitive.  When
+# the root cause is fixed, empty this list and the columns go back to signed.
+SIGN_INSENSITIVE_SUBSTRINGS = (
+    "_change",
+    "_diff_mean",
+    "_diff",
+)
+
+# Substrings identifying NON-DETERMINISTIC diagnostic columns whose *values*
+# vary run-to-run and so must not gate equivalence.  The statsmodels LMM
+# optimizer emits a run-dependent number of convergence warnings — and can flip
+# the per-fit ``converged`` boolean — on near-degenerate positions (e.g. p≈1.0
+# perfect ties), while the scientific outputs (p-value, coefficient, t-value) on
+# those very rows are identical.  These columns are still required to be PRESENT
+# (the comparator's schema gate catches a dropped/renamed column); only their
+# *values* are skipped.  ``"_warnings"`` also matches ``"_n_warnings"`` as a
+# substring, so one token covers both the warning text and the count.
+IGNORE_VALUE_SUBSTRINGS = (
+    "_warnings",       # {NUC}_warnings (text) and {NUC}_n_warnings (count)
+    "_converged_LMM",  # per-fit convergence flag
+)
 
 # --- Per-scenario carve-outs ----------------------------------------------
 # Substrings matched anywhere in a golden file's relative path, applied AFTER

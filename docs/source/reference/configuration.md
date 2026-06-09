@@ -35,6 +35,8 @@ Paths to required input files.
 | `metadata_path` | Path to sample metadata TSV file. Must contain columns: `sample_id`, `bam_path`, `subjectID`, `group`, `replicate`. For longitudinal data, also include `time`. |
 | `gtdb_path` | Path to GTDB-Tk taxonomy file (`gtdbtk.bac120.summary.tsv`). Used for taxonomic aggregation of scores. |
 | `mag_mapping_path` | Path to contig-to-MAG mapping file (TSV with `contig_name` and `mag_id` columns). |
+| `profiles_path` | *(Optional)* Path to an existing `profiles/` directory from a prior run. Reuses **only** the Step 1 pileup output; QC and the allele-frequency cache are still rebuilt. See [Artifact Reuse and Null Runs](../usage/artifact_reuse_and_null_runs.md). |
+| `reuse_from` | *(Optional)* Path to a completed run's **data-type output dir** (e.g. `.../output/longitudinal`). Reuses profiles **+ QC + allele-frequency cache** — only the group-dependent tail re-runs. Works standalone (no permutation required). See [Artifact Reuse and Null Runs](../usage/artifact_reuse_and_null_runs.md). |
 
 **Example:**
 

@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
+    input_has_column,
     load_allele_freq_inputs,
     load_and_filter_data,
     relabel_groups_from_metadata,
@@ -758,8 +759,11 @@ def main():
         "replicate": "category",
     }
     # Permuted run: ensure the per-sample join key is read so the cache can be
-    # relabeled (the usecols-based loaders below would otherwise drop it).
-    if args.permuted_metadata:
+    # relabeled (the usecols-based loaders below would otherwise drop it).  Only
+    # force it when the input actually carries sample_id: the across_time wide
+    # input (allele_analysis output) has none and is already relabeled upstream,
+    # so demanding the column would break the usecols-based parquet read.
+    if args.permuted_metadata and input_has_column(args.input_df, "sample_id"):
         dtype_map["sample_id"] = str
 
     # Conditional data loading strategy.

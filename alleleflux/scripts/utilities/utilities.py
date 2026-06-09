@@ -5,6 +5,7 @@ from functools import reduce
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 from Bio import SeqIO
 
 # Set up logger for this module
@@ -498,6 +499,37 @@ def load_and_filter_data(
         f"{len(filtered_counts_df.groupby(['contig', 'position'], dropna=False)):,} unique positions remaining after filtering."
     )
     return filtered_counts_df
+
+
+def input_has_column(paths, column: str) -> bool:
+    """Return True if the first input file's header exposes ``column``.
+
+    Cheap header/schema probe (no full data read): reads a parquet file's
+    schema or a TSV's header row only.  This is the guard for the *other* half
+    of the reuse-based null seam (see :func:`relabel_groups_from_metadata`): a
+    permuted run forces the per-sample join key (``sample_id``) into the
+    usecols-based read so the cache can be relabeled, but the wide
+    ``across_time`` inputs (the ``allele_analysis`` output, already relabeled
+    upstream) carry **no** ``sample_id`` — demanding it there would break the
+    parquet read with ``ArrowInvalid``.  Probe first, force only when present.
+
+    Parameters
+    ----------
+    paths : str | pathlib.Path | list | tuple
+        Input path or list of paths; only the first is probed.
+    column : str
+        Column name to look for in the header/schema.
+
+    Returns
+    -------
+    bool
+        True if the (first) input file exposes ``column``.
+    """
+    sample_path = paths[0] if isinstance(paths, (list, tuple)) else paths
+    sample_path = str(sample_path)
+    if sample_path.endswith(".parquet"):
+        return column in pq.read_schema(sample_path).names
+    return column in pd.read_csv(sample_path, sep="\t", nrows=0).columns
 
 
 def relabel_groups_from_metadata(df, permuted_metadata, key="sample_id"):

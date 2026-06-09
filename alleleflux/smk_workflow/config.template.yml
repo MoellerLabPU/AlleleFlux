@@ -104,6 +104,17 @@ permutation:
   # seeds: [1, 2, 3]              # Explicit seed list (overrides n_permutations) for a reproducible null set.
   output_subdir: "permuted"       # Subdir under output.root_dir for the per-seed permuted runs.
 
+  # --- Bring-your-own permuted metadata (advanced; skips the generation step) ---
+  # By default (above) AlleleFlux GENERATES one permuted sheet per pair per seed
+  # via alleleflux-permute-metadata, using unit/block/swaps/n_permutations.
+  # If you already have permuted sheets (a fixed design, an external tool, or a
+  # reproducibility archive), drop them in a directory and point this key at it.
+  # The unit/block/swaps/seeds knobs above are then ignored; reuse_from is still
+  # required. Files MUST follow the naming convention so each pair is found:
+  #   permuted_metadata_<treatment>_<control>.tsv   (e.g. permuted_metadata_treatment_control.tsv)
+  #
+  # permuted_metadata_dir: "/path/to/sheets"
+
 # Quality Control Parameters
 # --------------------------
 quality_control:

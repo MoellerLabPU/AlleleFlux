@@ -27,8 +27,8 @@ once for the **single** data type — so both code paths get coverage.
 
 | Command | What it does | Expect |
 |---------|--------------|--------|
-| `pytest tests/ -m "not regression"` | Fast unit loop (module tests + 14 comparator tests), no pipeline | All pass, seconds |
-| `pytest tests/regression/test_compare.py -v` | The 14 comparator unit tests only | `14 passed`, ~3 s |
+| `pytest tests/ -m "not regression"` | Fast unit loop (module tests + 18 comparator tests), no pipeline | All pass, seconds |
+| `pytest tests/regression/test_compare.py -v` | The 18 comparator unit tests only | `18 passed`, ~3 s |
 | `conda run -n alleleflux-dev --no-capture-output python -m pytest tests/regression/ -v` | Longitudinal pipeline + **scoped, float32-tolerant** diff vs the main-derived golden | `PASS` if the branch's statistical outputs match `main` within float32 tolerance; ~60 s |
 | `… --regression-scenario single` | Same, for the single-timepoint data type | `PASS`/`FAIL` per scenario |
 | `… --regression-scenario all` | Both scenarios in sequence | both `PASS` |
@@ -106,10 +106,11 @@ scientifically meaningful change (a p-value moving 0.01, a frequency moving
 
 | File | Purpose |
 |------|---------|
-| `test_pipeline_e2e.py` | The test. Runs `alleleflux run` and diffs outputs. Parametrized over `longitudinal` and `single` scenarios. |
+| `test_pipeline_e2e.py` | The e2e test. Runs `alleleflux run` and diffs outputs against the committed golden. Parametrized over `longitudinal` and `single` scenarios. |
+| `test_permutation_equivalence.py` | Proves reuse+relabel == full rebuild for permuted (null) runs. No committed golden — computes both sides live (~3 pipeline runs/scenario). Shares the same `scenario` fixture, so it's parametrized over `--regression-scenario` too (default `longitudinal` locally; CI runs `all`). |
 | `compare.py`           | File comparator (TSV / TSV.gz / parquet / JSON), tolerant of row order and tiny float drift. |
 | `_diff_outputs.py`     | Thin CLI wrapper around `compare.compare_trees`, used by `diff_branches.sh`. |
-| `test_compare.py`      | Fourteen unit tests pinning the comparator's contract — row/column-order tolerance, sign-folding, the scope filters (`include_prefixes` / `allow_golden_only`), and tolerance threading (rapid feedback if `compare.py` ever drifts). |
+| `test_compare.py`      | Eighteen unit tests pinning the comparator's contract — row/column-order tolerance, sign-folding, the non-deterministic-diagnostic-column skip (`*_warnings` / `*_converged_LMM`), the scope filters (`include_prefixes` / `allow_golden_only`), and tolerance threading (rapid feedback if `compare.py` ever drifts). |
 | `conftest.py`          | Pytest options (`--update-golden`, `--regression-scenario`, `--regression-config`). |
 | `diff_branches.sh`     | Bash tool for branch-vs-branch comparison and main-derived golden capture. See "Which command for which task" below. |
 | `golden/`              | Committed snapshot of expected outputs. Subdirectories per scenario: `golden/longitudinal/` and `golden/single/`. |
@@ -426,7 +427,7 @@ This excludes the slow regression test and runs in a few seconds:
 pytest tests/ -m "not regression" -v
 ```
 
-You should see all unit tests pass (244 module unit tests + 14 comparator
+You should see all unit tests pass (292 module unit tests + 18 comparator
 tests). If any fail here, fix them before touching the regression test — the
 comparator's own unit tests must be green first.
 
@@ -698,6 +699,7 @@ exercises the maximum amount of pipeline code.
 | Float drift within `rtol` / `atol` | OK (default `1e-9` / `1e-12`; the bundled scenarios loosen to `1e-5` / `1e-3` — see below) |
 | `NaN` vs `NaN`                   | OK |
 | Sign flip on allele-frequency diff columns (`*_change`, `*_diff_mean`, `*_diff`) | OK — compared on absolute value, see below |
+| Non-deterministic LMM diagnostic columns (`*_warnings`, `*_converged_LMM`) | OK — *value* skipped (column still required present); statsmodels convergence noise, see below |
 | Files outside `compare_only` scope | Ignored (not compared, not flagged) — see [scope](#what-the-e2e-checks-scope--tolerance) |
 | Golden-only files under `allow_golden_only` | Ignored (intended absence, e.g. omitted taxa levels) |
 | Missing / extra columns (in-scope) | **FAIL** |
@@ -725,8 +727,20 @@ multiprocessing pool, so running the same code on the same inputs can produce
 `A=+0.5, C=-0.5` on one run and `A=-0.5, C=+0.5` on the next. Until that root
 cause is fixed, the comparator compares the absolute value of these columns.
 
-If you fix the determinism, drop `_SIGN_INSENSITIVE_SUBSTRINGS` in
-`compare.py` so the comparator is strict again.
+If you fix the determinism, empty `SIGN_INSENSITIVE_SUBSTRINGS` in `_scope.py`
+(where the column-level comparison rules now live, alongside the scope and
+tolerance contract) so the comparator is strict again.
+
+### Why skip the LMM diagnostic columns
+
+When LMM is enabled, the per-fit diagnostic columns (`*_warnings`,
+`*_n_warnings`, `*_converged_LMM`) are **not reproducible** run-to-run: the
+statsmodels optimizer emits a run-dependent number of convergence warnings — and
+can flip the `converged` boolean — on near-degenerate positions (e.g. p≈1.0
+perfect ties), while the *scientific* outputs (p-value, coefficient, t-value) on
+those same rows are identical. The comparator therefore skips these columns'
+values (they are still required to be *present* — a dropped column still fails
+the schema gate). The list lives in `_scope.py` as `IGNORE_VALUE_SUBSTRINGS`.
 
 ## When the test is the wrong tool
 

@@ -4,8 +4,10 @@ The entire reuse-based permutation feature rests on one equality:
 
     reuse + relabel  ==  full rebuild from permuted metadata
 
-This test proves it end-to-end on the bundled longitudinal example, computing
-**both sides live** (no committed golden to maintain):
+This test proves it end-to-end on the bundled example(s) — parametrized over
+the regression ``scenario`` (longitudinal and/or single, same knob as the e2e:
+``--regression-scenario {longitudinal,single,all}``) — computing **both sides
+live** (no committed golden to maintain):
 
   1. **normal**  — a real run; its profiles/QC/allele-freq cache become the
      reuse source.
@@ -21,8 +23,14 @@ the e2e uses (``_scope.STAT_*``).  A sanity assertion also confirms the
 permutation actually *changed* the result vs the normal run (so a no-op
 permutation can't make the gate pass trivially).
 
-Marked ``regression`` (≈3 pipeline runs, ~2-3 min); deselected from the fast
-unit loop via ``-m "not regression"``.  Requires the ``alleleflux`` CLI in the
+To exercise the full reuse-sensitive surface, every run turns on ``use_lmm`` and
+``run_within_group_tests`` (see ``write_cfg``).  This puts the across-time LMM —
+the one stat that relabels from a wide parquet lacking ``sample_id`` — under the
+gate; ``compare.py`` skips the non-deterministic LMM convergence-diagnostic
+columns (``*_warnings`` / ``*_converged_LMM``) so only the science is compared.
+
+Marked ``regression`` (≈3 pipeline runs per scenario, ~2-3 min each); deselected
+from the fast unit loop via ``-m "not regression"``.  Requires the ``alleleflux`` CLI in the
 active conda env plus ``bwa``/``samtools`` (same prerequisites as the e2e).
 """
 
@@ -61,9 +69,14 @@ def _run(cmd, cwd):
 
 
 @pytest.mark.regression
-def test_permutation_reuse_equals_rebuild(tmp_path):
-    """reuse+relabel produces identical statistical outputs to a full rebuild."""
-    bundle = SCENARIOS["longitudinal"]
+def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
+    """reuse+relabel produces identical statistical outputs to a full rebuild.
+
+    Parametrized over ``scenario`` (longitudinal/single) by conftest's
+    ``pytest_generate_tests`` — the same ``--regression-scenario`` knob the e2e
+    uses.  Everything scenario-specific is read from ``bundle`` below.
+    """
+    bundle = SCENARIOS[scenario]
     example_dir = Path(bundle["example_data_dir"])
     base_config = example_dir / bundle["config_name"]
     assert base_config.exists(), f"base config missing: {base_config}"
@@ -82,6 +95,16 @@ def test_permutation_reuse_equals_rebuild(tmp_path):
 
     def write_cfg(name: str, mutate) -> Path:
         c = yaml.safe_load(yaml.safe_dump(cfg))  # deep copy
+        # Exercise the full reuse-sensitive stat surface in EVERY run
+        # (normal/rebuild/reuse must run the SAME tests to be comparable): turn
+        # on LMM and the within-group across-time tests so the reuse+relabel
+        # path is verified for the sample_id-sensitive across_time stats too —
+        # not just the two-sample path.  (CMH stays at the example default: off,
+        # because mantelhaen is unstable on the example's small replicate counts,
+        # a data constraint orthogonal to the reuse-path equivalence under test.)
+        c.setdefault("analysis", {})
+        c["analysis"]["use_lmm"] = True
+        c["analysis"]["run_within_group_tests"] = True
         mutate(c)
         p = tmp_path / name
         with p.open("w") as fh:
@@ -145,6 +168,15 @@ def test_permutation_reuse_equals_rebuild(tmp_path):
     )
     _run(["alleleflux", "run", "--config", str(reuse_cfg), "--threads", "4"], example_dir)
     reuse_data = reuse_out / bundle["pipeline_data_dir"]
+
+    # Surface the three output trees so they can be inspected after the run.
+    # pytest keeps the last 3 tmp_path roots under /tmp/pytest-of-$USER/; pass
+    # --basetemp=<dir> to pin them somewhere stable.  See these with
+    # `-o log_cli=true --log-cli-level=INFO` (or `-s`).
+    logger.info(f"[{scenario}] permutation equivalence output trees:")
+    logger.info(f"[{scenario}]   normal  (reuse source) : {normal_data}")
+    logger.info(f"[{scenario}]   rebuild (ground truth) : {rebuild_data}")
+    logger.info(f"[{scenario}]   reuse   (new way)      : {reuse_data}")
 
     # GATE: reuse (B) must equal rebuild (A) on the scoped statistical outputs.
     gate = compare_trees(

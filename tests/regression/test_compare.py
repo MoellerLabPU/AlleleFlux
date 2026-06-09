@@ -94,7 +94,7 @@ def test_column_order_does_not_matter(tmp_path):
 def test_sign_flip_on_diff_column_is_tolerated(tmp_path):
     """Derivative columns are compared on magnitude: a sign flip must be forgiven.
 
-    Columns matching ``_SIGN_INSENSITIVE_SUBSTRINGS`` (here ``_diff_mean``)
+    Columns matching ``SIGN_INSENSITIVE_SUBSTRINGS`` (_scope.py; here ``_diff_mean``)
     have an unstable sign upstream, so the comparator folds the sign away.
     This is the "forgive the flip" half of the sign-insensitive contract;
     see ``test_magnitude_change_on_diff_column_still_fails`` for the other half.
@@ -153,6 +153,77 @@ def test_non_diff_column_sign_change_fails(tmp_path):
     _write_tsv(g_path, g)
     # Act + Assert: signed comparison on a normal column -> AssertionError.
     with pytest.raises(AssertionError):
+        compare_tables(a_path, g_path)
+
+
+def test_nondeterministic_diag_column_value_is_ignored(tmp_path):
+    """LMM convergence-diagnostic columns are compared on presence, not value.
+
+    ``*_warnings`` / ``*_n_warnings`` / ``*_converged_LMM`` are non-reproducible
+    run-to-run — the statsmodels optimizer's warning count and converged flag
+    wobble on near-degenerate fits while the p-value on the same row is
+    identical.  A pure diagnostic difference must therefore be forgiven.  This
+    is the "forgive the wobble" half; the guardrails are the next two tests.
+    """
+    # Arrange: identical p-values, but the diagnostic columns differ.
+    g = pd.DataFrame({
+        "contig": ["c1", "c1"],
+        "position": [10, 20],
+        "A_p_value_LMM": [0.374867, 1.0],
+        "A_n_warnings": [4, 12],
+        "A_converged_LMM": [True, False],
+    })
+    a = g.copy()
+    a["A_n_warnings"] = [8, 12]            # warning count wobbles on row 0
+    a["A_converged_LMM"] = [False, False]  # converged flag flips on row 0
+    a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
+    _write_tsv(a_path, a)
+    _write_tsv(g_path, g)
+    # Act + Assert: only diagnostic columns differ -> match.
+    compare_tables(a_path, g_path)  # must not raise
+
+
+def test_real_value_diff_beside_ignored_diag_still_fails(tmp_path):
+    """Skipping diagnostic columns must not blind the comparator to the science.
+
+    The guardrail: even when a non-deterministic ``A_n_warnings`` also differs,
+    a genuine ``A_p_value_LMM`` change must still raise.  The value-skip is
+    scoped to the diagnostic columns, not the row or the file.
+    """
+    # Arrange: a real p-value change AND a diagnostic wobble in the same row.
+    g = pd.DataFrame({
+        "contig": ["c1"], "position": [10],
+        "A_p_value_LMM": [0.374867], "A_n_warnings": [4],
+    })
+    a = g.copy()
+    a["A_p_value_LMM"] = [0.99]  # real regression
+    a["A_n_warnings"] = [9]      # plus diagnostic noise
+    a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
+    _write_tsv(a_path, a)
+    _write_tsv(g_path, g)
+    # Act + Assert: the p-value change is still caught despite the diag noise.
+    with pytest.raises(AssertionError, match="mismatched"):
+        compare_tables(a_path, g_path)
+
+
+def test_dropping_ignored_diag_column_still_fails_schema(tmp_path):
+    """Value-skip is not presence-skip: a dropped diagnostic column still fails.
+
+    The diagnostic columns are exempt from VALUE comparison but NOT from the
+    schema gate — removing ``A_converged_LMM`` entirely is a real schema
+    regression and must be reported as a column-set mismatch.
+    """
+    # Arrange: golden has the diagnostic column; actual drops it.
+    g = pd.DataFrame({
+        "contig": ["c1"], "position": [10],
+        "A_p_value_LMM": [0.5], "A_converged_LMM": [True],
+    })
+    a = g.drop(columns=["A_converged_LMM"])
+    a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
+    _write_tsv(a_path, a)
+    _write_tsv(g_path, g)
+    # Act + Assert: schema gate fires before any value comparison.
+    with pytest.raises(AssertionError, match="column-set mismatch"):
         compare_tables(a_path, g_path)
 
 

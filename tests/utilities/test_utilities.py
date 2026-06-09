@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""Unit tests for ``relabel_groups_from_metadata`` (Phase 1 of the null-run feature).
+"""Unit tests for ``alleleflux.scripts.utilities.utilities``.
 
-This helper is the in-memory seam that lets a permuted run reuse the real run's
-cache/QC: it re-derives permuted ``group``/``subjectID`` labels by joining the
-loaded frame to a permuted metadata sheet on ``sample_id``.  These tests pin the
-contract every cache consumer relies on — correct join, idempotency, identity
-no-op, categorical preservation, graceful handling of a missing key, and the
-numeric-group → str coercion guard.
+Currently covers the two helpers that form the in-memory seam of the
+reuse-based null/permutation feature:
+
+* ``relabel_groups_from_metadata`` — re-derives permuted ``group`` labels by
+  joining a loaded frame to a permuted metadata sheet on ``sample_id``.  Tests
+  pin the contract every cache consumer relies on: correct join, idempotency,
+  identity no-op, categorical preservation, graceful handling of a missing key,
+  and the numeric-group → str coercion guard.
+* ``input_has_column`` — the cheap header/schema probe that guards the *other*
+  half of that seam (force the ``sample_id`` read only when the input actually
+  carries it).  Tests pin present-vs-absent for TSV, TSV.gz, parquet, and the
+  list-of-paths form.
+
+Add new ``TestX`` classes here for other utilities helpers rather than spawning
+a separate file per function.
 """
 
 import tempfile
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from alleleflux.scripts.utilities.utilities import relabel_groups_from_metadata
+from alleleflux.scripts.utilities.utilities import (
+    input_has_column,
+    relabel_groups_from_metadata,
+)
 
 
 def _cache_like():
@@ -116,6 +129,55 @@ class TestRelabelGroups(unittest.TestCase):
             _permuted_meta().to_csv(p, sep="\t", index=False)
             out = relabel_groups_from_metadata(_cache_like(), str(p))
         self.assertEqual(list(out["group"]), ["A", "A", "B", "B", "A", "A"])
+
+
+class TestInputHasColumn(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        # cache-like frame: carries sample_id (the per-sample join key)
+        self.cache = pd.DataFrame(
+            {"sample_id": ["s1", "s2"], "group": ["A", "B"], "A_frequency": [0.1, 0.2]}
+        )
+        # wide across_time-like frame: keyed by replicate, NO sample_id
+        self.wide = pd.DataFrame(
+            {"replicate": ["A", "B"], "group": ["A", "B"], "A_frequency_pre": [0.1, 0.2]}
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_tsv_present(self):
+        p = self.tmp / "cache.tsv"
+        self.cache.to_csv(p, sep="\t", index=False)
+        self.assertTrue(input_has_column(p, "sample_id"))
+
+    def test_tsv_absent(self):
+        p = self.tmp / "wide.tsv"
+        self.wide.to_csv(p, sep="\t", index=False)
+        self.assertFalse(input_has_column(p, "sample_id"))
+
+    def test_tsv_gz_present(self):
+        p = self.tmp / "cache.tsv.gz"
+        self.cache.to_csv(p, sep="\t", index=False, compression="gzip")
+        self.assertTrue(input_has_column(p, "sample_id"))
+
+    def test_parquet_present(self):
+        p = self.tmp / "cache.parquet"
+        self.cache.to_parquet(p)
+        self.assertTrue(input_has_column(p, "sample_id"))
+
+    def test_parquet_absent(self):
+        """The bug scenario: a wide across_time parquet has no sample_id."""
+        p = self.tmp / "wide.parquet"
+        self.wide.to_parquet(p)
+        self.assertFalse(input_has_column(p, "sample_id"))
+
+    def test_list_of_paths_probes_first(self):
+        p = self.tmp / "cache.parquet"
+        self.cache.to_parquet(p)
+        self.assertTrue(input_has_column([p], "sample_id"))
+        self.assertFalse(input_has_column([str(p)], "nonexistent_col"))
 
 
 if __name__ == "__main__":

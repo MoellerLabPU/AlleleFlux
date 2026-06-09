@@ -27,6 +27,15 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+# Column-level comparison rules (which columns are sign-insensitive, which are
+# non-deterministic diagnostics skipped on value) live in _scope.py alongside
+# the rest of the AlleleFlux comparison contract — imported here so this
+# mechanism carries no hard-coded AlleleFlux column names.
+from tests.regression._scope import (
+    IGNORE_VALUE_SUBSTRINGS,
+    SIGN_INSENSITIVE_SUBSTRINGS,
+)
+
 logger = logging.getLogger(__name__)
 
 # How many mismatched rows to print before truncating.  Keeps assertion
@@ -39,24 +48,46 @@ MAX_DIFF_ROWS = 10
 DEFAULT_RTOL = 1e-9
 DEFAULT_ATOL = 1e-12
 
-# Substrings identifying allele-frequency *derivative* columns.  These are
-# compared on absolute value because the pipeline currently has an upstream
-# non-determinism that flips the sign of pre-vs-post differences depending
-# on sample iteration order.  When that root cause is fixed, drop this
-# list and the columns will go back to ordinary signed comparison.
-_SIGN_INSENSITIVE_SUBSTRINGS = (
-    "_change",
-    "_diff_mean",
-    "_diff",
-)
+
+def _is_ignored_value_column(col: str) -> bool:
+    """Return True for non-deterministic diagnostic columns to skip on value.
+
+    Matches any column whose name contains a token in
+    ``IGNORE_VALUE_SUBSTRINGS`` (defined in _scope.py — the LMM
+    convergence-warning and converged-flag columns).  Such columns must still
+    EXIST in both files — the schema gate enforces that — but their cell values
+    are not compared, because the statsmodels optimizer produces a run-dependent
+    warning count / converged flag on near-degenerate fits while the p-value
+    stays identical.
+
+    Parameters
+    ----------
+    col : str
+        Column name to test.
+
+    Returns
+    -------
+    bool
+
+    Examples
+    --------
+    >>> _is_ignored_value_column("A_n_warnings")
+    True
+    >>> _is_ignored_value_column("A_converged_LMM")
+    True
+    >>> _is_ignored_value_column("A_p_value_LMM")   # the science — still compared
+    False
+    """
+    return any(s in col for s in IGNORE_VALUE_SUBSTRINGS)
 
 
 def _is_sign_insensitive(col: str) -> bool:
     """Return True for columns whose sign is unstable across pipeline runs.
 
-    A column matches if its name contains any of ``_SIGN_INSENSITIVE_SUBSTRINGS``
-    (``_change``, ``_diff_mean``, ``_diff``).  Matching columns are compared on
-    magnitude only — see the module-level comment for the upstream root cause.
+    A column matches if its name contains any of ``SIGN_INSENSITIVE_SUBSTRINGS``
+    (defined in _scope.py: ``_change``, ``_diff_mean``, ``_diff``).  Matching
+    columns are compared on magnitude only — see _scope.py for the upstream
+    root cause.
 
     Parameters
     ----------
@@ -76,7 +107,7 @@ def _is_sign_insensitive(col: str) -> bool:
     >>> _is_sign_insensitive("A_frequency")   # plain frequency — sign matters
     False
     """
-    return any(s in col for s in _SIGN_INSENSITIVE_SUBSTRINGS)
+    return any(s in col for s in SIGN_INSENSITIVE_SUBSTRINGS)
 
 
 def _read_table(path: Path) -> pd.DataFrame:
@@ -299,6 +330,11 @@ def compare_tables(
     # diff_mask[i] becomes True if ANY column disagrees in row i.
     diff_mask = pd.Series(False, index=a_sorted.index)
     for col in g_sorted.columns:
+        # Non-deterministic diagnostic columns (LMM convergence warnings /
+        # converged flag) are present in the schema but their values are not
+        # reproducible run-to-run — skip the value check, keep the schema gate.
+        if _is_ignored_value_column(col):
+            continue
         a_col = a_sorted[col]
         g_col = g_sorted[col]
         # is_float_dtype is the fork in the road: float columns get the
@@ -312,7 +348,7 @@ def compare_tables(
             if _is_sign_insensitive(col):
                 # Fold sign away for derivative columns whose +/- is unstable
                 # upstream — magnitude must still match, so this is NOT
-                # magnitude-insensitive.  See _SIGN_INSENSITIVE_SUBSTRINGS.
+                # magnitude-insensitive.  See SIGN_INSENSITIVE_SUBSTRINGS (_scope.py).
                 a_vals = np.abs(a_vals)
                 g_vals = np.abs(g_vals)
             # equal_nan=True so a NaN in the same cell of both files matches.

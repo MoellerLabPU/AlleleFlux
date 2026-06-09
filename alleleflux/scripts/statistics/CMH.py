@@ -534,7 +534,11 @@ def main() -> None:
         **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
     # Permuted run: ensure the per-sample join key is read so the cache can be
-    # relabeled (the usecols-based loaders below would otherwise drop it).
+    # relabeled (the usecols-based loaders below would otherwise drop it).  Every
+    # CMH input is the raw allele-freq cache (single/longitudinal/across_time all
+    # read ``_cache_paths_for_combination``), which always carries sample_id, so
+    # this is unconditional — unlike the LMM loader, whose across_time input is
+    # the wide allele_analysis parquet that lacks sample_id and must be probed.
     if args.permuted_metadata:
         dtype_map["sample_id"] = str
 
