@@ -192,7 +192,8 @@ rule cmh_test:
             )
             if config["statistics"].get("preprocess_between_groups", True) and DATA_TYPE == "longitudinal"
             else [],
-
+        # Permuted (null) run: depend on the per-pair sheet (generate mode only).
+        permuted_md=lambda wildcards: permuted_metadata_input(wildcards.groups),
     output:
         os.path.join(
             OUTDIR,

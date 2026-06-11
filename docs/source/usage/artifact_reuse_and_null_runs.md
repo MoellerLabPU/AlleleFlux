@@ -118,6 +118,43 @@ labels among samples and re-running the group-dependent tail. Because the scienc
 shuffle lives entirely in the `group` column, AlleleFlux reuses the real run's
 profiles/QC/cache and **relabels in memory** — it never re-profiles.
 
+### The three modes, in plain language
+
+A permutation run is always in one of three modes. In practice you only *choose* between
+two of them — let AlleleFlux make the permuted sheets for you, or hand it your own. The
+third mode is just what the top-level run does behind the scenes.
+
+- **Orchestrate — the conductor.** This is your top-level permutation config (`enabled: true`
+  with `n_permutations` or `seeds`). It runs **no analysis itself**. It loops over your
+  seeds and, for each one, spins off an independent child run. You never ask for "orchestrate"
+  explicitly — it is simply what happens when you turn permutation on and let AlleleFlux
+  generate the sheets.
+
+- **Generate — the default worker.** Each child the orchestrator spins off is a *generate*
+  run. It builds its **own** permuted sheets (one per comparison pair, for that one seed)
+  as a normal pipeline step, then runs the tail. This is the path you get automatically:
+  fresh, reproducible sheets with zero manual work. Because the generation is a tracked
+  pipeline step, a dry run (`-n`) shows the work and writes **nothing**.
+
+- **BYO (bring-your-own) — the manual override.** If you already have permuted sheets, you
+  skip both the conductor and the generation: point `permuted_metadata_dir` at your folder
+  and AlleleFlux runs the tail directly on your files. No seeds, no shuffling — your sheets
+  are used exactly as provided.
+
+| | Orchestrate | Generate | BYO |
+|---|---|---|---|
+| **What you set** | `enabled` + `seeds`/`n_permutations` | *(created automatically, one per seed)* | `enabled` + `permuted_metadata_dir` |
+| **Who makes the sheets** | — *(delegates to Generate)* | AlleleFlux, from the seed | **you**, beforehand |
+| **Runs the analysis?** | no — spawns children | yes | yes |
+| **Reproducible from a seed?** | yes | yes | up to you |
+
+:::{tip}
+**Which do I pick?** Want AlleleFlux to do everything? Set `enabled` + `n_permutations`
+(orchestrate, which fans out into generate runs for you). Already have sheets from another
+tool or a fixed design? Set `permuted_metadata_dir` (BYO). You never configure "generate"
+directly — it is the worker the orchestrator creates for each seed.
+:::
+
 ### How it works
 
 ```
@@ -128,9 +165,13 @@ real run  ──reuse_from──►  permutation orchestrator
                                 └─ ...                                              ...
 ```
 
-For each seed, the orchestrator generates one permuted metadata sheet **per comparison
-pair** (only that pair's labels are shuffled, the rest of the sheet is untouched), writes a
-per-seed leaf config, and runs the tail. Outputs land at:
+For each seed, the orchestrator writes a per-seed *leaf* config and runs it. Inside that
+leaf run, a built-in `permute_metadata` pipeline step produces one permuted metadata sheet
+**per comparison pair** (only that pair's labels are shuffled, the rest of the sheet is
+untouched), and the tail runs on those sheets. Because the sheets are produced as a tracked
+pipeline step rather than up front, a dry run (`-n`) plans the work without writing any
+sheets, and a re-run regenerates a sheet only if its seed or the source metadata changed.
+Outputs land at:
 
 ```
 <output.root_dir>/<output_subdir>/perm_<seed>/<data_type>/...

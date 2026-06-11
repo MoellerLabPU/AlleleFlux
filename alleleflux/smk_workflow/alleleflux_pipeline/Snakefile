@@ -16,6 +16,9 @@ include: "shared/dynamic_targets.smk"
 # Profiling & QC rules (formerly Step 1)
 include: "rules/profiling.smk"
 include: "rules/metadata.smk"
+# Permuted (null) sheet generation — only active when permutation.seed is set
+# (generate mode); produces the per-pair sheets consumed by the rules below.
+include: "rules/permute_metadata.smk"
 include: "rules/quality_control.smk"
 include: "rules/eligibility.smk"
 

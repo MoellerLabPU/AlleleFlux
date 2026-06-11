@@ -86,8 +86,10 @@ analysis:
 # Optional. Builds a permutation null for the divergence score by shuffling group
 # labels and re-running ONLY the group-dependent tail, reusing the real run's
 # profiles/QC/allele-frequency cache. REQUIRES input.reuse_from (a completed run).
-# One permuted metadata sheet is generated per groups_combinations pair, per seed,
-# and outputs land under <output.root_dir>/<output_subdir>/perm_<seed>/.
+# Each seed becomes one leaf run under <output.root_dir>/<output_subdir>/perm_<seed>/;
+# inside it the `permute_metadata` Snakemake rule generates one permuted sheet per
+# groups_combinations pair (tracked artifacts — regenerated only when the source
+# metadata or seed changes, and nothing is written on a dry run).
 # Labels are shuffled at the --unit level (counts preserved); only `group` changes.
 permutation:
   enabled: False                  # Master switch. When True, this run produces permuted nulls
@@ -111,7 +113,17 @@ permutation:
   # reproducibility archive), drop them in a directory and point this key at it.
   # The unit/block/swaps/seeds knobs above are then ignored; reuse_from is still
   # required. Files MUST follow the naming convention so each pair is found:
-  #   permuted_metadata_<treatment>_<control>.tsv   (e.g. permuted_metadata_treatment_control.tsv)
+  #   permuted_metadata_<treatment>_<control>.tsv
+  #
+  # Example — point at a directory holding ONE sheet per groups_combinations pair
+  # (here the single "treatment" vs "control" pair defined above; add one file per
+  # additional pair). Each sheet is a copy of input.metadata_path with the `group`
+  # column shuffled; all other columns unchanged:
+  #
+  #   permuted_metadata_dir: "/scratch/me/drido/my_permuted_sheets"
+  #     # /scratch/me/drido/my_permuted_sheets/
+  #     #   permuted_metadata_treatment_control.tsv
+  #     #   permuted_metadata_drug_control.tsv      # if you also compare drug vs control
   #
   # permuted_metadata_dir: "/path/to/sheets"
 
@@ -191,6 +203,12 @@ resources:
 # Most users should NOT need this section.
 #
 # resources_override:
+#   permute_metadata:              # Rule: permute_metadata (null-run sheet generation)
+#                                  # Sub-second label shuffle of one metadata TSV per pair;
+#                                  # the flat defaults are overkill. Keep it lean.
+#     threads_per_job: 1
+#     mem_per_job: "4G"
+#     time: "00:30:00"
 #   profile:                       # Rule: profile (sample profiling)
 #     threads_per_job: 8
 #     mem_per_job: "16G"

@@ -21,6 +21,9 @@ checkpoint eligibility_table:
         # consumed by the script, but the sentinel is what proves QC finished
         # — see common.smk for the rationale.
         qc_done=qc_sentinel("{timepoints}"),
+        # Permuted (null) run: depend on the per-pair sheet so it is built before
+        # this checkpoint (generate mode only; [] otherwise — no behaviour change).
+        permuted_md=lambda wildcards: permuted_metadata_input(wildcards.groups),
     output:
         out_fPath=os.path.join(OUTDIR, "eligibility_table_{timepoints}-{groups}.tsv"),
     params:

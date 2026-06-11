@@ -82,6 +82,9 @@ rule allele_analysis:
             OUTDIR,
             "eligibility_table_{timepoints}-{groups}.tsv",
         ),
+        # Permuted (null) run: depend on the per-pair sheet so it is built before
+        # this rule relabels the reused cache (generate mode only; [] otherwise).
+        permuted_md=lambda wildcards: permuted_metadata_input(wildcards.groups),
     output:
         allele_freq=os.path.join(
             OUTDIR,

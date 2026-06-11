@@ -401,27 +401,70 @@ if USE_REUSE:
     logger.info(f"Reusing profiles/QC/allele-freq cache from: {REUSE_DIR}")
 
 
+# Permutation mode detection
+# ---------------------------
+# A permuted (null) run can be in one of three modes, distinguished by config:
+#
+#   * Orchestrate : permutation.enabled, no ``seed``, no ``permuted_metadata_dir``
+#                   -> run_permutations() (workflow.py) fans out one leaf per
+#                      seed; the Snakemake pipeline never sees this top config.
+#   * Generate    : permutation.seed (an int) is set -> the ``permute_metadata``
+#                   rule builds the per-pair sheets under OUTDIR/permuted_metadata
+#                   and the group-dependent rules depend on them.
+#   * BYO         : permutation.permuted_metadata_dir is set (no ``seed``) ->
+#                   read user-supplied sheets directly; the permute_metadata rule
+#                   is NOT wired into the DAG.
+PERMUTATION = config.get("permutation", {})
+PERMUTATION_SEED = PERMUTATION.get("seed")
+PERMUTED_METADATA_DIR = PERMUTATION.get("permuted_metadata_dir", "")
+GENERATE_PERMUTED = bool(PERMUTATION.get("enabled") and PERMUTATION_SEED is not None)
+# Where the per-pair sheets live: generated under OUTDIR, or the BYO directory.
+PERMUTED_DIR = (
+    os.path.join(OUTDIR, "permuted_metadata")
+    if GENERATE_PERMUTED
+    else PERMUTED_METADATA_DIR
+)
+
+
+def permuted_metadata_path(groups_label):
+    """Absolute path to a comparison pair's permuted sheet (generate or BYO).
+
+    Named ``permuted_metadata_<groups_label>.tsv`` (e.g.
+    ``permuted_metadata_1D_AL.tsv``) under :data:`PERMUTED_DIR`.
+    """
+    return os.path.join(PERMUTED_DIR, f"permuted_metadata_{groups_label}.tsv")
+
+
 def permuted_metadata_flag(groups_label):
     """Return the ``--permuted_metadata`` CLI flag for a group pair, or ``""``.
 
     Permuted (null) runs relabel the reused cache/QC **in memory** from a
     per-comparison-pair permuted metadata sheet (see
-    ``alleleflux-permute-metadata`` and ``relabel_groups_from_metadata``).  The
-    pipeline writes one sheet per ``groups_combinations`` entry into
-    ``permutation.permuted_metadata_dir`` named
-    ``permuted_metadata_<groups_label>.tsv`` (e.g. ``permuted_metadata_1D_AL.tsv``).
-    Group-dependent rules pass this flag to their CLI so each consumer re-derives
-    the permuted labels at load time.  Returns ``""`` (no flag) when permutation
-    is disabled or no sheet is configured, so non-permuted runs are unaffected.
+    ``alleleflux-permute-metadata`` and ``relabel_groups_from_metadata``).  In
+    generate mode the sheet is produced by the ``permute_metadata`` rule; in BYO
+    mode it is the user-supplied file.  Group-dependent rules pass this flag to
+    their CLI so each consumer re-derives the permuted labels at load time.
+    Returns ``""`` (no flag) when permutation is disabled or no sheet directory
+    is configured, so non-permuted runs are unaffected.
     """
-    perm = config.get("permutation", {})
-    if not perm.get("enabled", False):
+    if not PERMUTATION.get("enabled", False):
         return ""
-    metadata_dir = perm.get("permuted_metadata_dir", "")
-    if not metadata_dir:
+    if not PERMUTED_DIR:
         return ""
-    path = os.path.join(metadata_dir, f"permuted_metadata_{groups_label}.tsv")
-    return f"--permuted_metadata {path}"
+    return f"--permuted_metadata {permuted_metadata_path(groups_label)}"
+
+
+def permuted_metadata_input(groups_label):
+    """Return the sheet path as a rule *dependency* — ONLY in generate mode.
+
+    In generate mode the ``permute_metadata`` rule produces the sheet, so every
+    consuming rule must declare it as an ``input`` (else Snakemake could
+    schedule the consumer before the sheet exists).  In BYO mode the sheet
+    already exists on disk and in non-permuted mode there is no sheet, so this
+    returns ``[]`` and those runs gain no dependency — behaviour is byte-for-byte
+    unchanged.
+    """
+    return [permuted_metadata_path(groups_label)] if GENERATE_PERMUTED else []
 
 # Profile reuse configuration
 # If profiles_path is specified and exists, use existing profiles instead of

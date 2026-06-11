@@ -13,9 +13,11 @@ import logging
 import multiprocessing
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from importlib import resources as importlib_resources
 from pathlib import Path
@@ -438,18 +440,20 @@ def run_permutations(
 ) -> int:
     """Fan out N per-comparison-pair permuted (null) runs that reuse a real run.
 
-    For each seed, generate one permuted metadata sheet per
-    ``groups_combinations`` entry (via ``alleleflux-permute-metadata``,
-    restricted to that pair), write a per-seed *leaf* config, and run the
-    group-dependent tail through :func:`execute_workflow`.  The leaf config sets
-    ``permutation.permuted_metadata_dir`` so it does NOT re-orchestrate, and
-    inherits ``input.reuse_from`` so profiling/QC/cache are reused.
+    For each seed, write a per-seed *leaf* config carrying ``permutation.seed``
+    (singular) and run the group-dependent tail through
+    :func:`execute_workflow`.  The leaf is a *generate-mode* permuted run: the
+    in-DAG ``permute_metadata`` rule builds one permuted metadata sheet per
+    ``groups_combinations`` entry from that seed (so the sheets are tracked
+    artifacts — provenance + skip-if-exists, and nothing is written on a dry
+    run).  Carrying ``seed`` also marks the leaf so it does NOT re-orchestrate,
+    and it inherits ``input.reuse_from`` so profiling/QC/cache are reused.
 
     Layout (under the orchestrating config's ``output.root_dir``)::
 
         <root>/<output_subdir>/perm_<seed>/
-            permuted_metadata/permuted_metadata_<treatment>_<control>.tsv
             config_perm_<seed>.yml
+            <data_type>/permuted_metadata/permuted_metadata_<t>_<c>.tsv
             <data_type>/...                      # scores, stats, eligibility
 
     Returns the worst (max) leaf exit code; stops early on the first failure.
@@ -463,8 +467,9 @@ def run_permutations(
 
     wd = Path(working_dir)
 
-    # Resolve the base output and the original metadata relative to working_dir
-    # so the permute subprocess and leaf configs use unambiguous absolute paths.
+    # Resolve the base output and the original metadata to absolute paths so the
+    # leaf configs (which run in their own working dir) reference them
+    # unambiguously regardless of the leaf's cwd.
     base_output = Path(config["output"]["root_dir"])
     if not base_output.is_absolute():
         base_output = (wd / base_output).resolve()
@@ -493,56 +498,62 @@ def run_permutations(
     exit_codes = []
     for idx, seed in enumerate(seeds, start=1):
         seed_dir = base_output / subdir / f"perm_{seed}"
-        md_dir = seed_dir / "permuted_metadata"
-        md_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"[permutation {idx}/{len(seeds)}] seed={seed} → {seed_dir}")
 
-        # 1. One permuted sheet per comparison pair (only that pair's labels move).
-        for treatment, control in pairs:
-            out_tsv = md_dir / f"permuted_metadata_{treatment}_{control}.tsv"
-            cmd = [
-                "alleleflux-permute-metadata",
-                "--input", str(orig_md),
-                "--output", str(out_tsv),
-                "--unit", unit,
-                "--groups", treatment, control,
-                "--seed", str(seed),
-            ]
-            if block:
-                cmd += ["--block", block]
-            if swaps is not None:
-                cmd += ["--swaps", str(swaps)]
-            logger.info(f"  permuting {treatment} vs {control} → {out_tsv.name}")
-            subprocess.run(cmd, check=True)
-
-        # 2. Per-seed leaf config: permuted_metadata_dir set ⇒ no re-orchestration.
+        # Per-seed leaf config.  Carrying ``permutation.seed`` (singular) marks
+        # this as a generate-mode leaf: execute_workflow does NOT re-orchestrate,
+        # and the in-DAG ``permute_metadata`` rule builds the per-pair sheets from
+        # this seed.  ``permuted_metadata_dir`` is removed so BYO mode is not
+        # triggered.  ``metadata_path`` is pinned absolute for the rule.
         leaf = copy.deepcopy(config)
         leaf["output"]["root_dir"] = str(seed_dir)
+        leaf["input"]["metadata_path"] = str(orig_md)
         leaf.setdefault("permutation", {})
         leaf["permutation"]["enabled"] = True
-        leaf["permutation"]["permuted_metadata_dir"] = str(md_dir)
+        leaf["permutation"]["seed"] = seed
+        leaf["permutation"].pop("permuted_metadata_dir", None)
         # A divergence null only needs the between-group comparison, so skip the
         # within-group / across-time tests by default (saves compute).  The user
         # can force them back on with analysis.run_within_group_tests: true.
         leaf.setdefault("analysis", {}).setdefault("run_within_group_tests", False)
 
-        leaf_path = seed_dir / f"config_perm_{seed}.yml"
+        # Persist the leaf config beside its outputs on a real run; on a dry run
+        # write it to a throwaway temp dir so the output tree stays pristine (no
+        # config/TSV litter under ``-n``).  Each leaf runs in its OWN working dir
+        # (isolated .snakemake/) — sharing the real run's dir made Snakemake's
+        # params rerun-trigger fire on the reused metadata/qc rules and re-touch
+        # the real run's sentinels.  Isolation also avoids cross-seed lock
+        # contention.
+        tmp_dir = None
+        if dry_run:
+            tmp_dir = Path(tempfile.mkdtemp(prefix=f"alleleflux_perm_{seed}_"))
+            leaf_path = tmp_dir / f"config_perm_{seed}.yml"
+            leaf_wd = tmp_dir
+        else:
+            seed_dir.mkdir(parents=True, exist_ok=True)
+            leaf_path = seed_dir / f"config_perm_{seed}.yml"
+            leaf_wd = seed_dir
+
         with open(leaf_path, "w") as f:
             yaml.safe_dump(leaf, f, sort_keys=False)
 
-        # 3. Run the group-dependent tail for this permutation.
-        rc = execute_workflow(
-            config_file=str(leaf_path),
-            working_dir=working_dir,
-            jobs=jobs,
-            threads=threads,
-            memory=memory,
-            profile=profile,
-            dry_run=dry_run,
-            extra_args=extra_args,
-            version=version,
-        )
+        try:
+            rc = execute_workflow(
+                config_file=str(leaf_path),
+                working_dir=str(leaf_wd),
+                jobs=jobs,
+                threads=threads,
+                memory=memory,
+                profile=profile,
+                dry_run=dry_run,
+                extra_args=extra_args,
+                version=version,
+            )
+        finally:
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
         exit_codes.append(rc)
         if rc != 0:
             logger.error(
@@ -611,12 +622,17 @@ def execute_workflow(
         return run_snakemake(unlock_cmd)
 
     # Permutation orchestration.  When permutation is enabled and this is not
-    # already a per-seed *leaf* run (a leaf carries permutation.permuted_metadata_dir),
-    # fan out into N per-comparison-pair permuted runs that reuse the real run's
-    # artifacts.  Each leaf re-enters execute_workflow with permuted_metadata_dir
-    # set, so it skips this block and runs the normal (group-dependent) pipeline.
+    # already a per-seed *leaf* run, fan out into N permuted runs that reuse the
+    # real run's artifacts.  A leaf is marked by either ``permutation.seed``
+    # (generate mode — the permute_metadata rule builds the sheets) or
+    # ``permutation.permuted_metadata_dir`` (BYO mode — user-supplied sheets);
+    # in either case it skips this block and runs the group-dependent pipeline.
     permutation = config.get("permutation", {})
-    if permutation.get("enabled") and not permutation.get("permuted_metadata_dir"):
+    if (
+        permutation.get("enabled")
+        and permutation.get("seed") is None
+        and not permutation.get("permuted_metadata_dir")
+    ):
         return run_permutations(
             config=config,
             working_dir=working_dir,

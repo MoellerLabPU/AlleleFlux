@@ -124,6 +124,8 @@ rule lmm_analysis_across_time:
             if config["statistics"].get("preprocess_within_groups", False)
             else []
         ),
+        # Permuted (null) run: depend on the per-pair sheet (generate mode only).
+        permuted_md=lambda wildcards: permuted_metadata_input(wildcards.groups),
     output:
         os.path.join(
             OUTDIR,
@@ -179,7 +181,9 @@ rule cmh_test_across_time:
             get_preprocessed_within_groups_path()
             if config["statistics"].get("preprocess_within_groups", False)
             else []
-        )
+        ),
+        # Permuted (null) run: depend on the per-pair sheet (generate mode only).
+        permuted_md=lambda wildcards: permuted_metadata_input(wildcards.groups),
     output:
         os.path.join(
             OUTDIR,
