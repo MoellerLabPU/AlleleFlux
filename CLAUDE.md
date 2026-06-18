@@ -348,6 +348,10 @@ These paths are only accessible from Della HPC nodes, not local machines.
 
 ---
 
+## Verify Generated Output (HARD RULE)
+
+**After any command/script/pipeline writes a file or table, OPEN IT AND INSPECT THE CONTENTS before reporting success.** Exit code 0, "N rows written", and clean log lines are NOT verification. `head` the rows, `cut` the key columns, check that headers are populated (not blank), values look sane, and the empty/zero/edge cases are what you expect — then state what you saw. Flagged forcefully by the user 2026-06-18 after blank `comparison`/`group_pair` columns shipped unnoticed. See `memory/feedback_verify_generated_output.md`.
+
 ## Common Pitfalls
 
 - **Don't** use `/usr/bin/python` — always use the conda environment
