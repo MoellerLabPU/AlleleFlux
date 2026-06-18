@@ -57,7 +57,7 @@ rule p_value_summary:
             OUTDIR, 
             "p_value_summary", 
             "{timepoints}-{groups}", 
-            "p_value_summary_{test_type}_{timepoints}.tsv"
+            "p_value_summary_{test_type}_{timepoints}-{groups}.tsv"
         )
     params:
         output_dir=os.path.join(OUTDIR, "p_value_summary", "{timepoints}-{groups}"),
@@ -78,6 +78,7 @@ rule p_value_summary:
         alleleflux-p-value-summary \
             --input-dir {params.input_dir} \
             --timepoints {wildcards.timepoints} \
+            --groups {wildcards.groups} \
             --test-types {wildcards.test_type} \
             --outdir {params.output_dir} \
             --prefix {params.prefix} \

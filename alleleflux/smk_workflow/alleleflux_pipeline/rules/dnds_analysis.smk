@@ -15,7 +15,7 @@ def get_significant_sites_df_path():
         OUTDIR,
         "p_value_summary",
         "{timepoints}-{groups}",
-        f"p_value_summary_{test_type_str}_{{timepoints}}.tsv"
+        f"p_value_summary_{test_type_str}_{{timepoints}}-{{groups}}.tsv"
     )
 
 rule dnds_from_timepoints:

@@ -59,16 +59,18 @@ def suppress_logger(logger_name, level=logging.WARNING):
 
 
 def find_test_files(
-    input_dir: Path, test_types: list[str], timepoint_label: str
+    input_dir: Path,
+    test_types: list[str],
+    timepoint_label: str,
+    groups_label: str,
 ) -> dict[str, list[Path]]:
     """
     Find and group compressed TSV test result files by statistical test type.
 
-    This function searches a given input directory for subdirectories whose names
-    start with a specific test type followed by an underscore, a timepoint label,
-    a hyphen, and any suffix (pattern: f"{test_type}_{timepoint_label}-*"). Within
-    each matching directory it collects all files ending with ".tsv.gz" and groups
-    them by test type.
+    This function searches a given input directory for subdirectories matching a
+    single comparison (pattern: f"{test_type}_{timepoint_label}-{groups_label}").
+    Within each matching directory it collects all files ending with ".tsv.gz" and
+    groups them by test type.
 
     Parameters
     ----------
@@ -77,8 +79,13 @@ def find_test_files(
     test_types : list[str]
         List of test type identifiers (e.g., ["lmm", "two_sample_paired"]) to search for.
     timepoint_label : str
-        Label identifying the timepoint segment to match between the test type and
-        the variable portion of the directory name.
+        Label identifying the timepoint segment of the directory name.
+    groups_label : str
+        The group-pair label (e.g. "40_AL") identifying the single comparison to
+        summarize. Required: discovery is restricted to exactly this comparison's
+        directory so a summary only ever sees its own pair. Without it, every group
+        pair sharing the timepoint would be pooled into one summary and, for tests
+        without a group column (e.g. two_sample_unpaired), conflated irrecoverably.
 
     Returns
     -------
@@ -103,7 +110,8 @@ def find_test_files(
     >>> test_files = find_test_files(
     ...     input_dir=Path("results"),
     ...     test_types=["lmm", "two_sample_paired"],
-    ...     timepoint_label="tp1"
+    ...     timepoint_label="tp1",
+    ...     groups_label="40_AL",
     ... )
     >>> test_files["lmm"]  # list of Path objects (possibly empty)
     """
@@ -112,9 +120,9 @@ def find_test_files(
     logger.info(f"Searching for test results in: {input_dir}")
 
     for test_type in test_types:
-        # Search for directories that start with the test type name
-        # e.g., 'lmm', 'two_sample_paired'
-        for test_dir in input_dir.glob(f"{test_type}_{timepoint_label}-*"):
+        # Match exactly this comparison's directory, e.g.
+        # 'two_sample_unpaired_5mo_10mo-40_AL' -- never other group pairs.
+        for test_dir in input_dir.glob(f"{test_type}_{timepoint_label}-{groups_label}"):
             if test_dir.is_dir():
                 found_files = list(test_dir.glob("*.tsv.gz"))
 
@@ -329,6 +337,16 @@ def main():
         help="A single timepoint combination label to include (e.g., 'pre_post' or 'pre').",
     )
     parser.add_argument(
+        "--groups",
+        type=str,
+        required=True,
+        help=(
+            "The group-pair label (e.g. '40_AL') identifying the single comparison to "
+            "summarize. Required: the summary is restricted to exactly this comparison "
+            "so pairs are never pooled/conflated (which would also pool their FDR)."
+        ),
+    )
+    parser.add_argument(
         "--test-types",
         nargs="+",
         default=[
@@ -366,7 +384,9 @@ def main():
         sys.exit(1)
 
     # 1. Discover all relevant result files
-    test_files = find_test_files(args.input_dir, args.test_types, args.timepoints)
+    test_files = find_test_files(
+        args.input_dir, args.test_types, args.timepoints, groups_label=args.groups
+    )
     total_files = sum(len(files) for files in test_files.values())
     if total_files == 0:
         logger.error(
@@ -433,7 +453,12 @@ def main():
         )
 
         # Create output filename using the combined key
-        subtest_output_file = args.outdir / f"{args.prefix}_{combined_key}.tsv"
+        # Include the group-pair label so each file is self-describing once moved
+        # out of its comparison directory, e.g.
+        # 'p_value_summary_two_sample_unpaired_5mo_10mo-40_AL.tsv'.
+        subtest_output_file = (
+            args.outdir / f"{args.prefix}_{combined_key}-{args.groups}.tsv"
+        )
 
         args.outdir.mkdir(parents=True, exist_ok=True)
         final_df.to_csv(subtest_output_file, sep="\t", index=False)

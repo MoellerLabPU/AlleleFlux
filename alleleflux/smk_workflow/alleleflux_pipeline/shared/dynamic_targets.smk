@@ -128,13 +128,13 @@ def generate_p_value_summary_targets(tp, gr):
         if test_type in ['two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh']:
             mags = get_eligible_mags(tp, gr, test_type)
             if mags:
-                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                filename = f"p_value_summary_{test_type}_{tp}-{gr}.tsv"
                 expected.append(os.path.join(output_dir, filename))
         
         elif test_type in ["single_sample",'lmm_across_time', 'cmh_across_time'] and DATA_TYPE == "longitudinal":
             sample_entries = get_eligible_mags(tp, gr, test_type)
             if sample_entries:
-                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                filename = f"p_value_summary_{test_type}_{tp}-{gr}.tsv"
                 expected.append(os.path.join(output_dir, filename))
                 
     return expected
@@ -147,10 +147,19 @@ def generate_allele_analysis_targets(tp, gr):
     
     NOTE: Uses _get_mags_by_eligibility (QC-only) because allele analysis runs
     BEFORE preprocessing, so preprocessing eligibility is not yet available.
+
+    When within-group tests are disabled (e.g. permuted/null runs), MAGs that
+    are eligible *only* for single-sample (within-group) tests have no
+    downstream consumer, so we restrict to between-group eligibility
+    ("between_only") to avoid scheduling allele-analysis / allele-freq-cache
+    jobs whose output is never used.
     """
     targets = []
-    # Get eligible MAGs for this timepoint-group combination (QC eligibility only)
-    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type="all")
+    # Drop within-group-only MAGs when within-group tests are off — otherwise
+    # use the full QC-eligible set (allele analysis also feeds regional contrast
+    # and stands alone as a deliverable in allele_analysis_only mode).
+    eligibility_type = "all" if _run_within_group_tests() else "between_only"
+    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type=eligibility_type)
     
     # Add targets for each eligible MAG using the centralized path helper
     for mag in eligible_mags:

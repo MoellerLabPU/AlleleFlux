@@ -189,6 +189,115 @@ class TestProcessResultsFile(unittest.TestCase):
         self.assertTrue(df["min_p_value"].notna().all())
 
 
+class TestFindTestFiles(unittest.TestCase):
+    """Test that find_test_files selects the correct comparison directories.
+
+    Regression coverage for the group-pair conflation bug: the script used to
+    glob ``{test_type}_{timepoint}-*`` which swallowed *every* group-pair sharing
+    a timepoint, so each comparison's summary pooled all pairs (e.g. 20_AL's file
+    was byte-identical to 1D_AL's). The discovery must be restricted to the
+    requested ``groups_label`` so a comparison only sees its own pair.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        # Two group pairs at the SAME timepoint, plus a different timepoint.
+        self.layout = {
+            "two_sample_unpaired_5mo_10mo-20_AL": "MAG1_two_sample_unpaired.tsv.gz",
+            "two_sample_unpaired_5mo_10mo-1D_AL": "MAG1_two_sample_unpaired.tsv.gz",
+            "two_sample_unpaired_5mo_22mo-20_AL": "MAG1_two_sample_unpaired.tsv.gz",
+        }
+        for dirname, fname in self.layout.items():
+            d = self.root / dirname
+            d.mkdir(parents=True)
+            (d / fname).write_text("stub")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_restricts_to_requested_group_pair(self):
+        """With a groups_label, only the matching pair's dir is discovered."""
+        result = find_test_files(
+            self.root, ["two_sample_unpaired"], "5mo_10mo", groups_label="20_AL"
+        )
+        found = result["two_sample_unpaired"]
+        self.assertEqual(len(found), 1)
+        # The single hit must come from the 20_AL dir, not 1D_AL.
+        self.assertIn("5mo_10mo-20_AL", str(found[0]))
+        self.assertFalse(any("1D_AL" in str(p) for p in found))
+
+    def test_does_not_match_other_timepoints(self):
+        """The timepoint is pinned: 5mo_22mo dirs are never returned for 5mo_10mo."""
+        result = find_test_files(
+            self.root, ["two_sample_unpaired"], "5mo_10mo", groups_label="20_AL"
+        )
+        found = result["two_sample_unpaired"]
+        self.assertFalse(any("5mo_22mo" in str(p) for p in found))
+
+    def test_groups_label_is_required(self):
+        """groups_label is mandatory: there is no all-pairs fallback to conflate on."""
+        with self.assertRaises(TypeError):
+            find_test_files(self.root, ["two_sample_unpaired"], "5mo_10mo")
+
+
+class TestOutputFilenameIncludesGroups(unittest.TestCase):
+    """The written summary filename must carry the group-pair label.
+
+    Now that each summary is one comparison, the filename should be
+    self-describing (e.g. ``p_value_summary_two_sample_unpaired_pre_post-fat_control.tsv``)
+    rather than only the dir encoding the pair. Kept in lockstep with the rule
+    output, dynamic_targets, and dnds_analysis input patterns.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.input_dir = self.root / "significance_tests"
+        comp_dir = self.input_dir / "two_sample_unpaired_pre_post-fat_control"
+        comp_dir.mkdir(parents=True)
+        df = pd.DataFrame(
+            {
+                "contig": ["c1", "c1"],
+                "position": [100, 200],
+                "gene_id": ["g1", "g1"],
+                "p_value_tTest": [0.01, 0.5],
+            }
+        )
+        df.to_csv(
+            comp_dir / "MAG1_two_sample_unpaired.tsv.gz",
+            sep="\t",
+            compression="gzip",
+            index=False,
+        )
+        self.outdir = self.root / "out"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_output_filename_contains_group_label(self):
+        from alleleflux.scripts.preprocessing import p_value_summary as pvs
+
+        argv = [
+            "alleleflux-p-value-summary",
+            "--input-dir", str(self.input_dir),
+            "--timepoints", "pre_post",
+            "--groups", "fat_control",
+            "--test-types", "two_sample_unpaired",
+            "--outdir", str(self.outdir),
+        ]
+        with patch("sys.argv", argv):
+            pvs.main()
+
+        expected = self.outdir / "p_value_summary_two_sample_unpaired_pre_post-fat_control.tsv"
+        written = list(self.outdir.glob("*.tsv"))
+        self.assertEqual(
+            [p.name for p in written],
+            [expected.name],
+            f"Expected {expected.name}, got {[p.name for p in written]}",
+        )
+
+
 class TestFdrCorrection(unittest.TestCase):
     """Test FDR-BH correction functionality."""
 
