@@ -109,3 +109,50 @@ def test_stops_on_first_failure(tmp_path, monkeypatch):
 
     assert rc == 1
     assert calls == [1]  # stopped after the first failure; 2 and 3 not attempted
+
+
+def test_unlock_cascades_to_started_leaves(tmp_path, monkeypatch):
+    """--unlock on an orchestrator clears each started leaf's working dir too."""
+    unlocked = []
+
+    def fake_run_snakemake(cmd, *args, **kwargs):
+        unlocked.append(cmd)
+        return 0
+
+    monkeypatch.setattr(wf, "run_snakemake", fake_run_snakemake)
+
+    config, _ = _make_config(tmp_path, seeds=[1, 2, 3])
+    out_root = tmp_path / "out"
+    # Seeds 1 and 3 "started" — they have a persisted leaf config + .snakemake/.
+    # Seed 2 never ran (no leaf dir) and must be skipped.
+    for seed in (1, 3):
+        seed_dir = out_root / "permuted" / f"perm_{seed}"
+        (seed_dir / ".snakemake").mkdir(parents=True)
+        (seed_dir / f"config_perm_{seed}.yml").write_text("placeholder: true\n")
+
+    rc = wf._unlock_permutation_leaves(
+        config, working_dir=str(tmp_path), snakefile="Snakefile"
+    )
+
+    assert rc == 0
+    # One unlock command per started leaf, pointed at that leaf's dir.
+    assert sum("perm_1" in c for c in unlocked) == 1
+    assert sum("perm_3" in c for c in unlocked) == 1
+    assert not any("perm_2" in c for c in unlocked)
+    assert all("--unlock" in c for c in unlocked)
+
+
+def test_unlock_noop_for_non_orchestrator(tmp_path, monkeypatch):
+    """A leaf/BYO config (seed set) is not an orchestrator — no cascade."""
+    called = []
+    monkeypatch.setattr(wf, "run_snakemake", lambda *a, **k: called.append(a) or 0)
+
+    config, _ = _make_config(tmp_path, seeds=[1])
+    config["permutation"]["seed"] = 1  # marks this as a leaf, not an orchestrator
+
+    rc = wf._unlock_permutation_leaves(
+        config, working_dir=str(tmp_path), snakefile="Snakefile"
+    )
+
+    assert rc == 0
+    assert called == []  # nothing unlocked

@@ -739,6 +739,8 @@ def _get_mags_by_eligibility(timepoints, groups, eligibility_type):
             - "two_sample_unpaired": only return MAG IDs where unpaired_test_eligible is True.
             - "two_sample_paired": only return MAG IDs where paired_test_eligible is True.
             - "lmm": only return MAG IDs where unpaired_test_eligible is True.
+            - "between_only": MAG IDs eligible for unpaired OR paired tests,
+              excluding single-sample (within-group) eligibility.
             - "all": return MAG IDs that are eligible for any of the tests.
     
     Returns:
@@ -763,6 +765,20 @@ def _get_mags_by_eligibility(timepoints, groups, eligibility_type):
         return df.loc[df["unpaired_test_eligible"] == True, "MAG_ID"].tolist()
     elif eligibility_type == "two_sample_paired" or eligibility_type == "cmh":
         return df.loc[df["paired_test_eligible"] == True, "MAG_ID"].tolist()
+    # Between-group eligibility only — unpaired OR paired, deliberately
+    # EXCLUDING single-sample (within-group) columns. Used by allele-analysis
+    # target generation when within-group tests are disabled, so that MAGs
+    # eligible *only* for within-group tests do not trigger unconsumed
+    # allele-analysis / allele-freq-cache jobs.
+    elif eligibility_type == "between_only":
+        return (
+            df[
+                (df["unpaired_test_eligible"] == True)
+                | (df["paired_test_eligible"] == True)
+            ]["MAG_ID"]
+            .unique()
+            .tolist()
+        )
     # Return MAGs from all eligible columns
     elif eligibility_type == "all":
         # Combine unpaired, paired, and any single-sample eligibility columns.
@@ -781,7 +797,8 @@ def _get_mags_by_eligibility(timepoints, groups, eligibility_type):
     else:
         raise ValueError(
             f"Unknown eligibility type: {eligibility_type}. "
-            "Please use 'two_sample_unpaired', 'two_sample_paired', 'cmh', 'lmm' or 'all'."
+            "Please use 'two_sample_unpaired', 'two_sample_paired', 'cmh', "
+            "'lmm', 'between_only' or 'all'."
         )
 
 

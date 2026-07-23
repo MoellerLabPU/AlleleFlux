@@ -427,6 +427,51 @@ def _resolve_permutation_seeds(perm_config: dict) -> List[int]:
     return list(range(1, n + 1))
 
 
+def _unlock_permutation_leaves(
+    config: dict, working_dir: str, snakefile: "str | Path"
+) -> int:
+    """Unlock every per-seed leaf working dir of a permutation-orchestrating run.
+
+    The head ``--unlock`` only clears the orchestrator's own working dir. Each
+    leaf (``<root>/<output_subdir>/perm_<seed>/``) runs Snakemake in its own dir
+    with its own ``.snakemake/`` lock, so a crashed leaf leaves a stale lock the
+    head unlock cannot reach. This cascades the unlock to each leaf that has a
+    persisted leaf config, mirroring the layout written by :func:`run_permutations`.
+
+    No-op (returns 0) when this is not a permutation orchestrator. Leaves with no
+    leaf config yet (never started) are silently skipped — nothing to unlock.
+    """
+    perm = config.get("permutation", {})
+    is_orchestrator = (
+        perm.get("enabled")
+        and perm.get("seed") is None
+        and not perm.get("permuted_metadata_dir")
+    )
+    if not is_orchestrator:
+        return 0
+
+    subdir = perm.get("output_subdir", "permuted")
+    base_output = Path(config["output"]["root_dir"])
+    if not base_output.is_absolute():
+        base_output = (Path(working_dir) / base_output).resolve()
+
+    worst = 0
+    for seed in _resolve_permutation_seeds(perm):
+        seed_dir = base_output / subdir / f"perm_{seed}"
+        leaf_config = seed_dir / f"config_perm_{seed}.yml"
+        # Skip leaves that never ran (no config, or no lock dir to clear).
+        if not leaf_config.exists() or not (seed_dir / ".snakemake").is_dir():
+            continue
+        logger.info(f"Unlocking permutation leaf: {seed_dir}")
+        leaf_cmd = (
+            f"snakemake --snakefile {snakefile} "
+            f"--configfile {leaf_config.resolve()} "
+            f"--directory {seed_dir} --unlock"
+        )
+        worst = max(worst, run_snakemake(leaf_cmd))
+    return worst
+
+
 def run_permutations(
     config: dict,
     working_dir: str,
@@ -619,7 +664,13 @@ def execute_workflow(
     if unlock:
         logger.info("Unlocking working directory...")
         unlock_cmd = f"snakemake --snakefile {snakefile} --configfile {config_path.resolve()} --directory {working_dir} --unlock"
-        return run_snakemake(unlock_cmd)
+        rc = run_snakemake(unlock_cmd)
+        # A permutation-orchestrating run drives each per-seed leaf in its OWN
+        # working dir with its OWN .snakemake/ — the head unlock above does NOT
+        # reach them. Cascade so a single `alleleflux run ... --unlock` clears
+        # stale locks left by a crashed leaf (e.g. <root>/permuted/perm_<seed>/).
+        rc = max(rc, _unlock_permutation_leaves(config, working_dir, snakefile))
+        return rc
 
     # Permutation orchestration.  When permutation is enabled and this is not
     # already a per-seed *leaf* run, fan out into N permuted runs that reuse the

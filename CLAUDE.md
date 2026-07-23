@@ -352,6 +352,17 @@ These paths are only accessible from Della HPC nodes, not local machines.
 
 **After any command/script/pipeline writes a file or table, OPEN IT AND INSPECT THE CONTENTS before reporting success.** Exit code 0, "N rows written", and clean log lines are NOT verification. `head` the rows, `cut` the key columns, check that headers are populated (not blank), values look sane, and the empty/zero/edge cases are what you expect — then state what you saw. Flagged forcefully by the user 2026-06-18 after blank `comparison`/`group_pair` columns shipped unnoticed. See `memory/feedback_verify_generated_output.md`.
 
+## Trust Receipt — make my work spot-checkable, not re-auditable 🕵️
+
+**The user hates having to audit my code after every change** (correctness, did-I-do-a-good-job, is-it-what-they-asked). The burden of proof is **mine**, not theirs. After any non-trivial write/change, end with a short **Case Closed receipt** (≤ ~5 lines — a receipt, *not* a recap):
+
+- ✅ **What you asked for** — one line restating the goal so drift is caught instantly
+- 🧪 **How I proved it** — the actual test/command run + real output inspected (per the Verify rule above — not "exit 0")
+- ⚠️ **Where I'd look** — the 1–2 spots I'm least sure about, named honestly
+- Confidence tag: 🟢 verified / 🟡 spot-check this / 🔴 I'm guessing — be ruthlessly honest about 🔴
+
+**TDD auto-kicks-in** for algorithmic / stats-heavy code (where "looks right" is most dangerous): test first → see it fail → pass, so correctness is shown by a re-runnable green test, not the user's eyeballs. Scale the receipt: small change = one line, big/risky = full receipt. Don't let the receipt itself become friction (the "banner that wasn't" trap). See `memory/feedback_trust_receipt_review.md`.
+
 ## Common Pitfalls
 
 - **Don't** use `/usr/bin/python` — always use the conda environment

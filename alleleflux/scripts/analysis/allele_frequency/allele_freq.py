@@ -142,7 +142,8 @@ def _arrow_string_types_mapper(pa_type):
     return None  # default mapping (numpy-backed) for non-string types
 
 
-def load_cache_files(cache_paths, data_type, groups=None, permuted_metadata=None):
+def load_cache_files(cache_paths, data_type, groups=None, permuted_metadata=None,
+                     save_archival=False):
     """Read one or two Stage-1 Parquet cache files into a single DataFrame.
 
     Only the columns Stage 2 needs are read from disk via ``columns=``.
@@ -192,6 +193,12 @@ def load_cache_files(cache_paths, data_type, groups=None, permuted_metadata=None
         If supplied, retain only rows whose ``group`` column is in this set.
         Applied at the Arrow Table level (pre-pandas) for memory safety on
         large MAGs.
+    save_archival : bool, optional
+        Mirrors the archival flag passed to
+        ``calculate_allele_frequency_changes``.  When False (default) the
+        ``total_coverage`` column is not read for longitudinal data — it is
+        consumed only by the archival diff table.  Ignored for single data,
+        which always keeps ``total_coverage``.
 
     Returns
     -------
@@ -201,11 +208,24 @@ def load_cache_files(cache_paths, data_type, groups=None, permuted_metadata=None
         in the frame, preserving the tp1/tp2 ordering used by
         ``calculate_allele_frequency_changes``.
     """
-    columns = (
+    columns = list(
         _STAGE2_COLUMNS_LONGITUDINAL
         if data_type == "longitudinal"
         else _STAGE2_COLUMNS_SINGLE
     )
+    # ``total_coverage`` is consumed only by the (default-off) archival diff
+    # table in ``calculate_allele_frequency_changes``.  For longitudinal
+    # non-archival runs it is dead weight — carried through the parquet read,
+    # the per-timepoint split and the per-subject merge, then dropped unused.
+    # Skip reading it entirely in that case (one fewer int column across
+    # 1B+ rows on the heaviest MAGs).  Single data keeps it: the single-data
+    # output parquet carries total_coverage for downstream consumers.
+    if (
+        data_type == "longitudinal"
+        and not save_archival
+        and "total_coverage" in columns
+    ):
+        columns.remove("total_coverage")
     # Permuted (null) runs reuse the real run's cache, which carries the
     # ORIGINAL group labels.  To relabel in memory we need the per-sample join
     # key.  ``sample_id`` is otherwise dropped from the Stage-2 read (see the
@@ -376,6 +396,25 @@ def calculate_allele_frequency_changes(allele_df, output_dir, mag_id, save_archi
         logger.warning(
             f"SubjectIDs only in '{timepoint_2}' (no match at '{timepoint_1}'): {diff}"
         )
+
+    # Pre-filter both frames to subjects present at BOTH timepoints.  The merge
+    # below is an inner join keyed on subjectID, so a subject sampled at only
+    # one timepoint contributes zero output rows — dropping it here is exact
+    # (identical result) and removes it from the hash-join input.  On
+    # cross-sectional cohorts (e.g. DRIDO aging, where ~half the mice are
+    # sampled at only one age) this roughly halves the merge input, which is
+    # what pushes the heaviest MAGs past available RAM.
+    shared = subjects_tp1 & subjects_tp2
+    n_only_tp1 = len(subjects_tp1) - len(shared)
+    n_only_tp2 = len(subjects_tp2) - len(shared)
+    if n_only_tp1 or n_only_tp2:
+        logger.info(
+            f"Pre-filtering to {len(shared)} subject(s) present at both "
+            f"timepoints before the merge (dropping {n_only_tp1} only in "
+            f"'{timepoint_1}' and {n_only_tp2} only in '{timepoint_2}')."
+        )
+        df_tp1 = df_tp1[df_tp1["subjectID"].isin(shared)]
+        df_tp2 = df_tp2[df_tp2["subjectID"].isin(shared)]
 
     merged_df = pd.merge(
         df_tp1,
@@ -805,6 +844,7 @@ def main():
         args.data_type,
         groups=args.groups,
         permuted_metadata=args.permuted_metadata,
+        save_archival=args.save_archival_changes,
     )
     if args.groups and allele_df.empty:
         logger.error(
