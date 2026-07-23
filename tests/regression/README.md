@@ -115,6 +115,32 @@ scientifically meaningful change (a p-value moving 0.01, a frequency moving
 | `diff_branches.sh`     | Bash tool for branch-vs-branch comparison and main-derived golden capture. See "Which command for which task" below. |
 | `golden/`              | Committed snapshot of expected outputs. Subdirectories per scenario: `golden/longitudinal/` and `golden/single/`. |
 
+### Golden provenance notes
+
+The golden payload is a *snapshot*, so an intentional change to an output's
+**name** breaks the test even when the **values** are unchanged — the
+comparator reports the golden-side path as `MISSING` and never gets to compare
+contents. Record such renames here.
+
+* **`p_value_summary_*` filenames (`178ed5d`, 2026-06-18).** `p_value_summary`
+  outputs gained the group pair in the filename
+  (`p_value_summary_{test}_{tp}.tsv` → `p_value_summary_{test}_{tp}-{groups}.tsv`)
+  as part of the group-pair conflation fix. The golden dated from `4b6b6ab`
+  and still carried the old names, so the e2e failed with three `MISSING`
+  entries for `longitudinal`.
+
+  The golden files were **renamed in place, not regenerated**. That is the
+  correct treatment here because the conflation bug only triggered with more
+  than one group pair sharing a timepoint, and both example datasets define
+  exactly one (`treatment`/`control`) — so the recorded values were never
+  affected by the bug. Verified after renaming: same schema, same row count,
+  and `min_p_value` / `q_value` agree to ≤1.3e-4, inside the scenario
+  tolerance (`STAT_RTOL=1e-5`, `STAT_ATOL=1e-3`) that already absorbs the
+  float32-vs-float64 drift described above.
+
+  Had the values genuinely changed, the right move would have been
+  `--update-golden` (or `diff_branches.sh --capture-golden`), not a rename.
+
 ## Which command for which task
 
 The regression machinery has four common use cases.  Each maps to exactly one
