@@ -596,7 +596,10 @@ ALLELEFLUX_TOOLS = {
         ("alleleflux-preprocess-between-groups", "Preprocess for between-group tests"),
         ("alleleflux-preprocess-within-group", "Preprocess for within-group tests"),
         ("alleleflux-preprocessing-eligibility", "Preprocessing eligibility check"),
-        ("alleleflux-p-value-summary", "Summarize p-values"),
+    ],
+    "Summary": [
+        ("alleleflux-p-value-summary", "Summarize p-values across tests"),
+        ("alleleflux-significant-sites-summary", "Roll up significant sites per MAG for heatmaps"),
     ],
     "Statistics": [
         ("alleleflux-lmm", "Linear Mixed Models analysis"),

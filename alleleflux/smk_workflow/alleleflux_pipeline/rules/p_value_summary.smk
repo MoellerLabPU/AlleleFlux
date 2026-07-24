@@ -84,3 +84,65 @@ rule p_value_summary:
             --prefix {params.prefix} \
             {params.group_by_mag_id}
         """
+
+
+def get_all_p_value_summary_outputs(wildcards):
+    """Every p_value_summary table across ALL timepoint/group combinations.
+
+    The full input to the run-once ``significant_sites_summary`` rollup: Snakemake will not
+    schedule that rule until every one of these files exists.  Reuses the same target
+    generator the top-level output loop uses (``generate_p_value_summary_targets``), so the
+    rollup input and the pipeline targets stay in lockstep.
+    """
+    targets = []
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            targets.extend(generate_p_value_summary_targets(tp, gr))
+    return targets
+
+
+rule significant_sites_summary:
+    """Summarize every p_value_summary table into per-(comparison, test, group, MAG)
+    significant-site stats -- the input table for the AlleleFlux score/heatmap notebooks.
+    Runs once per run, after all p_value_summary outputs are complete."""
+    input:
+        get_all_p_value_summary_outputs
+    output:
+        cell_stats=os.path.join(
+            OUTDIR, "p_value_summary", "significant_sites_summary",
+            "significant_sites_mag_cell_stats_long.tsv",
+        ),
+        counts_long=os.path.join(
+            OUTDIR, "p_value_summary", "significant_sites_summary",
+            "significant_sites_mag_counts_long.tsv",
+        ),
+        counts_pivot=os.path.join(
+            OUTDIR, "p_value_summary", "significant_sites_summary",
+            "significant_sites_mag_counts_pivot.tsv",
+        ),
+        sig_sites=os.path.join(
+            OUTDIR, "p_value_summary", "significant_sites_summary",
+            "significant_sites_sig_sites.tsv",
+        ),
+    params:
+        input_dir=os.path.join(OUTDIR, "p_value_summary"),
+        output_dir=os.path.join(OUTDIR, "p_value_summary", "significant_sites_summary"),
+        prefix="significant_sites",
+        q_threshold=config["statistics"].get("p_value_threshold", 0.05),
+        p_threshold=config["statistics"].get("p_value_threshold", 0.05),
+    threads: get_threads("significant_sites_summary")
+    retries: get_retries("significant_sites_summary")
+    resources:
+        mem_mb=get_mem_mb("significant_sites_summary"),
+        time=get_time("significant_sites_summary"),
+        runtime=get_runtime("significant_sites_summary"),
+    shell:
+        """
+        alleleflux-significant-sites-summary \
+            --input-dir {params.input_dir} \
+            --outdir {params.output_dir} \
+            --q-threshold {params.q_threshold} \
+            --p-threshold {params.p_threshold} \
+            --cpus {threads} \
+            --prefix {params.prefix}
+        """

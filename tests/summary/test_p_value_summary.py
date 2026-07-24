@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
-from alleleflux.scripts.preprocessing.p_value_summary import (
+from alleleflux.scripts.summary.p_value_summary import (
     extract_mag_id_from_filepath,
     find_test_files,
     process_results_file,
@@ -132,7 +132,7 @@ class TestProcessResultsFile(unittest.TestCase):
 
         # Mock extract_relevant_columns to return empty dict
         with patch(
-            "alleleflux.scripts.preprocessing.p_value_summary.extract_relevant_columns"
+            "alleleflux.scripts.summary.p_value_summary.extract_relevant_columns"
         ) as mock_extract:
             mock_extract.return_value = {}
             result = process_results_file(test_file, "lmm", "pre_post")
@@ -276,7 +276,7 @@ class TestOutputFilenameIncludesGroups(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_output_filename_contains_group_label(self):
-        from alleleflux.scripts.preprocessing import p_value_summary as pvs
+        from alleleflux.scripts.summary import p_value_summary as pvs
 
         argv = [
             "alleleflux-p-value-summary",

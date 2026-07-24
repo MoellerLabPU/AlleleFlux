@@ -83,6 +83,14 @@ def get_final_pipeline_outputs(wildcards):
             if not config["analysis"].get("allele_analysis_only", False):
                 final_targets.extend(generate_regional_contrast_targets(tp, gr))
 
+    # Run-once significant-sites rollup over ALL p_value_summary tables (not scoped per tp/gr;
+    # added after the loop since it is a single terminal target).  Guarded at the call site --
+    # mirroring the per-combo generators above -- so it is never requested when
+    # allele_analysis_only skips the p_value_summary step (the generator is internally guarded
+    # too, so this is belt-and-suspenders matching generate_p_value_summary_targets).
+    if not config["analysis"].get("allele_analysis_only", False):
+        final_targets.extend(generate_significant_sites_summary_targets())
+
     return final_targets
 
 # 3. Eager Upstream Targets

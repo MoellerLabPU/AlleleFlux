@@ -139,6 +139,25 @@ def generate_p_value_summary_targets(tp, gr):
                 
     return expected
 
+def generate_significant_sites_summary_targets():
+    """Run-once rollup of EVERY p_value_summary table into one significant-sites summary.
+
+    Always produced (no config flag) -- the AlleleFlux score/heatmap notebooks consume it --
+    but skipped when ``allele_analysis_only`` is set, since then no p_value_summary tables
+    exist to summarize.  Not scoped by (tp, gr): it is a single terminal aggregation over the
+    whole run, so it is added once, after the per-combination loop in the Snakefile.
+    """
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    return [
+        os.path.join(
+            OUTDIR,
+            "p_value_summary",
+            "significant_sites_summary",
+            "significant_sites_mag_cell_stats_long.tsv",
+        )
+    ]
+
 def generate_allele_analysis_targets(tp, gr):
     """
     Dynamically generate targets for allele analysis based on eligible MAGs.
