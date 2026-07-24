@@ -384,7 +384,12 @@ def aggregate_region_scores(
         score_agg = (score_col, agg_method)  # "median" or "mean"
 
     agg_df = (
-        merged.groupby(group_keys, dropna=False)
+        # observed=True is required: `group` (and other keys) can be Categorical
+        # when loaded from parquet.  With observed=False pandas reindexes the
+        # result to the full Cartesian product of every grouping key's levels —
+        # with the collinear region-metadata columns that exploded to a 23.7 PiB
+        # allocation.  observed=True emits only groups that actually occur.
+        merged.groupby(group_keys, dropna=False, observed=True)
         .agg(
             region_score=score_agg,
             # Count rows present after the (contig, position) merge — i.e. the
@@ -928,6 +933,23 @@ def fisher_combine_empirical_pvalues(
     return pd.DataFrame(results)
 
 
+def _fisher_merge_keys(
+    fisher_df: pd.DataFrame, summary_df: pd.DataFrame
+) -> list[str]:
+    """Columns to join *fisher_df* onto *summary_df*.
+
+    The two frames share only their region-identifying columns (region_id,
+    region_type, and any genomic-location metadata).  Everything else is
+    per-frame data: *summary_df* carries a single ``n_replicates`` plus the
+    contrast statistics, while *fisher_df* carries per-group counts
+    (``n_replicates_treatment`` / ``n_replicates_control``) and the Fisher
+    p-values.  Joining on the shared columns keeps those data columns as
+    payload instead of treating the fisher-only counts as keys — which would
+    raise ``KeyError`` because they are absent from *summary_df*.
+    """
+    return [c for c in fisher_df.columns if c in summary_df.columns]
+
+
 # ── 9. Multiple-testing correction ──────────────────────────────────────
 
 
@@ -1331,8 +1353,7 @@ def main() -> None:
             min_replicates=args.min_replicates,
         )
         if not fisher_df.empty:
-            fisher_p_cols = [FISHER_PVAL_TREATMENT_COL, FISHER_PVAL_CONTROL_COL]
-            fisher_keys = [c for c in fisher_df.columns if c not in fisher_p_cols]
+            fisher_keys = _fisher_merge_keys(fisher_df, summary_df)
             summary_df = summary_df.merge(
                 fisher_df,
                 on=fisher_keys,
