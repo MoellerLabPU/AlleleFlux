@@ -455,5 +455,127 @@ class TestPlotGroupDistributionsIntegration(unittest.TestCase):
         self.assertFalse((Path(self.temp_dir) / "by_replicate").exists())
 
 
+class TestBinWidthFilenameTag(unittest.TestCase):
+    """Binned outputs must carry the bin width in the filename (e.g. _bin10d)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        # Days spanning two 10-day bins (0-9 and 10-19) so binned line plots
+        # have two x-points and the binning path is genuinely exercised.
+        self.df = make_long_df(
+            {
+                1: {"fat": [0.1, 0.3], "control": [0.1, 0.3]},
+                2: {"fat": [0.7, 0.9], "control": [0.7, 0.9]},
+            },
+            days=(0, 12),
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_binned_filenames_carry_bin_tag(self):
+        """Combined, per-replicate, and per-site filenames all embed the width."""
+        plot_group_distributions(
+            df=self.df,
+            value_col="min_p_value",
+            n_line="all",
+            n_dist="all",
+            x_col="day",
+            plot_types=["line"],
+            per_site=True,
+            output_dir=self.temp_dir,
+            output_format="png",
+            bin_width_days=10,
+            combined_per_replicate=True,
+        )
+
+        pooled = Path(self.temp_dir) / "MAGTEST_combined_nALL_bin_midpoint_line_bin10d.png"
+        self.assertTrue(pooled.exists(), f"expected {pooled.name} to be written")
+
+        rep_dir = Path(self.temp_dir) / "by_replicate"
+        self.assertEqual(
+            sorted(p.name for p in rep_dir.glob("*.png")),
+            [
+                "MAGTEST_combined_nALL_bin_midpoint_line_bin10d_rep1.png",
+                "MAGTEST_combined_nALL_bin_midpoint_line_bin10d_rep2.png",
+            ],
+        )
+
+        site_files = list((Path(self.temp_dir) / "single_sites").glob("*.png"))
+        self.assertTrue(site_files, "expected per-site plots to be written")
+        for f in site_files:
+            self.assertIn("_bin10d", f.name, f"{f.name} lacks the bin tag")
+
+    def test_unbinned_filenames_have_no_tag(self):
+        """Without binning, filenames keep their historical form (no _bin tag)."""
+        plot_group_distributions(
+            df=self.df,
+            value_col="min_p_value",
+            n_line="all",
+            n_dist="all",
+            x_col="day",
+            plot_types=["line"],
+            per_site=False,
+            output_dir=self.temp_dir,
+            output_format="png",
+        )
+
+        pooled = Path(self.temp_dir) / "MAGTEST_combined_nALL_day_line.png"
+        self.assertTrue(pooled.exists(), f"expected {pooled.name} to be written")
+
+
+class TestCliMultipleBinWidths(unittest.TestCase):
+    """--bin_width_days accepts several widths; each gets an isolated DataFrame."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.input_tsv = Path(self.temp_dir) / "long.tsv"
+        make_long_df(
+            {1: {"fat": [0.1, 0.3], "control": [0.1, 0.3]}}, days=(0, 12)
+        ).to_csv(self.input_tsv, sep="\t", index=False)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run_main(self, extra_argv):
+        """Invoke main() with a stubbed orchestrator; return its recorded calls."""
+        argv = [
+            "alleleflux-plot-trajectories",
+            "--input_file",
+            str(self.input_tsv),
+            "--x_col",
+            "day",
+            "--output_dir",
+            self.temp_dir,
+        ] + extra_argv
+        with patch(
+            "alleleflux.scripts.visualization.plot_allele_trajectory.plot_group_distributions"
+        ) as mock_plot, patch("sys.argv", argv):
+            from alleleflux.scripts.visualization.plot_allele_trajectory import main
+
+            main()
+        return mock_plot.call_args_list
+
+    def test_one_orchestrator_call_per_width(self):
+        calls = self._run_main(["--bin_width_days", "10", "20"])
+        self.assertEqual([c.kwargs["bin_width_days"] for c in calls], [10, 20])
+
+    def test_each_width_gets_its_own_dataframe_copy(self):
+        """The orchestrator mutates and row-filters its input (binning columns,
+        initial-frequency filter), so widths sharing one object would corrupt
+        each other's site selection."""
+        calls = self._run_main(["--bin_width_days", "10", "20"])
+        df_ids = [id(c.kwargs["df"]) for c in calls]
+        self.assertEqual(len(set(df_ids)), len(df_ids), "widths share a DataFrame object")
+
+    def test_single_width_still_works(self):
+        calls = self._run_main(["--bin_width_days", "10"])
+        self.assertEqual([c.kwargs["bin_width_days"] for c in calls], [10])
+
+    def test_no_width_passes_none(self):
+        calls = self._run_main([])
+        self.assertEqual([c.kwargs["bin_width_days"] for c in calls], [None])
+
+
 if __name__ == "__main__":
     unittest.main()

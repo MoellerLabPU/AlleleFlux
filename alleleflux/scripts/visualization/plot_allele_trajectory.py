@@ -715,6 +715,7 @@ def plot_combined(
     title_suffix: str = "",
     group_order: Optional[List[str]] = None,
     xlim: Optional[Tuple[float, float]] = None,
+    filename_tag: str = "",
 ) -> None:
     """
     Generates a combined plot summarizing allele frequencies across all selected sites.
@@ -743,6 +744,9 @@ def plot_combined(
                      Defaults to the sorted groups present in `df`.
         xlim: Optional (left, right) limits for the X-axis. Used to share a common x-range
               across a set of figures; ignored when None.
+        filename_tag: Optional string inserted after the plot type and before label_suffix
+                      (e.g., "_bin10d" when day binning is active), so outputs produced with
+                      different settings can coexist in one directory.
     """
     if df.empty:
         logger.warning("Empty DataFrame provided to plot_combined")
@@ -754,7 +758,7 @@ def plot_combined(
     outdir.mkdir(parents=True, exist_ok=True)
     outfile = (
         outdir
-        / f"{mag_id}_combined_n{n_label}_{x_col}_{plot_type}{label_suffix}.{output_format}"
+        / f"{mag_id}_combined_n{n_label}_{x_col}_{plot_type}{filename_tag}{label_suffix}.{output_format}"
     )
 
     sns.set_theme(style="whitegrid", context="talk")
@@ -838,6 +842,7 @@ def plot_combined_per_replicate(
     min_samples_per_bin: int = 1,
     custom_order: Optional[List[str]] = None,
     share_x: bool = True,
+    filename_tag: str = "",
 ) -> None:
     """
     Generates one combined line plot per replicate.
@@ -871,6 +876,8 @@ def plot_combined_per_replicate(
         share_x: If True (default) all figures use the same numeric X-axis limits, computed
                  across every replicate, so figures can be compared side by side. Has no
                  effect when the x-axis is categorical.
+        filename_tag: Optional filename tag forwarded to plot_combined; it lands before the
+                      "_rep<N>" suffix (e.g., "..._line_bin10d_rep3.png").
     """
     if df.empty:
         logger.warning("Empty DataFrame provided to plot_combined_per_replicate")
@@ -949,6 +956,7 @@ def plot_combined_per_replicate(
             title_suffix=f" — Replicate {rep}",
             group_order=group_order,
             xlim=xlim,
+            filename_tag=filename_tag,
         )
 
 
@@ -960,6 +968,7 @@ def plot_per_site(
     output_dir: str,
     output_format: str,
     group_by_replicate: bool = False,
+    filename_tag: str = "",
 ) -> None:
     """
     Generates individual trajectory plots for each genomic site.
@@ -979,6 +988,8 @@ def plot_per_site(
         output_dir: Directory where the individual plot files will be saved.
         output_format: File format for the plots (e.g., 'png', 'pdf', 'svg').
         group_by_replicate: If True, aggregate subject trajectories by replicate before plotting.
+        filename_tag: Optional string appended before the extension (e.g., "_bin10d"),
+                      so per-site plots from different bin widths can coexist.
     """
     if df.empty:
         logger.warning("Empty DataFrame provided to plot_per_site")
@@ -1080,7 +1091,7 @@ def plot_per_site(
         # Include grouping mode in filename
         suffix = "_by_replicate" if group_by_replicate else ""
         filename = (
-            f"{contig}_{pos}_{allele}_{value_col}_{x_col}{suffix}.{output_format}"
+            f"{contig}_{pos}_{allele}_{value_col}_{x_col}{suffix}{filename_tag}.{output_format}"
         )
         # Sanitize filename: replace any character that is not a letter, number, underscore, hyphen, or dot with an underscore
         filename = re.sub(r"[^\w\-_.]", "_", filename)
@@ -1183,6 +1194,12 @@ def plot_group_distributions(
 
     # Extract MAG identifier for output filenames (defaults to "MAG" if not present)
     mag_id = str(df["mag_id"].iloc[0]) if "mag_id" in df.columns else "MAG"
+
+    # Filename tag derived from the bin width, so plots produced with different
+    # widths (e.g., a sensitivity sweep) can coexist in one directory. Derived
+    # here — not passed by callers — so the name can never disagree with the
+    # width that actually produced the figure.
+    bin_tag = f"_bin{bin_width_days}d" if bin_width_days is not None else ""
 
     # === X-AXIS PREPARATION ===
     # Apply custom ordering/filtering if specified, or convert 'day' to numeric
@@ -1311,6 +1328,7 @@ def plot_group_distributions(
                 plot_type,
                 mag_id,
                 line_alpha=line_alpha,
+                filename_tag=bin_tag,
             )
 
         # === PER-REPLICATE COMBINED PLOTS ===
@@ -1331,6 +1349,7 @@ def plot_group_distributions(
                 # Custom order only applies to the original x_col; binned axes carry their own
                 # ordering, matching the choice made in get_plotting_data.
                 custom_order=None if bin_width_days is not None else sorted_vals,
+                filename_tag=bin_tag,
             )
 
     # === GENERATE PER-SITE PLOTS ===
@@ -1384,6 +1403,7 @@ def plot_group_distributions(
                     output_dir,
                     output_format,
                     group_by_replicate=group_by_replicate,
+                    filename_tag=bin_tag,
                 )
 
 
@@ -1460,8 +1480,12 @@ def main():
     parser.add_argument(
         "--bin_width_days",
         type=int,
+        nargs="+",
         required=False,
-        help="Bin width in days for time binning (e.g., 10 for 10-day bins). A 'day' column must be present.",
+        help="Bin width(s) in days for time binning (e.g., 10, or 10 20 30 for a "
+        "sensitivity sweep). A 'day' column must be present. With multiple widths, "
+        "the full plotting pass runs once per width and each output filename "
+        "carries a _bin<W>d tag.",
     )
     parser.add_argument(
         "--min_samples_per_bin",
@@ -1551,28 +1575,36 @@ def main():
     if n_line is None or n_dist is None:
         return
 
-    # Run plotting
-    plot_group_distributions(
-        df=df,
-        value_col=args.value_col,
-        n_line=n_line,
-        n_dist=n_dist,
-        n_per_site=n_per_site,
-        x_col=args.x_col,
-        x_order=args.x_order,
-        plot_types=args.plot_types,
-        per_site=args.per_site,
-        output_dir=args.output_dir,
-        output_format=args.output_format,
-        bin_width_days=args.bin_width_days,
-        min_samples_per_bin=args.min_samples_per_bin,
-        group_by_replicate=args.group_by_replicate,
-        line_alpha=args.line_alpha,
-        max_initial_freq=args.max_initial_freq,
-        min_initial_freq=args.min_initial_freq,
-        initial_freq_group=args.initial_freq_group,
-        combined_per_replicate=args.combined_per_replicate,
-    )
+    # Run the full plotting pass once per requested bin width (or once, unbinned).
+    # Each pass gets a fresh copy of the loaded table: the orchestrator adds
+    # binning columns AND row-filters via the initial-frequency criteria (which
+    # are evaluated on the FIRST BIN, so they depend on the width) — reusing one
+    # DataFrame across widths would let one width's filtering corrupt the next.
+    bin_widths = args.bin_width_days if args.bin_width_days else [None]
+    for bw in bin_widths:
+        if bw is not None:
+            logger.info(f"=== Plotting pass: bin_width_days={bw} ===")
+        plot_group_distributions(
+            df=df.copy(),
+            value_col=args.value_col,
+            n_line=n_line,
+            n_dist=n_dist,
+            n_per_site=n_per_site,
+            x_col=args.x_col,
+            x_order=args.x_order,
+            plot_types=args.plot_types,
+            per_site=args.per_site,
+            output_dir=args.output_dir,
+            output_format=args.output_format,
+            bin_width_days=bw,
+            min_samples_per_bin=args.min_samples_per_bin,
+            group_by_replicate=args.group_by_replicate,
+            line_alpha=args.line_alpha,
+            max_initial_freq=args.max_initial_freq,
+            min_initial_freq=args.min_initial_freq,
+            initial_freq_group=args.initial_freq_group,
+            combined_per_replicate=args.combined_per_replicate,
+        )
 
     logger.info("Plotting completed successfully")
 
