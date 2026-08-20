@@ -101,4 +101,8 @@ slurm-delete-logfiles-older-than: -1    # days (default 10, if set to <=0, no ol
 #   4. Profile:       add `- slurm_account="foo"` here (cluster-wide default)
 default-resources:
   - mem_mb=20000
-  - runtime=120                    # minutes
+  # Explicit unit REQUIRED: snakemake >= 9.17 parses a bare number here as
+  # SECONDS (verified 2026-08-20 on 9.17.2: "runtime=120" -> 2-minute jobs,
+  # while "120min"/"2h"/"7200" -> 120 minutes). Rule-level `runtime=<int>`
+  # in the .smk files is still minutes and unaffected.
+  - runtime=120min
