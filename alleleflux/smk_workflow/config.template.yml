@@ -56,6 +56,19 @@ analysis:
                                   # (a divergence null only needs the between-group test).
   use_gene_scores: False           # Compute gene-level significance scores (alleleflux-gene-scores); requires Prodigal annotations
   use_outlier_detection: False     # Detect outlier genes by comparing gene vs MAG scores (alleleflux-outliers); requires use_gene_scores: True
+  use_pairwise_ani: False          # Pairwise conANI/popANI between QC-passing sample pairs per MAG (alleleflux-pairwise-ani);
+                                   # group- and timepoint-independent, one job per MAG
+
+  # Pairwise ANI settings (only used when use_pairwise_ani: True)
+  pairwise_ani:
+    min_cov: 5                     # Reads required in BOTH samples for a position to be compared (part of the metric; 1 disables the depth gate)
+    min_freq: 0.05                 # Minimum read fraction for an allele to count as present (popANI only)
+    fdr: 1.0e-6                    # Tolerated chance that sequencing error alone explains an allele (popANI only)
+    pairs: "within_subject"        # "within_subject" = every same-mouse pair across timepoints;
+                                   # "transitions" = only same-mouse pairs matching timepoints_combinations
+                                   #   (what strain-turnover consumes; DRiDO: 970 pairs instead of 2,570);
+                                   # "all" = every pair (needed for between-mouse strain-sharing analyses)
+    store_snp_locations: "within_subject"   # "none", "within_subject", or "all" (WARNING: "all" was 7.7 GB for 90 samples in inStrain)
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
     - phylum                       # Remove or comment out levels you don't need; set to [] for MAG level only
     - class
@@ -251,3 +264,14 @@ resources:
 #   regional_contrast:             # Rule: regional_contrast
 #     mem_per_job: "16G"
 #     time: "04:00:00"
+#   pairwise_ani:                  # Rule: pairwise_ani
+#                                  # Holds dense per-contig count arrays for every sample that
+#                                  # takes part in a pair: genome_length x 4 x 2 bytes x n_samples
+#                                  # (~1 GB for a 3 Mb MAG x 43 samples; ~48 GB for a 4.3 Mb DRiDO
+#                                  # MAG x 1,403 within-subject samples) plus pandas frames while
+#                                  # loading. Loading dominates (~3.6 s per profile) and scales
+#                                  # with threads_per_job (--cpus); comparing is ~1 s per pair.
+#     threads_per_job: 8
+#     mem_per_job: "64G"
+#     mem_step: "48G"
+#     time: "02:00:00"

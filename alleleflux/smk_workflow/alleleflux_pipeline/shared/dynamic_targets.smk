@@ -1028,3 +1028,21 @@ def get_combined_scores_targets():
                     )
     return targets
 """
+
+def generate_pairwise_ani_targets():
+    """One pairwise-ANI target per MAG, gated by the use_pairwise_ani flag.
+
+    Not scoped per (timepoints, groups): the rule is group- and timepoint-
+    independent, so this is called once, OUTSIDE the combination loop -- the same
+    shape as generate_significant_sites_summary_targets().  The MAG universe
+    comes from the MAG mapping file (known at DAG-build time), so no checkpoint
+    is triggered; QC files exist for every mapped MAG, and a MAG where nothing
+    passes QC still yields valid header-only outputs from the CLI.
+    """
+    if not config["analysis"].get("use_pairwise_ani", False):
+        return []
+
+    # dtype=str: MAG ids are labels; sorted for a deterministic DAG.
+    mag_mapping = pd.read_csv(config["input"]["mag_mapping_path"], sep="\t", dtype=str)
+    mags = sorted(mag_mapping["mag_id"].unique())
+    return [get_pairwise_ani_output_path(mag_wildcard=mag) for mag in mags]

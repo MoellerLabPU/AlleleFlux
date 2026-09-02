@@ -1119,3 +1119,30 @@ def get_preprocessed_within_groups_path(mag_wildcard="{mag}", group_wildcard="{g
         f"{mag_wildcard}_{group_wildcard}_allele_frequency_changes_mean_zeros_processed.tsv.gz"
     )
 
+
+
+def get_pairwise_ani_output_path(mag_wildcard="{mag}"):
+    """Path to the per-MAG pairwise conANI/popANI table (the rule's primary output).
+
+    Group- and timepoint-independent: one file per MAG covering every QC-passing
+    sample, because within-subject cross-timepoint comparisons are the point.
+    Resolves under OUTDIR (NOT REUSE_DIR): unlike profiles/QC/the allele-freq
+    cache, this table is a PRODUCT of the current run, not a reusable upstream
+    artifact -- a permuted/null run computes its own or, more sensibly, disables
+    the feature via use_pairwise_ani.
+    """
+    return os.path.join(OUTDIR, "pairwise_ani", f"{mag_wildcard}_pairwise_ani.tsv")
+
+
+def get_all_qc_files_for_mag(mag_wildcard="{mag}"):
+    """Every per-timepoint-combination QC file for one MAG -- the ANI sample gate.
+
+    Unlike the allele-frequency cache (which wants ONE canonical timepoint's QC),
+    pairwise ANI wants every sample judged usable at ANY timepoint combination;
+    the CLI unions and de-duplicates them.  Resolves under REUSE_DIR because QC
+    IS a reusable upstream artifact (same reasoning as qc_sentinel).
+    """
+    return [
+        os.path.join(REUSE_DIR, "QC", f"QC_{tp}", f"{mag_wildcard}_QC.tsv")
+        for tp in timepoints_labels
+    ]
