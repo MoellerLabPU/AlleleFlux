@@ -48,7 +48,7 @@ A **population SNP** = the two samples' *credible-allele* sets are disjoint
 | `min_freq` | 0.05 | `analysis.pairwise_ani.min_freq` / `--min_freq` |
 | `fdr` | 1e-6 | `analysis.pairwise_ani.fdr` / `--fdr` |
 | base-quality floor (sets error rate) | 30 | `profiling.min_base_quality` (same key the profiler used) |
-| `pairs` | `within_subject` | `analysis.pairwise_ani.pairs` / `--pairs` |
+| `pairs` | `within_subject` | `analysis.pairwise_ani.pairs` / `--pairs`; `transitions` restricts to the configured `--transitions EARLIER:LATER` comparisons (DRiDO: 970 pairs instead of 2,570) |
 | `store_snp_locations` | `within_subject` | (`all` produced 7.7 GB in inStrain — use deliberately) |
 | `--cpus` | 1 | worker processes for profile loading (the bottleneck) + threads for comparison; output identical for any value |
 

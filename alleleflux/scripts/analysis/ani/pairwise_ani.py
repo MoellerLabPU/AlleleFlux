@@ -51,6 +51,7 @@ Method credit: Olm et al. 2021, Nat Biotechnol, doi:10.1038/s41587-020-00797-0.
 
 import argparse
 import itertools
+from collections import defaultdict
 import logging
 import math
 import multiprocessing
@@ -93,37 +94,81 @@ SAMPLE_COLUMNS = [
 _PAIR_META_FIELDS = ("subjectID", "group", "time", "replicate")
 
 
-def enumerate_pairs(samples_df: pd.DataFrame, mode: str) -> list[tuple[str, str]]:
+def parse_transitions(specs: list[str]) -> list[tuple[str, str]]:
+    """Turn ``["5mo:10mo", "5mo:22mo"]`` into ``[("5mo", "10mo"), ("5mo", "22mo")]``.
+
+    One place for the format so this CLI and the strain-turnover tool can never
+    disagree on it.  Each spec is ``EARLIER:LATER``; a degenerate ``T:T`` is
+    rejected because a sample cannot transition to its own timepoint.
+    """
+    transitions = []
+    for spec in specs:
+        if spec.count(":") != 1:
+            raise ValueError(f"Transition {spec!r} must look like EARLIER:LATER (e.g. 5mo:22mo)")
+        earlier, later = (part.strip() for part in spec.split(":"))
+        if not earlier or not later:
+            raise ValueError(f"Transition {spec!r} has an empty timepoint")
+        if earlier == later:
+            raise ValueError(f"Degenerate transition {spec!r}: both sides are the same timepoint")
+        transitions.append((earlier, later))
+    return transitions
+
+
+def enumerate_pairs(
+    samples_df: pd.DataFrame, mode: str, transitions: list[tuple[str, str]] | None = None
+) -> list[tuple[str, str]]:
     """Ordered, de-duplicated sample pairs from the QC roster.
 
     ``all`` compares every unordered pair; ``within_subject`` keeps only pairs of
-    samples from the same mouse (the unit of the future strain-turnover work).
-    Sorting first makes ``(sample1, sample2)`` deterministic across runs, so
-    outputs join cleanly.
+    samples from the same mouse; ``transitions`` keeps only same-mouse pairs whose
+    two timepoints are one of the configured ``(earlier, later)`` transitions --
+    the comparisons the strain-turnover analysis actually consumes (on DRiDO:
+    970 pairs instead of within_subject's 2,570, because the extra 1,600 compare
+    two LATER timepoints nothing downstream reads).  Every mode returns pairs as
+    ``(sample1, sample2)`` with ``sample1 < sample2`` by id, sorted, so outputs
+    are deterministic and join across runs.
 
-    Example: roster S1(m1), S2(m2), S3(m1) -> all: (S1,S2),(S1,S3),(S2,S3);
-    within_subject: (S1,S3) only.
+    Example: roster S1(m1, pre), S2(m2, pre), S3(m1, end) ->
+    all: (S1,S2),(S1,S3),(S2,S3); within_subject: (S1,S3);
+    transitions [(pre, end)]: (S1,S3); transitions [(pre, post)]: nothing.
     """
     # Sort so combinations() emits each pair exactly once with sample1 < sample2.
     sample_ids = sorted(samples_df["sample_id"].astype(str))
-    pairs = list(itertools.combinations(sample_ids, 2))
-
-    if mode == "within_subject":
-        if "subjectID" not in samples_df.columns:
-            raise ValueError(
-                "--pairs within_subject requires a subjectID column in the QC file"
-            )
-        # sample_id -> subjectID lookup; keep a pair only when both sides match.
-        subject_of = dict(
-            zip(
-                samples_df["sample_id"].astype(str), samples_df["subjectID"].astype(str)
-            )
-        )
-        pairs = [p for p in pairs if subject_of[p[0]] == subject_of[p[1]]]
-    elif mode != "all":
+    if mode == "all":
+        return list(itertools.combinations(sample_ids, 2))
+    if mode not in ("within_subject", "transitions"):
         raise ValueError(f"Unknown --pairs mode: {mode}")
+    if "subjectID" not in samples_df.columns:
+        raise ValueError(f"--pairs {mode} requires a subjectID column in the QC file")
+    # sample_id -> subjectID lookup; a pair is kept only when both sides match.
+    subject_of = dict(
+        zip(samples_df["sample_id"].astype(str), samples_df["subjectID"].astype(str))
+    )
+    if mode == "within_subject":
+        return [p for p in itertools.combinations(sample_ids, 2)
+                if subject_of[p[0]] == subject_of[p[1]]]
 
-    return pairs
+    # mode == "transitions"
+    if not transitions:
+        raise ValueError("--pairs transitions requires --transitions EARLIER:LATER [...]")
+    if "time" not in samples_df.columns:
+        raise ValueError("--pairs transitions requires a time column in the QC file")
+    time_of = dict(zip(samples_df["sample_id"].astype(str), samples_df["time"].astype(str)))
+    # Index samples by (mouse, timepoint) so each transition is a direct lookup:
+    # for every mouse, every sample at EARLIER pairs with every sample at LATER
+    # (normally exactly one of each).
+    at = defaultdict(list)
+    for sample in sample_ids:
+        at[(subject_of[sample], time_of[sample])].append(sample)
+    pairs = set()
+    for earlier, later in transitions:
+        for (subject, time), samples_here in at.items():
+            if time != earlier:
+                continue
+            for sample_a in samples_here:
+                for sample_b in at.get((subject, later), []):
+                    pairs.add(tuple(sorted((sample_a, sample_b))))  # sample1 < sample2
+    return sorted(pairs)
 
 
 def _load_one_sample(job: tuple) -> tuple[str, dict, dict]:
@@ -189,7 +234,7 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     # one pair are ever loaded.  On DRiDO with --pairs within_subject that skips
     # ~38% of the QC-passing roster (samples whose mouse lacks the partner
     # timepoint) -- each skipped load is ~3.6 s and ~34 MB.
-    pairs = enumerate_pairs(samples, args.pairs)
+    pairs = enumerate_pairs(samples, args.pairs, transitions=args.transitions)
     if args.store_snp_locations == "all":
         location_pairs = set(pairs)  # the 7.7 GB option: explicit only
     elif args.store_snp_locations == "within_subject":
@@ -387,9 +432,18 @@ def main():
     )
     parser.add_argument(
         "--pairs",
-        choices=["all", "within_subject"],
+        choices=["all", "within_subject", "transitions"],
         default="within_subject",
-        help="Compare every pair, or only same-mouse pairs",
+        help="all = every pair; within_subject = every same-mouse pair; transitions = "
+        "only same-mouse pairs matching --transitions (what strain-turnover consumes)",
+    )
+    parser.add_argument(
+        "--transitions",
+        nargs="+",
+        default=None,
+        metavar="EARLIER:LATER",
+        help="Timepoint transitions for --pairs transitions, e.g. 5mo:10mo 5mo:22mo "
+        "(the pipeline builds these from analysis.timepoints_combinations)",
     )
     parser.add_argument(
         "--store_snp_locations",
@@ -407,11 +461,17 @@ def main():
         "identical for any value",
     )
     args = parser.parse_args()
+    # Validate the transition specs here, at the door, so a typo fails before
+    # any profile is read; None stays None for the other modes.
+    if args.pairs == "transitions" and not args.transitions:
+        parser.error("--pairs transitions requires --transitions EARLIER:LATER [...]")
+    args.transitions = parse_transitions(args.transitions) if args.transitions else None
 
     logger.info(
         f"pairwise-ani: mag={args.mag} min_cov={args.min_cov} min_freq={args.min_freq} "
         f"fdr={args.fdr:.0e} min_base_quality={args.min_base_quality} pairs={args.pairs} "
-        f"store_snp_locations={args.store_snp_locations} cpus={args.cpus}"
+        f"store_snp_locations={args.store_snp_locations} cpus={args.cpus} "
+        f"transitions={args.transitions}"
     )
     raise SystemExit(round_up_the_sample_pairs(args))
 

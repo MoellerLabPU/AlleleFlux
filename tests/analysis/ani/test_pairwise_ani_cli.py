@@ -221,6 +221,34 @@ class TestPairwiseAniCLI(unittest.TestCase):
         samples = self._read("_pairwise_ani_samples.tsv")
         self.assertEqual(sorted(samples["sample_id"]), ["S1", "S3"])
 
+    def test_transitions_mode_builds_only_the_configured_comparisons(self):
+        """pre:end on the fixture -> the single same-mouse pair S1(pre)-S3(end);
+        S2 (mouse m2, pre only) has no 'end' partner and is not loaded."""
+        self.assertEqual(self._run("--pairs", "transitions", "--transitions", "pre:end").returncode, 0)
+        table = self._read("_pairwise_ani.tsv")
+        self.assertEqual(len(table), 1)
+        self.assertEqual((table.iloc[0]["sample1"], table.iloc[0]["sample2"]), ("S1", "S3"))
+        samples = self._read("_pairwise_ani_samples.tsv")
+        self.assertEqual(sorted(samples["sample_id"]), ["S1", "S3"])
+
+    def test_transitions_mode_with_no_matching_samples_is_header_only(self):
+        """A configured transition nobody has (pre:post) is a legitimate empty
+        result, not an error -- the pipeline must stay green."""
+        completed = self._run("--pairs", "transitions", "--transitions", "pre:post")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        table = self._read("_pairwise_ani.tsv")
+        self.assertEqual(len(table), 0)
+        self.assertIn("popANI", table.columns)
+
+    def test_transitions_mode_requires_the_transitions_flag(self):
+        completed = self._run("--pairs", "transitions")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("transitions", completed.stderr)
+
+    def test_degenerate_transition_is_rejected(self):
+        completed = self._run("--pairs", "transitions", "--transitions", "pre:pre")
+        self.assertNotEqual(completed.returncode, 0)
+
     def test_qc_breadth_mismatch_is_fatal(self):
         """QC recorded a breadth the profile no longer produces -> stale tree."""
         qc = pd.read_csv(self.qc, sep="\t")
