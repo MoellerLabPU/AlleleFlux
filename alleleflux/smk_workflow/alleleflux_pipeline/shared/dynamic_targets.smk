@@ -15,14 +15,36 @@ checkpoint has been evaluated to ensure the DAG is properly updated.
 """
 
 
+# Within-group (across-time) test types — gated by analysis.run_within_group_tests.
+WITHIN_GROUP_TYPES = ("single_sample", "lmm_across_time", "cmh_across_time")
+
+
+def _run_within_group_tests():
+    """Whether within-group / across-time tests should run.
+
+    Default True.  Permuted (null) runs set this False — the divergence null
+    only needs the between-group comparison, so single-sample and across-time
+    tests (which measure within-group change over time) are wasted compute.
+    Also useful as a standalone knob for non-permuted runs.
+    """
+    return config["analysis"].get("run_within_group_tests", True)
+
+
 def get_enabled_test_types():
+    within = _run_within_group_tests()
     enabled = []
     if config["analysis"].get("use_significance_tests", True):
-        enabled.extend(["two_sample_unpaired", "two_sample_paired", "single_sample"])
+        enabled.extend(["two_sample_unpaired", "two_sample_paired"])
+        if within:
+            enabled.append("single_sample")
     if config["analysis"].get("use_lmm", True):
-        enabled.extend(["lmm", "lmm_across_time"])
+        enabled.append("lmm")
+        if within:
+            enabled.append("lmm_across_time")
     if config["analysis"].get("use_cmh", True):
-        enabled.extend(["cmh", "cmh_across_time"])
+        enabled.append("cmh")
+        if within:
+            enabled.append("cmh_across_time")
     return enabled
 
 
@@ -58,8 +80,13 @@ def get_eligible_mags(tp, gr, test_type):
             return _get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
     
     elif test_type in ["single_sample", "lmm_across_time", "cmh_across_time"]:
+        # Within-group tests disabled (e.g. permuted/null run): suppress every
+        # target for these types from every generator via this single chokepoint.
+        if not _run_within_group_tests():
+            return []
+
         preprocess_enabled = config["statistics"].get("preprocess_within_groups", False)
-        
+
         # First get all QC-eligible entries
         sample_entries = _get_single_sample_entries(tp, gr)
         
@@ -90,6 +117,8 @@ def generate_p_value_summary_targets(tp, gr):
     """
     Get the expected summary files for a given timepoint combination and group combination.
     """
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
     test_types = get_enabled_test_types()
     expected = []
     output_dir = os.path.join(OUTDIR, "p_value_summary", f"{tp}-{gr}")
@@ -99,16 +128,35 @@ def generate_p_value_summary_targets(tp, gr):
         if test_type in ['two_sample_unpaired', 'two_sample_paired', 'lmm', 'cmh']:
             mags = get_eligible_mags(tp, gr, test_type)
             if mags:
-                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                filename = f"p_value_summary_{test_type}_{tp}-{gr}.tsv"
                 expected.append(os.path.join(output_dir, filename))
         
         elif test_type in ["single_sample",'lmm_across_time', 'cmh_across_time'] and DATA_TYPE == "longitudinal":
             sample_entries = get_eligible_mags(tp, gr, test_type)
             if sample_entries:
-                filename = f"p_value_summary_{test_type}_{tp}.tsv"
+                filename = f"p_value_summary_{test_type}_{tp}-{gr}.tsv"
                 expected.append(os.path.join(output_dir, filename))
                 
     return expected
+
+def generate_significant_sites_summary_targets():
+    """Run-once rollup of EVERY p_value_summary table into one significant-sites summary.
+
+    Always produced (no config flag) -- the AlleleFlux score/heatmap notebooks consume it --
+    but skipped when ``allele_analysis_only`` is set, since then no p_value_summary tables
+    exist to summarize.  Not scoped by (tp, gr): it is a single terminal aggregation over the
+    whole run, so it is added once, after the per-combination loop in the Snakefile.
+    """
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    return [
+        os.path.join(
+            OUTDIR,
+            "p_value_summary",
+            "significant_sites_summary",
+            "significant_sites_mag_cell_stats_long.tsv",
+        )
+    ]
 
 def generate_allele_analysis_targets(tp, gr):
     """
@@ -118,10 +166,19 @@ def generate_allele_analysis_targets(tp, gr):
     
     NOTE: Uses _get_mags_by_eligibility (QC-only) because allele analysis runs
     BEFORE preprocessing, so preprocessing eligibility is not yet available.
+
+    When within-group tests are disabled (e.g. permuted/null runs), MAGs that
+    are eligible *only* for single-sample (within-group) tests have no
+    downstream consumer, so we restrict to between-group eligibility
+    ("between_only") to avoid scheduling allele-analysis / allele-freq-cache
+    jobs whose output is never used.
     """
     targets = []
-    # Get eligible MAGs for this timepoint-group combination (QC eligibility only)
-    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type="all")
+    # Drop within-group-only MAGs when within-group tests are off — otherwise
+    # use the full QC-eligible set (allele analysis also feeds regional contrast
+    # and stands alone as a deliverable in allele_analysis_only mode).
+    eligibility_type = "all" if _run_within_group_tests() else "between_only"
+    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type=eligibility_type)
     
     # Add targets for each eligible MAG using the centralized path helper
     for mag in eligible_mags:
@@ -133,10 +190,98 @@ def generate_allele_analysis_targets(tp, gr):
     return targets
 
 
-def generate_taxa_scores_targets(tp, gr):
+def generate_mag_scores_targets(tp, gr):
+    """
+    Generate MAG-level combined score targets.
+
+    Not produced when ``allele_analysis_only`` is True, because significance
+    tests are not run and therefore no per-MAG scores are available.
+    """
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
     targets = []
-    # Use centralized taxonomy levels constant from common.smk
-    tax_levels = TAXONOMY_LEVELS
+
+    if config["analysis"].get("use_significance_tests", True):
+        for test_type in ["two_sample_unpaired", "two_sample_paired"]:
+            mags = get_eligible_mags(tp, gr, test_type)
+            if mags:
+                targets.append(
+                    os.path.join(
+                        OUTDIR, "scores", "processed", "combined", "MAG",
+                        f"scores_{test_type}-{tp}-{gr}-MAGs.tsv",
+                    )
+                )
+
+        # Single-sample (longitudinal only)
+        if DATA_TYPE == "longitudinal":
+            sample_entries = get_eligible_mags(tp, gr, "single_sample")
+            if sample_entries:
+                unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                for grp in unique_groups:
+                    targets.append(
+                        os.path.join(
+                            OUTDIR, "scores", "processed", "combined", "MAG",
+                            f"scores_single_sample-{tp}-{gr}_{grp}-MAGs.tsv",
+                        )
+                    )
+
+    if config["analysis"].get("use_lmm", True):
+        mags = get_eligible_mags(tp, gr, "lmm")
+        if mags:
+            targets.append(
+                os.path.join(
+                    OUTDIR, "scores", "processed", "combined", "MAG",
+                    f"scores_lmm-{tp}-{gr}-MAGs.tsv",
+                )
+            )
+        # LMM across time (longitudinal only)
+        if DATA_TYPE == "longitudinal":
+            sample_entries = get_eligible_mags(tp, gr, "lmm_across_time")
+            if sample_entries:
+                unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                for grp in unique_groups:
+                    targets.append(
+                        os.path.join(
+                            OUTDIR, "scores", "processed", "combined", "MAG",
+                            f"scores_lmm_across_time-{tp}-{gr}_{grp}-MAGs.tsv",
+                        )
+                    )
+
+    if config["analysis"].get("use_cmh", True):
+        # Regular CMH — uses combine_MAG_scores_cmh (focus_tp in filename)
+        mags = get_eligible_mags(tp, gr, "cmh")
+        if mags:
+            focus_tp = focus_timepoints.get(tp)
+            if not focus_tp:
+                raise ValueError(f"No focus timepoint defined for {tp}.")
+            targets.append(
+                os.path.join(
+                    OUTDIR, "scores", "processed", "combined", "MAG",
+                    f"scores_cmh-{tp}-{gr}-MAGs-{focus_tp}.tsv",
+                )
+            )
+        # CMH across time (longitudinal only) — uses combine_MAG_scores (standard path)
+        if DATA_TYPE == "longitudinal":
+            sample_entries = get_eligible_mags(tp, gr, "cmh_across_time")
+            if sample_entries:
+                unique_groups = sorted(set([grp for mag, grp in sample_entries]))
+                for grp in unique_groups:
+                    targets.append(
+                        os.path.join(
+                            OUTDIR, "scores", "processed", "combined", "MAG",
+                            f"scores_cmh_across_time-{tp}-{gr}_{grp}-MAGs.tsv",
+                        )
+                    )
+
+    return targets
+
+
+def generate_taxa_scores_targets(tp, gr):
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    targets = []
+    # Read configured levels from config; default to empty list (MAG level only)
+    tax_levels = config["analysis"].get("taxa_score_levels", [])
     
     # For two-sample tests, group_str is empty.
     if config["analysis"].get("use_significance_tests", True):
@@ -257,9 +402,74 @@ def generate_taxa_scores_targets(tp, gr):
     return targets
 
 
-def generate_outlier_gene_targets(tp, gr):
+def generate_gene_scores_targets(tp, gr):
+    """
+    Generate gene-level score targets.
+
+    Only produces targets when ``use_gene_scores`` is True and
+    ``allele_analysis_only`` is False in the config.
+    Covers all enabled test types (standard, LMM, CMH, across-time variants).
+    """
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
     targets = []
-    
+
+    if not config["analysis"].get("use_gene_scores", False):
+        return targets
+
+    base_subdir = f"gene_scores_{tp}-{gr}"
+
+    def _gene_score_path(prefix):
+        return os.path.join(
+            OUTDIR, "scores", "processed", base_subdir,
+            f"{prefix}_gene_scores_combined.tsv",
+        )
+    if config["analysis"].get("use_significance_tests", True):
+        for test_type in ["two_sample_unpaired", "two_sample_paired"]:
+            mags = get_eligible_mags(tp, gr, test_type)
+            for mag in mags:
+                targets.append(_gene_score_path(f"{mag}_{test_type}"))
+
+        # Single-sample (longitudinal only)
+        if DATA_TYPE == "longitudinal":
+            for mag, grp in get_eligible_mags(tp, gr, "single_sample"):
+                targets.append(_gene_score_path(f"{mag}_single_sample_{grp}"))
+
+    if config["analysis"].get("use_lmm", True):
+        for mag in get_eligible_mags(tp, gr, "lmm"):
+            targets.append(_gene_score_path(f"{mag}_lmm"))
+
+        # LMM across time (longitudinal only)
+        if DATA_TYPE == "longitudinal":
+            for mag, grp in get_eligible_mags(tp, gr, "lmm_across_time"):
+                targets.append(_gene_score_path(f"{mag}_lmm_across_time_{grp}"))
+
+    if config["analysis"].get("use_cmh", True):
+        # Regular CMH — uses cmh_gene_scores rule (focus_tp in prefix)
+        mags = get_eligible_mags(tp, gr, "cmh")
+        if mags:
+            focus_tp = focus_timepoints.get(tp)
+            if not focus_tp:
+                raise ValueError(f"No focus timepoint defined for {tp}.")
+            for mag in mags:
+                targets.append(_gene_score_path(f"{mag}_cmh_{focus_tp}"))
+
+        # CMH across time (longitudinal only)
+        if DATA_TYPE == "longitudinal":
+            for mag, grp in get_eligible_mags(tp, gr, "cmh_across_time"):
+                targets.append(_gene_score_path(f"{mag}_cmh_across_time_{grp}"))
+
+    return targets
+
+
+def generate_outlier_gene_targets(tp, gr):
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    targets = []
+
+    if not config["analysis"].get("use_outlier_detection", False):
+        return targets
+
     # Add significance test outlier targets if enabled
     if config["analysis"].get("use_significance_tests", True):
         for test_type in ["two_sample_unpaired", "two_sample_paired"]:
@@ -358,6 +568,107 @@ def generate_outlier_gene_targets(tp, gr):
     return targets
 
 
+def _get_rc_region_types():
+    """Return list of region types expected from the configured mode.
+
+    Used both in dynamic_targets and in regional_contrast.smk rules.
+    Defined here (included before regional_contrast.smk) so it is available
+    during DAG construction in generate_regional_contrast_targets.
+    """
+    mode = config.get("regional_contrast", {}).get("mode", "both")
+    if mode == "gene":
+        return ["gene"]
+    elif mode == "window":
+        return ["window"]
+    else:  # "both"
+        return ["gene", "window"]
+
+
+def generate_regional_contrast_targets(tp, gr):
+    """Generate regional contrast output targets for a timepoint-group combination.
+
+    Returns one per-host (``.tsv.gz``) and one summary (``.tsv``) path per
+    eligible MAG.  Only generates targets for longitudinal data (the rule
+    requires allele-frequency-change columns that do not exist in single-
+    timepoint output).
+
+    Parameters:
+        tp: Timepoint label (e.g., "pre_post")
+        gr: Groups label (e.g., "treatment_control")
+
+    Returns:
+        list: Expected output file paths (empty for single-timepoint data or
+              when ``use_regional_contrast`` is disabled in config).
+    """
+    targets = []
+
+    # Regional contrast requires longitudinal mean-change data
+    if DATA_TYPE != "longitudinal":
+        return targets
+
+    # Honour the opt-out flag; defaults to True (run by default)
+    if not config["analysis"].get("use_regional_contrast", True):
+        return targets
+
+    # Use the same QC-eligibility set as allele analysis (one output per MAG)
+    eligible_mags = _get_mags_by_eligibility(tp, gr, eligibility_type="all")
+
+    base_dir = os.path.join(
+        OUTDIR, "regional_contrast", f"regional_contrast_{tp}-{gr}"
+    )
+    # Determine which region types will be produced based on the configured mode
+    region_types = _get_rc_region_types()
+    for mag in eligible_mags:
+        targets.append(
+            os.path.join(base_dir, f"{mag}_regional_contrast_per_host_region.tsv.gz")
+        )
+        targets.append(
+            os.path.join(base_dir, f"{mag}_regional_contrast_region_summary.tsv")
+        )
+        # Scoring targets are split by region_type (gene vs window) so that
+        # each type uses its own independent denominator.
+        score_base_dir = os.path.join(
+            OUTDIR,
+            "regional_contrast",
+            "scores",
+            f"regional_contrast_scores_{tp}-{gr}",
+        )
+        for rt in region_types:
+            targets.append(
+                os.path.join(
+                    score_base_dir, f"{mag}_regional_contrast_{rt}_scores.tsv"
+                )
+            )
+
+    # Add combined scores targets — one per region_type per timepoint-group combination
+    if eligible_mags:
+        score_base_dir = os.path.join(
+            OUTDIR,
+            "regional_contrast",
+            "scores",
+            f"regional_contrast_scores_{tp}-{gr}",
+        )
+        for rt in region_types:
+            targets.append(
+                os.path.join(
+                    score_base_dir,
+                    f"combined_regional_contrast_{rt}_scores.tsv",
+                )
+            )
+
+        # Add cross-MAG FDR summary targets — one per region_type (gene / window).
+        # Always generate summaries alongside regional contrast analysis.
+        for rt in region_types:
+            targets.append(
+                os.path.join(
+                    base_dir,
+                    f"region_contrast_summary_{rt}_region_summary.tsv",
+                )
+            )
+
+    return targets
+
+
 def generate_dnds_analysis_targets(tp, gr):
     """
     Generate dN/dS analysis targets, which are now directories, one for each subject.
@@ -376,29 +687,16 @@ def generate_dnds_analysis_targets(tp, gr):
     if DATA_TYPE != "longitudinal":
         return targets
 
-    # Check preprocessing config
-    preprocess_between = config["statistics"].get("preprocess_between_groups", False)
-    preprocess_within = config["statistics"].get("preprocess_within_groups", False)
+    # Honour the opt-out flag; defaults to True (run by default)
+    if not config["analysis"].get("use_dnds", True):
+        return targets
 
-    # Map dN/dS test type to base eligibility test type using shared helper
+    # Map dN/dS test type to base eligibility test type using shared helper.
     eligibility_test_type = get_base_test_type(DN_DS_TEST_TYPE)
-    
-    # Trigger preprocessing eligibility checkpoint if enabled (similar to p_value_summary.smk)
-    # This ensures the eligibility file exists before get_eligible_mags() reads it
-    if eligibility_test_type in BETWEEN_GROUP_TEST_TYPES:
-        if preprocess_between:
-            checkpoints.preprocessing_eligibility_between_groups.get(
-                timepoints=tp,
-                groups=gr
-            )
-    elif eligibility_test_type in WITHIN_GROUP_TEST_TYPES:
-        if preprocess_within:
-            checkpoints.preprocessing_eligibility_within_groups.get(
-                timepoints=tp,
-                groups=gr
-            )
-    
-    # Check if there are any eligible MAGs for the dN/dS test type
+
+    # No defensive ``checkpoints.preprocessing_eligibility_*.get()`` call here:
+    # ``get_eligible_mags`` -> ``get_mags_by_preprocessing_eligibility`` performs
+    # that gating itself via ``.output.out_fPath``.  See shared/common.smk.
     eligible_mags = get_eligible_mags(tp, gr, eligibility_test_type)
     if not eligible_mags:
         # No eligible MAGs - don't generate any dN/dS targets
@@ -408,16 +706,11 @@ def generate_dnds_analysis_targets(tp, gr):
     subject_pairs = parse_metadata_for_timepoint_pairs(tp, gr)
     subjects = [str(subject_id) for subject_id, _, _ in subject_pairs]
 
-    # A directory is created for each subject.
+    # A directory is created for each subject; we target its sentinel so
+    # Snakemake's notion of "done" matches a successful subprocess exit
+    # rather than the directory simply existing.
     for subject in subjects:
-        targets.append(
-            os.path.join(
-                OUTDIR,
-                "dnds_analysis",
-                f"{tp}-{gr}",
-                subject
-            )
-        )
+        targets.append(dnds_sentinel(tp, gr, subject))
     return targets
 
 # Test the following functions before uncommenting. They are not all 100% up to date and might need modification. Be careful.
@@ -735,3 +1028,21 @@ def get_combined_scores_targets():
                     )
     return targets
 """
+
+def generate_pairwise_ani_targets():
+    """One pairwise-ANI target per MAG, gated by the use_pairwise_ani flag.
+
+    Not scoped per (timepoints, groups): the rule is group- and timepoint-
+    independent, so this is called once, OUTSIDE the combination loop -- the same
+    shape as generate_significant_sites_summary_targets().  The MAG universe
+    comes from the MAG mapping file (known at DAG-build time), so no checkpoint
+    is triggered; QC files exist for every mapped MAG, and a MAG where nothing
+    passes QC still yields valid header-only outputs from the CLI.
+    """
+    if not config["analysis"].get("use_pairwise_ani", False):
+        return []
+
+    # dtype=str: MAG ids are labels; sorted for a deterministic DAG.
+    mag_mapping = pd.read_csv(config["input"]["mag_mapping_path"], sep="\t", dtype=str)
+    mags = sorted(mag_mapping["mag_id"].unique())
+    return [get_pairwise_ani_output_path(mag_wildcard=mag) for mag in mags]
