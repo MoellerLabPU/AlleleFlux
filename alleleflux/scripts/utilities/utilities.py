@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import logging
+import os
 from collections import defaultdict
 from functools import reduce
 from pathlib import Path
@@ -48,6 +49,13 @@ def build_contig_length_index(fasta_file, mag_mapping_file):
     """
     Build an index of contig lengths limited to contigs present in the mapping file.
 
+    Prefers the samtools ``.fai`` index beside the FASTA (``{fasta_file}.fai``)
+    when it exists: its second column is the sequence length, so the whole index
+    parses in milliseconds, versus a full Biopython parse of a multi-hundred-MB
+    reference.  ``profile_mags.py`` creates the ``.fai`` during profiling, so
+    pipeline runs always have it; the FASTA parse remains as the fallback.  Both
+    paths return identical contents because the index is generated from the FASTA.
+
     Parameters
     ----------
     fasta_file : str
@@ -70,10 +78,31 @@ def build_contig_length_index(fasta_file, mag_mapping_file):
         )
 
     contig_whitelist = set(mag_mapping_df["contig_id"].tolist())
-    contig_lengths = {}
-    for record in SeqIO.parse(fasta_file, "fasta"):
-        if record.id in contig_whitelist:
-            contig_lengths[record.id] = len(record.seq)
+
+    fai_file = f"{fasta_file}.fai"
+    if os.path.exists(fai_file):
+        # Fast path: .fai columns are name, length, offset, linebases, linewidth;
+        # only the first two are needed.  Names read as str so a numeric-looking
+        # contig id cannot become int64 and miss the whitelist.
+        fai_df = pd.read_csv(
+            fai_file, sep="\t", header=None, usecols=[0, 1],
+            names=["contig", "length"], dtype={"contig": str, "length": "int64"},
+        )
+        # Filter while walking the index: keep only mapped contigs.
+        contig_lengths = {
+            contig: int(length)
+            for contig, length in zip(fai_df["contig"], fai_df["length"])
+            if contig in contig_whitelist
+        }
+    else:
+        logger.warning(
+            f"No .fai index beside {fasta_file}; parsing the FASTA instead "
+            "(run `samtools faidx` once to speed this up)"
+        )
+        contig_lengths = {}
+        for record in SeqIO.parse(fasta_file, "fasta"):
+            if record.id in contig_whitelist:
+                contig_lengths[record.id] = len(record.seq)
 
     logger.info(
         f"Indexed {len(contig_lengths):,} contigs with lengths for coverage weighting."

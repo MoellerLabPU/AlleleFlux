@@ -26,6 +26,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from alleleflux.scripts.utilities.utilities import (
+    build_contig_length_index,
     input_has_column,
     relabel_groups_from_metadata,
 )
@@ -178,6 +179,50 @@ class TestInputHasColumn(unittest.TestCase):
         self.cache.to_parquet(p)
         self.assertTrue(input_has_column([p], "sample_id"))
         self.assertFalse(input_has_column([str(p)], "nonexistent_col"))
+
+
+
+
+class TestBuildContigLengthIndex(unittest.TestCase):
+    """The shared contig-length helper: .fai fast path versus FASTA fallback."""
+
+    def _write_reference(self, tmp, with_fai, fai_lengths=None):
+        fasta = Path(tmp) / "ref.fa"
+        fasta.write_text(">c1\nACGT\n>c2\nACGTAC\n")
+        if with_fai:
+            lengths = fai_lengths or {"c1": 4, "c2": 6}
+            lines = [f"{name}\t{length}\t0\t60\t61" for name, length in lengths.items()]
+            (Path(tmp) / "ref.fa.fai").write_text("\n".join(lines) + "\n")
+        mapping = Path(tmp) / "map.tsv"
+        mapping.write_text("mag_id\tcontig_id\nM1\tc1\nM1\tc2\n")
+        return str(fasta), str(mapping)
+
+    def test_fai_index_is_preferred_when_present(self):
+        """A deliberately wrong length in the .fai proves which source was read."""
+        with TemporaryDirectory() as tmp:
+            fasta, mapping = self._write_reference(
+                tmp, with_fai=True, fai_lengths={"c1": 7, "c2": 6}
+            )
+            self.assertEqual(build_contig_length_index(fasta, mapping), {"c1": 7, "c2": 6})
+
+    def test_falls_back_to_parsing_the_fasta(self):
+        with TemporaryDirectory() as tmp:
+            fasta, mapping = self._write_reference(tmp, with_fai=False)
+            self.assertEqual(build_contig_length_index(fasta, mapping), {"c1": 4, "c2": 6})
+
+    def test_both_paths_agree_and_filter_to_mapped_contigs(self):
+        """Same answer with and without the index, and unmapped contigs stay out."""
+        with TemporaryDirectory() as tmp:
+            fasta = Path(tmp) / "ref.fa"
+            fasta.write_text(">c1\nACGT\n>unmapped\nACGTACGT\n")
+            (Path(tmp) / "ref.fa.fai").write_text("c1\t4\t0\t60\t61\nunmapped\t8\t0\t60\t61\n")
+            mapping = Path(tmp) / "map.tsv"
+            mapping.write_text("mag_id\tcontig_id\nM1\tc1\n")
+            via_fai = build_contig_length_index(str(fasta), str(mapping))
+            (Path(tmp) / "ref.fa.fai").unlink()
+            via_fasta = build_contig_length_index(str(fasta), str(mapping))
+            self.assertEqual(via_fai, via_fasta)
+            self.assertEqual(via_fai, {"c1": 4})
 
 
 if __name__ == "__main__":
