@@ -80,6 +80,9 @@ Core analysis settings.
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
 | `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel tests for stratified categorical analysis. Best for detecting consistent directional changes. |
 | `use_dnds` | `true` | Enable dN/dS (Nei-Gojobori) evolutionary-rate analysis. **Longitudinal data only.** Set to `false` to skip the dN/dS step entirely (its parameters live under the top-level [`dnds`](#dnds) section). |
+| `use_pairwise_ani` | `false` | Pairwise conANI/popANI between QC-passing sample pairs, one job per tested MAG (see [`pairwise_ani`](#pairwise_ani-strain_turnover-and-baseline_presence)). |
+| `use_strain_turnover` | `false` | Per-mouse strain-background verdicts per MAG plus the all-MAG classification. Requires `use_pairwise_ani` and longitudinal data. |
+| `use_baseline_presence` | `false` | For each significant site, was the allele present at the earlier timepoint? One job per comparison, after the statistics. |
 | `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
 | `groups_combinations` | Required | List of group pairs to compare (see below). |
 
@@ -303,6 +306,27 @@ regional_contrast:
 - **use_fisher**: Fisher combined p-values provide an orthogonal statistical perspective but require additional computation. Set to `false` for large datasets if runtime is a concern.
 
 ---
+
+### pairwise_ani, strain_turnover and baseline_presence
+
+Settings for the strain-turnover branch (see the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md)). All three sit under `analysis:`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pairwise_ani.min_cov` | 5 | Reads required in both samples for a position to be compared; 1 disables the depth gate. Also the depth gate of baseline presence. |
+| `pairwise_ani.min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI; baseline presence). |
+| `pairwise_ani.fdr` | 1e-6 | Tolerated chance that sequencing error alone explains an allele (popANI; baseline presence). |
+| `pairwise_ani.pairs` | `within_subject` | `within_subject`, `transitions` (only same-subject pairs matching `timepoints_combinations`; what strain turnover consumes) or `all`. |
+| `pairwise_ani.store_snp_locations` | `within_subject` | `none`, `within_subject` or `all` (large). |
+| `strain_turnover.min_compared` | 0.1 | Fraction of the genome both samples must cover for a verdict. |
+| `strain_turnover.pop_threshold` | 0.99999 | popANI below this = `strain_replacement`. |
+| `strain_turnover.con_threshold` | 0.999 | conANI below this = `dominant_strain_change`. |
+| `baseline_presence.summary` | `two_sample_paired` | Which `p_value_summary` family to annotate. |
+| `baseline_presence.test_type` | required | Row filter, spelled as the summary file does (e.g. `two_sample_unpaired_tTest`, `LMM_abs`). |
+| `baseline_presence.threshold_column` | `q_value` | `q_value` (BH) or `min_p_value`. |
+| `baseline_presence.threshold` | 0.05 | Significance cutoff. |
+
+The MAG universe of this branch is the set of **tested** MAGs: the union over every comparison and enabled test of the MAGs the eligibility (and preprocessing, when enabled) checkpoints admitted. Resource overrides use the rule names `pairwise_ani` and `baseline_presence`; `strain_turnover` and `replacement_classification` run locally.
 
 ### Multiple Group Combinations
 

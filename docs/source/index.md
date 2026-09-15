@@ -47,6 +47,7 @@ usage/artifact_reuse_and_null_runs.md
 usage/visualization_guide.md
 usage/interpreting_results.md
 usage/dnds_analysis.md
+usage/strain_turnover_analysis.md
 ```
 
 ```{toctree}

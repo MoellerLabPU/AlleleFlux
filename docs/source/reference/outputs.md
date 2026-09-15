@@ -259,6 +259,59 @@ Key columns:
 - `observed_S`, `observed_N`: Fractional observed counts (path-averaged)
 - `k`: Number of positions changed in codon (1, 2, or 3)
 
+## Strain Turnover and Baseline Presence Outputs
+
+Written only when the corresponding `analysis.use_*` flag is on. See the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md).
+
+### Pairwise ANI
+
+**Path:** `pairwise_ani/{mag}_pairwise_ani.tsv`, `pairwise_ani/{mag}_pairwise_ani_samples.tsv`
+
+One row per compared sample pair.
+
+| Column | Description |
+|--------|-------------|
+| `compared_bases_count`, `percent_genome_compared`, `coverage_overlap` | Positions with ≥ `min_cov` reads in both samples, and that as a fraction of the genome |
+| `consensus_SNPs`, `conANI` | Positions whose majority base differs, and 1 − that / compared |
+| `population_SNPs`, `popANI` | Positions sharing no allele, and 1 − that / compared |
+| `min_cov` | The depth gate the metric was computed with |
+| `subjectID_1/2`, `group_1/2`, `time_1/2`, `replicate_1/2` | Each sample's metadata |
+
+### Strain Turnover
+
+**Path:** `strain_turnover/{mag}_strain_turnover.tsv`, `strain_turnover/{mag}_turnover_rollup.tsv`
+
+One row per subject × transition.
+
+| Column | Description |
+|--------|-------------|
+| `transition`, `sample_t1`, `sample_t2` | The earlier and later sample of this subject |
+| `compared_bases_count`, `percent_genome_compared`, `conANI`, `popANI` | Copied from the pair |
+| `strain_replacement` | popANI < `pop_threshold`; `<NA>` when undetermined |
+| `dominant_strain_change` | conANI < `con_threshold`; `<NA>` when undetermined |
+| `background` | `stable`, `strain_replacement`, `dominant_strain_change` or `undetermined` |
+| `frequency_shift`, `min_compared`, `pop_threshold`, `con_threshold`, `min_cov` | Provenance: the thresholds the verdicts were called with |
+
+### Replacement Classification
+
+**Path:** `strain_turnover/replacement_classification.tsv`
+
+One row per MAG × group × transition × metric (`strain_replacement` and `dominant_strain_change` stacked in a `metric` column).
+
+| Column | Description |
+|--------|-------------|
+| `n_mice_with_call`, `n_mice_undetermined`, `n_mice_changed` | Mice with a verdict, without one, and with a True verdict |
+| `majority_mice_changed`, `any_mouse_changed`, `all_mice_changed`, `no_mouse_changed` | Mouse-block flags |
+| `n_replicates_with_call`, `n_replicates_changed`, `majority_replicates_changed`, `all_replicates_changed` | Replicate block; a replicate counts as changed if any of its mice changed |
+
+### Baseline Presence
+
+**Path:** `baseline_presence/{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long), `..._summary.tsv`
+
+Long table: one row per significant site × allele × sample, with `allele_reads`, `total_reads`, `detection_threshold_reads`, `allele_frequency`, `allele_status` (`present`, `below_detection`, `absent`, `not_covered`), `origin_in_own_mouse`, and optionally `strain_background`.
+
+Summary: one row per site × allele. Sample-count columns (`origin_any_mouse`, `n_{earlier}_samples_allele_present`, `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`, `n_mice_standing_variation`, `n_mice_de_novo_candidate`, ...) apply the presence rule; read-count columns (`total_reads_{tp}`, `allele_reads_{tp}`, `allele_frequency_{tp}`) are unfiltered sums over every sample at that timepoint. Timepoint names in column headers are the comparison's own labels.
+
 ## File Format Notes
 
 - Most files are gzip-compressed TSV (`.tsv.gz`)

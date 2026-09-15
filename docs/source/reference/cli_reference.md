@@ -795,3 +795,128 @@ alleleflux-plot-trajectories --help
 ```
 
 For configuration details, see [Configuration Reference](configuration.md). For how to run the workflow end to end, see [Running the Workflow](../usage/running_workflow.md).
+
+## Strain turnover and baseline presence tools
+
+See the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md) for what these compute and how they chain.
+
+### `alleleflux-pairwise-ani` — conANI / popANI between sample pairs of one MAG
+
+```bash
+alleleflux-pairwise-ani --mag MAG --profiles_dir DIR --qc_files QC [QC ...] \
+  --fasta FASTA --mag_mapping MAPPING --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--mag` | MAG identifier. |
+| `--profiles_dir` | Directory holding per-sample profile subdirectories. |
+| `--qc_files` | Per-MAG QC TSV(s), one per timepoint combination; samples that passed anywhere are compared. |
+| `--fasta` | Reference FASTA. |
+| `--mag_mapping` | MAG-to-contig mapping TSV (`mag_id`, `contig_id`). |
+| `--output_dir` | Output directory. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--min_cov` | 5 | Reads required in **both** samples for a position to be compared; 1 disables the depth gate. |
+| `--min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI only). |
+| `--fdr` | 1e-6 | Tolerated per-position probability that sequencing error explains an allele (popANI only). |
+| `--min_base_quality` | 30 | Phred floor the profiles were built with; sets the error model. |
+| `--pairs` | `within_subject` | `all`, `within_subject` (every same-mouse pair) or `transitions` (same-mouse pairs matching `--transitions`). |
+| `--transitions` | — | `EARLIER:LATER` pairs for `--pairs transitions`, e.g. `pre:end`. |
+| `--store_snp_locations` | `within_subject` | Which pairs also get per-position SNP rows: `none`, `within_subject`, `all`. |
+| `--cpus` | 1 | Workers for loading profiles; results are identical for any value. |
+
+#### Output
+
+`{mag}_pairwise_ani.tsv` (one row per pair: `compared_bases_count`, `percent_genome_compared`, `consensus_SNPs`, `population_SNPs`, `conANI`, `popANI`, `min_cov`, and each sample's subject, group, time and replicate) and `{mag}_pairwise_ani_samples.tsv`.
+
+---
+
+### `alleleflux-strain-turnover` — per-mouse strain verdicts for one MAG
+
+```bash
+alleleflux-strain-turnover --mag MAG --pair_table TSV --output_dir DIR \
+  --transitions EARLIER:LATER [EARLIER:LATER ...] [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--mag` | MAG identifier. |
+| `--pair_table` | This MAG's `{mag}_pairwise_ani.tsv`. |
+| `--output_dir` | Output directory. |
+| `--transitions` | Transitions to call, e.g. `pre:end` or `5mo:10mo 5mo:22mo`. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--min_compared` | 0.1 | Minimum fraction of the genome compared for a verdict; below it both verdicts are `<NA>`. |
+| `--pop_threshold` | 0.99999 | popANI below this = `strain_replacement`. |
+| `--con_threshold` | 0.999 | conANI below this = `dominant_strain_change`. |
+
+#### Output
+
+`{mag}_strain_turnover.tsv` (one row per mouse × transition) and `{mag}_turnover_rollup.tsv` (counts per group × transition).
+
+---
+
+### `alleleflux-replacement-classification` — roll strain verdicts up to one row per MAG
+
+```bash
+alleleflux-replacement-classification --turnover_dir DIR --output_path TSV
+```
+
+| Argument | Description |
+|----------|-------------|
+| `--turnover_dir` | Directory of `{mag}_strain_turnover.tsv` files. |
+| `--output_path` | Output TSV: one row per MAG × transition × metric, mouse block and replicate block side by side. |
+
+---
+
+### `alleleflux-baseline-presence` — was each significant allele present at baseline?
+
+```bash
+alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
+  --profiles_dir DIR --metadata TSV --fasta FASTA --mag_mapping MAPPING \
+  --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | Run root holding `p_value_summary/` and `significance_tests/`. |
+| `--comparison` | Comparison label, e.g. `pre_end-fat_control`. |
+| `--test_type` | Row filter within the summary, spelled exactly as the file does (`two_sample_paired_tTest`, `LMM_abs`, ...). |
+| `--profiles_dir` | Profiles root: `{sample}/{sample}_{mag}_profiled.tsv.gz`. |
+| `--metadata` | Sample metadata TSV (`sample_id`, `subjectID`, `group`, `time`[, `replicate`]). |
+| `--fasta` | Reference FASTA (its `.fai` gives contig lengths). |
+| `--mag_mapping` | MAG-to-contig mapping TSV. |
+| `--output_dir` | Output directory. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--summary` | `two_sample_paired` | Summary family: `two_sample_paired`, `two_sample_unpaired`, `single_sample`, `lmm`, `lmm_across_time`. CMH is not offered (no per-base p-value). |
+| `--threshold_column` | `q_value` | `q_value` or `min_p_value`. |
+| `--threshold` | 0.05 | Significance cutoff. |
+| `--turnover_dir` | — | Strain-turnover outputs; adds a `strain_background` column. |
+| `--mags` | all | Restrict to these MAG ids. |
+| `--min_cov` | 5 | Reads at a position before any verdict (1 = off). |
+| `--min_freq` | 0.05 | Presence frequency floor. |
+| `--fdr` | 1e-6 | Null-model false-discovery rate. |
+| `--min_base_quality` | 30 | Base quality assumed by the null model. |
+| `--cpus` | all | Worker processes (one profile load per MAG × sample). |
+
+#### Output
+
+`{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long: one row per site × allele × sample) and `..._summary.tsv` (one row per site × allele). Column names use the comparison's own timepoint labels.
+
