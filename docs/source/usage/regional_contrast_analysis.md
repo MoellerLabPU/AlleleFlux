@@ -1,5 +1,9 @@
 # Regional Contrast Analysis
 
+:::{warning}
+**Experimental.** Regional contrast analysis was not used or benchmarked in the AlleleFlux publication. It is disabled in the shipped config template (`use_regional_contrast: False`); set it to `True` to opt in, and interpret results with care.
+:::
+
 ## Overview
 
 Regional contrast analysis detects **genes or genomic windows with differential allele-frequency evolution** between treatment and control groups across paired hosts (e.g., biological replicates). It is designed to identify regions under divergent evolutionary pressures or parallel adaptation between conditions.
@@ -64,7 +68,7 @@ regional_contrast:
 | `min_informative_sites` | `5` | Minimum variable sites per region. Regions with fewer are excluded. Set to `0` to disable. **Note:** A region with all `site_score == 0` (stasis) still has full informative sites. |
 | `min_informative_fraction` | `0.0` | Minimum coverage: `(sites_observed) / (region_length)`. Set to `0.0` to disable. |
 | `use_fisher` | `true` | Compute Fisher combined p-values from percentiles (secondary/exploratory). Set to `false` to skip. |
-| `use_regional_contrast` | `true` | Global enable/disable flag. Set to `false` to skip this analysis entirely. |
+| `use_regional_contrast` | `false` | Global enable/disable flag. Off by default (experimental); set to `true` to run this analysis. |
 
 ## Workflow Overview
 

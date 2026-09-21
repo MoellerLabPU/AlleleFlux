@@ -45,7 +45,8 @@ analysis:
   use_lmm: True                   # Linear Mixed Models: Best for repeated measures, accounts for subject-level variation
   use_significance_tests: True    # Two-sample (t-test, Mann-Whitney) and single-sample tests: Simple comparisons
   use_cmh: True                   # Cochran-Mantel-Haenszel: Stratified categorical analysis, detects directional changes
-  use_regional_contrast: True     # Regional contrast: detect genes/windows with differential allele-frequency evolution
+  use_regional_contrast: False    # EXPERIMENTAL (off by default; not used or benchmarked in the AlleleFlux publication).
+                                  # Regional contrast: detect genes/windows with differential allele-frequency evolution
                                   # Only applicable to longitudinal data; runs on raw allele-frequency changes (no preprocessing)
   use_dnds: True                  # dN/dS (Nei-Gojobori) evolutionary-rate analysis on significant sites
                                   # Only applicable to longitudinal data; set False to skip the dN/dS step entirely

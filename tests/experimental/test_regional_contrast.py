@@ -12,7 +12,7 @@ columns (region_id/region_start/region_end/region_length) this exploded to a
 import pandas as pd
 import pytest
 
-from alleleflux.scripts.analysis.regional_contrast import (
+from alleleflux.scripts.experimental.regional_contrast import (
     FISHER_PVAL_CONTROL_COL,
     FISHER_PVAL_TREATMENT_COL,
     _fisher_merge_keys,
@@ -23,7 +23,7 @@ from alleleflux.scripts.analysis.regional_contrast import (
     reshape_treatment_control,
     write_outputs,
 )
-from alleleflux.scripts.analysis.regional_contrast import (
+from alleleflux.scripts.experimental.regional_contrast import (
     test_region_contrasts as run_region_contrasts,
 )
 

@@ -598,7 +598,7 @@ def generate_regional_contrast_targets(tp, gr):
 
     Returns:
         list: Expected output file paths (empty for single-timepoint data or
-              when ``use_regional_contrast`` is disabled in config).
+              when ``use_regional_contrast`` is not enabled in config).
     """
     targets = []
 
@@ -606,8 +606,10 @@ def generate_regional_contrast_targets(tp, gr):
     if DATA_TYPE != "longitudinal":
         return targets
 
-    # Honour the opt-out flag; defaults to True (run by default)
-    if not config["analysis"].get("use_regional_contrast", True):
+    # Opt-in flag; defaults to False. Regional contrast is experimental (not used
+    # or validated in the publication), so a config that omits the key must NOT
+    # silently run it -- same default as use_outlier_detection above.
+    if not config["analysis"].get("use_regional_contrast", False):
         return targets
 
     # Use the same QC-eligibility set as allele analysis (one output per MAG)

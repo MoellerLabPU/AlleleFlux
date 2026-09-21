@@ -20,7 +20,8 @@ Output: Scores, outliers, p-values ← Step 2 (Statistical tests + scoring) ← 
 
 ### Script Organization
 - **`alleleflux/scripts/`**: All CLI tools (installed as `alleleflux-*` commands)
-  - `analysis/`: Core allele frequency analysis (`allele_freq.py`), scoring (`scores.py`, `gene_scores.py`, `taxa_scores.py`, `cmh_scores.py`), outlier detection (`outliers_genes.py`)
+  - `analysis/`: Core allele frequency analysis (`allele_freq.py`), scoring (`scores.py`, `gene_scores.py`, `taxa_scores.py`, `cmh_scores.py`)
+  - `experimental/`: Unvalidated modules not used in the publication and off by default - regional contrast (`regional_contrast.py`, `regional_contrast_summary.py`), outlier gene detection (`outliers_genes.py`)
   - `preprocessing/`: Metadata generation (`mag_metadata.py`), QC (`quality_control.py`), eligibility tables (`eligibility_table.py`), preprocessing for statistical tests (`preprocess_*.py`)
   - `statistics/`: Statistical tests - LMM (`LMM.py`), CMH (`CMH.py`), two-sample (paired/unpaired), single-sample
   - `accessory/`: MAG mapping (`create_mag_mapping.py`), coverage stats (`coverage_and_allele_stats.py`)

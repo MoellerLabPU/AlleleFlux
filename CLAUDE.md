@@ -106,9 +106,11 @@ alleleflux/
 │   │   ├── allele_frequency/    # allele_freq.py, allele_freq_cache.py,
 │   │   │                        # _allele_freq_common.py
 │   │   ├── scoring/             # scores.py, cmh_scores.py, gene_scores.py,
-│   │   │                        # taxa_scores.py, outliers_genes.py
-│   │   ├── profile_mags.py      # BAM pileup and gene mapping
-│   │   └── regional_contrast.py # Regional allele contrast
+│   │   │                        # taxa_scores.py
+│   │   └── profile_mags.py      # BAM pileup and gene mapping
+│   ├── experimental/    # NOT in the paper, unvalidated, off by default:
+│   │                    # regional_contrast.py, regional_contrast_summary.py,
+│   │                    # outliers_genes.py
 │   ├── preprocessing/   # mag_metadata.py, quality_control.py,
 │   │                    # eligibility_table.py, preprocess_*.py
 │   ├── statistics/      # LMM.py, CMH.py, two_sample_paired/unpaired,

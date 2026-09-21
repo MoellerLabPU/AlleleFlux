@@ -229,6 +229,10 @@ Scores aggregated by gene.
 
 ### Outlier Gene Files
 
+:::{warning}
+**Experimental.** Outlier gene detection (binomial and Poisson tests, `alleleflux-outliers`) was not used or benchmarked in the AlleleFlux publication. It is off by default (`use_outlier_detection: False`); these files are only produced if you opt in.
+:::
+
 **Path:** `outlier_genes/{timepoints}-{groups}/{test_type}_outlier_genes.tsv.gz`
 
 Genes with exceptionally high scores (potential adaptive targets).

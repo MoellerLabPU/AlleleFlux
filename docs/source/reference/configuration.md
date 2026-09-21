@@ -253,6 +253,10 @@ dnds:
 
 ### regional_contrast
 
+:::{warning}
+**Experimental.** Regional contrast analysis was not used or benchmarked in the AlleleFlux publication. The shipped config template sets `use_regional_contrast: False`; set it to `True` to opt in.
+:::
+
 Parameters for regional contrast analysis (longitudinal data only). Detects genes or sliding windows where treatment and control groups show consistently different allele-frequency evolution across paired hosts.
 
 :::{note}
@@ -268,7 +272,7 @@ Regional contrast analysis is **only applicable to longitudinal data** (`data_ty
 | `min_informative_sites` | `5` | Minimum number of variable sites required per region. Regions with fewer sites are excluded. Set to `0` to disable. **Note:** Sites with `site_score == 0` (perfect evolutionary stasis) are counted if they exist in the input. |
 | `min_informative_fraction` | `0.0` | Minimum fraction of region length that must be covered by informative sites (0.0–1.0). Set to `0.0` to disable. |
 | `use_fisher` | `true` | Also compute Fisher combined p-values from percentile-derived empirical p-values (secondary/exploratory analysis). Set to `false` to skip this computationally intensive step. |
-| `use_regional_contrast` | `true` | Enable or disable regional contrast analysis entirely. Set to `false` to skip this analysis. |
+| `use_regional_contrast` | `false` | Enable or disable regional contrast analysis entirely. Off by default (experimental); set to `true` to run this analysis. |
 
 **Example with default settings:**
 
