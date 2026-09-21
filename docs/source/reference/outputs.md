@@ -301,8 +301,16 @@ One row per MAG × group × transition × metric (`strain_replacement` and `domi
 | Column | Description |
 |--------|-------------|
 | `n_mice_with_call`, `n_mice_undetermined`, `n_mice_changed` | Mice with a verdict, without one, and with a True verdict |
-| `majority_mice_changed`, `any_mouse_changed`, `all_mice_changed`, `no_mouse_changed` | Mouse-block flags |
-| `n_replicates_with_call`, `n_replicates_changed`, `majority_replicates_changed`, `all_replicates_changed` | Replicate block; a replicate counts as changed if any of its mice changed |
+| `majority_mice_changed`, `any_mouse_changed`, `all_mice_changed`, `no_mouse_changed` | Mouse-block flags. **Blank** when fewer than `min_voters` mice had a verdict: a blank means "no verdict", never "not changed" |
+| `strain_status` | **The column to filter on.** Under the default `vote_rule: majority`: `replaced` (at least `min_voters` mice with a verdict, more than half changed), `not_replaced` (at least `min_voters`, half or fewer changed), `too_few_voters` (1 to `min_voters`-1), `no_voters` (none), and `tie` (exactly half, only with `tie: unresolved`). With `vote_rule: any` or `all` the line between the first two moves; the last three do not |
+| `n_replicates_with_call`, `n_replicates_changed`, `majority_replicates_changed`, `all_replicates_changed` | Replicate block; a replicate counts as changed if any of its mice changed. Flags blank under the same floor, counted in replicates |
+| `strain_status_replicates` | The same status word with replicates as the voters |
+| `min_voters`, `vote_rule`, `tie_rule` | The settings that produced the row |
+
+A key is in one of three situations (replaced, checked and not replaced, not
+checkable) and a True/False flag can hold only two. Keep
+`strain_status == "not_replaced"` to select verified MAGs; testing a flag for
+`True` would let every unchecked MAG through.
 
 ### Baseline Presence
 

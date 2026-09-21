@@ -85,9 +85,33 @@ the metadata has no replicate column, replicate equals subject and the two
 blocks agree).  Both metrics are always reported, stacked, with a `metric`
 column, so the choice of threshold is made downstream.
 
-This table is the input for a strain-aware enrichment filter: drop the MAGs
-(or MAG × transition pairs) where the background changed before counting
-significant sites.
+This table is the input for a strain-aware enrichment filter.  Filter on the
+`strain_status` column and **keep** the MAG × group × transition keys that read
+`not_replaced`, before counting significant sites.
+
+Do not write the filter the other way round ("drop the keys where the
+background changed").  A key is in one of three situations:
+
+| `strain_status` | meaning |
+|---|---|
+| `replaced` | at least `min_voters` mice had a verdict and more than half changed |
+| `not_replaced` | at least `min_voters` mice had a verdict and half or fewer changed |
+| `too_few_voters`, `no_voters` | not enough mice could be checked to say |
+
+In sparsely covered data most keys are in the third row, because a mouse only
+gets a verdict when both of its samples cover enough of the genome.  Dropping
+the `replaced` keys keeps all of those unchecked keys as if they had passed.
+For the same reason the yes/no columns are left **blank** below the floor
+instead of `False`: a blank cannot be read as "checked, and it did not change".
+
+Three settings under `strain_turnover` in the config shape the status:
+`min_voters` (default 8), `vote_rule` (`majority` by default; `any` flags a key
+when a single voter changed, `all` only when every voter did) and `tie` (what
+an exact half-and-half vote means under `majority`, default `not_replaced`).
+The rule is chosen here, once, and stamped on every row, so every analysis
+reading the table uses the same one.  All three belong to this step alone:
+changing them reruns only this roll-up, not pairwise ANI or the per-mouse
+calls.
 
 ## Step 4: baseline presence (`alleleflux-baseline-presence`)
 

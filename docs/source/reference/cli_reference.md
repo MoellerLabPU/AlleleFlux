@@ -870,13 +870,17 @@ alleleflux-strain-turnover --mag MAG --pair_table TSV --output_dir DIR \
 ### `alleleflux-replacement-classification` — roll strain verdicts up to one row per MAG
 
 ```bash
-alleleflux-replacement-classification --turnover_dir DIR --output_path TSV
+alleleflux-replacement-classification --turnover_dir DIR --output_path TSV \
+  [--min_voters 8] [--vote_rule majority] [--tie not_replaced]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `--turnover_dir` | Directory of `{mag}_strain_turnover.tsv` files. |
 | `--output_path` | Output TSV: one row per MAG × transition × metric, mouse block and replicate block side by side. |
+| `--min_voters` | Fewest mice (or replicates) with a verdict needed for any yes/no call (default 8). Below it the flags are blank and `strain_status` reads `too_few_voters` or `no_voters`. |
+| `--vote_rule` | When a checked key counts as replaced: `majority` (default), `any`, or `all`. |
+| `--tie` | With `--vote_rule majority`, what exactly half the voters changing means for `strain_status`: `not_replaced` (default), `replaced`, or `unresolved`. |
 
 ---
 
