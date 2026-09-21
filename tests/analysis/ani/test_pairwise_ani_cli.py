@@ -153,6 +153,13 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertEqual(len(locations), 0)
         self.assertIn("population_SNP", locations.columns)
 
+    def test_snp_locations_none_writes_no_file(self):
+        # "none" means nothing to store: no header-only placeholder either, so a
+        # directory listing never suggests locations were recorded.
+        self.assertEqual(self._run("--store_snp_locations", "none").returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.out, f"{self.MAG}_pairwise_ani_snp_locations.tsv.gz")))
+        self.assertTrue(os.path.exists(os.path.join(self.out, f"{self.MAG}_pairwise_ani.tsv")))
+
     def test_snp_locations_all_records_the_fixed_difference(self):
         self.assertEqual(self._run("--store_snp_locations", "all").returncode, 0)
         locations = pd.read_csv(

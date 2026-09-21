@@ -48,11 +48,12 @@ rule baseline_presence:
         test_type=config["analysis"]["baseline_presence"]["test_type"],
         threshold_column=config["analysis"].get("baseline_presence", {}).get("threshold_column", "q_value"),
         threshold=config["analysis"].get("baseline_presence", {}).get("threshold", 0.05),
-        # Presence rule: same knobs as pairwise ANI so the two agree by construction.
-        min_cov=config["analysis"].get("pairwise_ani", {}).get("min_cov", 5),
-        min_freq=config["analysis"].get("pairwise_ani", {}).get("min_freq", 0.05),
-        fdr=config["analysis"].get("pairwise_ani", {}).get("fdr", 1e-6),
-        min_base_quality=config.get("profiling", {}).get("min_base_quality", 30),
+        # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
+        # "present" means one thing across the ANI table and this one.
+        min_cov=PRESENCE_RULE["min_cov"],
+        min_freq=PRESENCE_RULE["min_freq"],
+        fdr=PRESENCE_RULE["fdr"],
+        min_base_quality=PRESENCE_RULE["min_base_quality"],
         turnover_arg=(
             f"--turnover_dir {os.path.join(OUTDIR, 'strain_turnover')}"
             if config["analysis"].get("use_strain_turnover", False)

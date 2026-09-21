@@ -1134,6 +1134,35 @@ def get_pairwise_ani_output_path(mag_wildcard="{mag}"):
     return os.path.join(OUTDIR, "pairwise_ani", f"{mag_wildcard}_pairwise_ani.tsv")
 
 
+def presence_rule_params():
+    """The allele-presence rule, read from config ONCE for every rule that applies it.
+
+    pairwise_ani decides whether two samples share an allele, and
+    baseline_presence decides whether an allele was present at the earlier
+    timepoint, with the SAME rule: at least ``min_cov`` reads at the position,
+    then at least the null-model bar (from ``fdr`` and ``min_base_quality``)
+    AND ``min_freq`` of the reads.  Both rules read this one dict, so a changed
+    default changes both tables or neither -- they can never drift apart
+    silently.  Defaults match the two CLIs' argparse defaults.
+
+    Example: with no ``pairwise_ani`` block in the config ->
+    ``{"min_cov": 5, "min_freq": 0.05, "fdr": 1e-6, "min_base_quality": 30}``.
+    """
+    ani = config["analysis"].get("pairwise_ani", {})
+    return {
+        "min_cov": ani.get("min_cov", 5),
+        "min_freq": ani.get("min_freq", 0.05),
+        "fdr": ani.get("fdr", 1e-6),
+        # The error model must assume the base-quality floor the profiles were
+        # built with -- read from the profiling section, never a separate knob.
+        "min_base_quality": config.get("profiling", {}).get("min_base_quality", 30),
+    }
+
+
+# Evaluated once at parse time; rules reference PRESENCE_RULE["min_cov"] etc.
+PRESENCE_RULE = presence_rule_params()
+
+
 def get_strain_turnover_output_path(mag_wildcard="{mag}"):
     """Per-MAG strain-turnover table (the strain_turnover rule's primary output); OUTDIR, like ANI."""
     return os.path.join(OUTDIR, "strain_turnover", f"{mag_wildcard}_strain_turnover.tsv")

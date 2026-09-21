@@ -361,12 +361,18 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
                     pair_table[f"sample{side}"].map(metadata[field]).astype(str)
                 )
 
-    # ---- 8. Write both tables (gzip for locations: it can be large for 'all').
+    # ---- 8. Write the pair table; the locations table only when something was
+    # stored ('none' writes no file at all -- a header-only placeholder would
+    # suggest locations were recorded; the file is not a Snakemake output).
     pair_out = os.path.join(args.output_dir, f"{args.mag}_pairwise_ani.tsv")
+    pair_table.to_csv(pair_out, sep="\t", index=False)
+    if args.store_snp_locations == "none":
+        logger.info(f"Wrote {pair_out} ({len(pair_table)} pairs); SNP locations not stored")
+        return 0
     location_out = os.path.join(
         args.output_dir, f"{args.mag}_pairwise_ani_snp_locations.tsv.gz"
     )
-    pair_table.to_csv(pair_out, sep="\t", index=False)
+    # gzip: the locations table can be large for 'all'.
     snp_locations.to_csv(location_out, sep="\t", index=False, compression="gzip")
     logger.info(
         f"Wrote {pair_out} ({len(pair_table)} pairs) and "

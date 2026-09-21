@@ -44,12 +44,12 @@ rule pairwise_ani:
         qc_files=lambda wildcards: " ".join(get_all_qc_files_for_mag(wildcards.mag)),
         profiles_dir=PROFILES_DIR,
         output_dir=os.path.join(OUTDIR, "pairwise_ani"),
-        min_cov=config["analysis"].get("pairwise_ani", {}).get("min_cov", 5),
-        min_freq=config["analysis"].get("pairwise_ani", {}).get("min_freq", 0.05),
-        fdr=config["analysis"].get("pairwise_ani", {}).get("fdr", 1e-6),
-        # The error model must assume the SAME base-quality floor the profiles
-        # were built with -- read it from the profiling section, not a new knob.
-        min_base_quality=config.get("profiling", {}).get("min_base_quality", 30),
+        # The presence rule, shared with baseline_presence via one dict in
+        # common.smk so the two can never disagree about what "present" means.
+        min_cov=PRESENCE_RULE["min_cov"],
+        min_freq=PRESENCE_RULE["min_freq"],
+        fdr=PRESENCE_RULE["fdr"],
+        min_base_quality=PRESENCE_RULE["min_base_quality"],
         pairs=config["analysis"].get("pairwise_ani", {}).get("pairs", "within_subject"),
         # --transitions is only meaningful for pairs == "transitions"; built from the
         # configured timepoint combinations (EARLIER:LATER each), and left empty for
