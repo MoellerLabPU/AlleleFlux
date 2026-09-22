@@ -65,14 +65,15 @@ rule replacement_classification:
         get_replacement_classification_path(),
     params:
         turnover_dir=os.path.join(OUTDIR, "strain_turnover"),
-        # The voter floor, the vote rule and the tie rule belong to THIS step only:
-        # a mouse's own verdict does not depend on how many other mice could be
-        # called, so changing any of them reruns this cheap roll-up and nothing
-        # upstream of it.  Defaults mirror DEFAULT_MIN_VOTERS / DEFAULT_VOTE_RULE /
-        # DEFAULT_TIE in the script.
+        # The voter floor, the vote rule, the tie rule and the replicate rule belong
+        # to THIS step only: a mouse's own verdict does not depend on how many other
+        # mice could be called, so changing any of them reruns this cheap roll-up and
+        # nothing upstream of it.  Defaults mirror DEFAULT_MIN_VOTERS /
+        # DEFAULT_VOTE_RULE / DEFAULT_TIE / DEFAULT_REPLICATE_RULE in the script.
         min_voters=config["analysis"].get("strain_turnover", {}).get("min_voters", 8),
         vote_rule=config["analysis"].get("strain_turnover", {}).get("vote_rule", "majority"),
         tie=config["analysis"].get("strain_turnover", {}).get("tie", "not_replaced"),
+        replicate_rule=config["analysis"].get("strain_turnover", {}).get("replicate_rule", "average"),
     shell:
         """
         alleleflux-replacement-classification \
@@ -80,5 +81,6 @@ rule replacement_classification:
             --output_path {output} \
             --min_voters {params.min_voters} \
             --vote_rule {params.vote_rule} \
-            --tie {params.tie}
+            --tie {params.tie} \
+            --replicate_rule {params.replicate_rule}
         """

@@ -113,6 +113,21 @@ reading the table uses the same one.  All three belong to this step alone:
 changing them reruns only this roll-up, not pairwise ANI or the per-mouse
 calls.
 
+A fourth setting, `replicate_rule`, matters only when a replicate holds several
+subjects, for example a cage of co-housed mice.  It decides how those subjects
+become the replicate's single vote in the replicate block:
+
+| `replicate_rule` | The replicate counts as changed when |
+|---|---|
+| `average` (default) | the mean ANI of its subjects with a verdict is below the threshold: conANI against `con_threshold`, popANI against `pop_threshold` |
+| `any` | at least one of its subjects with a verdict changed |
+| `majority` | more than half of them changed (1 of 2 is not a majority) |
+
+Subjects without a verdict never take part, under any rule.  Their rows still
+carry ANI numbers, computed from too little of the genome to trust, and
+`average` leaves those out of the mean.  A replicate with a single subject gives
+the same answer under all three rules.
+
 ## Step 4: baseline presence (`alleleflux-baseline-presence`)
 
 One job per `{timepoints}-{groups}` comparison, after the statistics.  It reads

@@ -328,6 +328,7 @@ Settings for the strain-turnover branch (see the [Strain Turnover and Baseline P
 | `strain_turnover.min_voters` | 8 | Fewest mice (or replicates) with a verdict that a MAG × group × transition needs. Below it the classification gives no verdict (`too_few_voters` / `no_voters`). Applies to the classification step only; changing it does not rerun pairwise ANI or the per-mouse calls. |
 | `strain_turnover.vote_rule` | `majority` | When a checked key counts as replaced: `majority` (more than half its voters changed), `any` (at least one did) or `all` (every one did). |
 | `strain_turnover.tie` | `not_replaced` | With `vote_rule: majority`, what an exact half-and-half vote means: `not_replaced`, `replaced` or `unresolved`. |
+| `strain_turnover.replicate_rule` | `average` | When a replicate holds several subjects (e.g. a cage), how they become its one vote in the replicate block: `average` (the mean conANI / popANI of its subjects with a verdict is below the threshold), `any` (one changed subject is enough) or `majority` (more than half). |
 | `baseline_presence.summary` | `two_sample_paired` | Which `p_value_summary` family to annotate. |
 | `baseline_presence.test_type` | required | Row filter, spelled as the summary file does (e.g. `two_sample_unpaired_tTest`, `LMM_abs`). |
 | `baseline_presence.threshold_column` | `q_value` | `q_value` (BH) or `min_p_value`. |

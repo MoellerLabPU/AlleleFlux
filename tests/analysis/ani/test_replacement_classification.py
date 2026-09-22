@@ -1,7 +1,7 @@
 """Tests for rolling per-mouse strain-background calls up to MAGs.
 
 Every MAG-level row carries two blocks: counts over MICE, and counts over
-REPLICATES (a replicate "changed" if ANY of its mice changed).  With no
+REPLICATES (one vote per replicate, made from its mice by ``replicate_rule``).  With no
 replicate column in the metadata replicate == mouse and the blocks agree.
 """
 import unittest
@@ -11,13 +11,26 @@ import pandas as pd
 from alleleflux.scripts.analysis.ani.replacement_classification import METRICS, classify_mags
 
 
+CON_THRESHOLD, POP_THRESHOLD = 0.999, 0.99999
+
+
 def _call_row(mag, mouse, group, transition, replacement, dominant, replicate=None):
-    """One turnover-table row (Task 6 schema).  ``None`` for a flag means undetermined (pd.NA)."""
+    """One turnover-table row (Task 6 schema).  ``None`` for a flag means undetermined (pd.NA).
+
+    Each flag also gets an ANI value that agrees with it (just under the
+    threshold when True, just over when False, a junk value when undetermined),
+    so the default ``replicate_rule="average"`` can run on these fixtures and,
+    with one mouse per cage, gives the same answer as the flag itself.
+    """
+    def ani(flag, threshold):
+        return 0.5 if flag is None else (threshold - 1e-4 if flag else threshold + 1e-6)
     return {
         "MAG_ID": mag, "subjectID": mouse, "group": group,
         "replicate": replicate or mouse, "transition": transition,
         "strain_replacement": pd.NA if replacement is None else replacement,
         "dominant_strain_change": pd.NA if dominant is None else dominant,
+        "popANI": ani(replacement, POP_THRESHOLD), "pop_threshold": POP_THRESHOLD,
+        "conANI": ani(dominant, CON_THRESHOLD), "con_threshold": CON_THRESHOLD,
     }
 
 
@@ -103,6 +116,10 @@ class TestMouseBlock(unittest.TestCase):
 
 
 class TestReplicateBlock(unittest.TestCase):
+    """Replicate counts beside mouse counts, under ``replicate_rule="any"``
+    (the rule these cage fixtures were written for; ``TestReplicateRule``
+    covers the default ``average``)."""
+
     ROWS = [
         # cage c1: m1 changed, m2 not  -> the cage counts as changed (ANY mouse).
         _call_row("MAG_A", "m1", "40", "5mo_22mo", True, False, replicate="c1"),
@@ -114,7 +131,7 @@ class TestReplicateBlock(unittest.TestCase):
     ]
 
     def test_replicate_counts_sit_beside_mouse_counts(self):
-        both = _classify(_frame(self.ROWS))
+        both = _classify(_frame(self.ROWS), replicate_rule="any")
         row = both[both.metric == "strain_replacement"].iloc[0]
         # mice: 3 called (m1,m2,m3), 1 changed -> 1 of 3 is no majority
         self.assertEqual((row.n_mice_with_call, row.n_mice_changed), (3, 1))
@@ -133,14 +150,14 @@ class TestReplicateBlock(unittest.TestCase):
             _call_row("MAG_A", "m3", "40", "5mo_22mo", False, False, replicate="c1"),
             _call_row("MAG_A", "m4", "40", "5mo_22mo", True, False, replicate="c2"),
         ]
-        both = _classify(_frame(rows))
+        both = _classify(_frame(rows), replicate_rule="any")
         row = both[both.metric == "strain_replacement"].iloc[0]
         self.assertFalse(row.majority_mice_changed)
         self.assertTrue(row.majority_replicates_changed)
         self.assertTrue(row.all_replicates_changed)
 
     def test_replicate_equal_to_mouse_makes_the_blocks_agree(self):
-        # DRiDO: no replicate column -> replicate == subjectID.
+        # No replicate column in the metadata -> replicate == subjectID.
         rows = [_call_row("MAG_A", m, "40", "5mo_22mo", flag, False)
                 for m, flag in (("m1", True), ("m2", False), ("m3", None))]
         both = _classify(_frame(rows))
@@ -148,6 +165,109 @@ class TestReplicateBlock(unittest.TestCase):
         self.assertEqual(row.n_replicates_with_call, row.n_mice_with_call)
         self.assertEqual(row.n_replicates_changed, row.n_mice_changed)
         self.assertEqual(row.majority_replicates_changed, row.majority_mice_changed)
+
+
+def _ani_row(mouse, cage, con_ani, pop_ani, determined=True):
+    """A turnover row WITH its ANI values; the two flags are derived from them.
+
+    Mirrors ``strain_turnover``: flag = ANI < threshold, blank when the pair
+    compared too little of the genome (``determined=False``) -- the ANI numbers
+    are still written for such a mouse, which is exactly the trap under test.
+    """
+    row = _call_row(
+        "MAG_A", mouse, "40", "5mo_22mo",
+        (pop_ani < POP_THRESHOLD) if determined else None,
+        (con_ani < CON_THRESHOLD) if determined else None,
+        replicate=cage,
+    )
+    row.update(conANI=con_ani, popANI=pop_ani,
+               con_threshold=CON_THRESHOLD, pop_threshold=POP_THRESHOLD)
+    return row
+
+
+class TestReplicateRule(unittest.TestCase):
+    """How the mice of ONE replicate become that replicate's single vote.
+
+    conANI per cage (threshold 0.999):
+      c1 = 0.9980, 0.9996, 0.9998 -> one mouse changed; mean 0.99913 is NOT below the line
+      c2 = 0.9900, 0.9995         -> one mouse changed; mean 0.99475 IS below the line
+      c3 = 0.9999 + an UNDETERMINED mouse at 0.90 that must not enter the mean
+      c4 = only an undetermined mouse -> the cage has no vote at all
+    So the three rules give three different counts of changed cages:
+      any 2 (c1, c2) / majority 0 (1 of 3; 1 of 2 is a tie) / average 1 (c2).
+    """
+
+    ROWS = [
+        _ani_row("m1", "c1", 0.9980, 0.99990),
+        _ani_row("m2", "c1", 0.9996, 0.999995),
+        _ani_row("m3", "c1", 0.9998, 0.999999),
+        _ani_row("m4", "c2", 0.9900, 0.9999),
+        _ani_row("m5", "c2", 0.9995, 0.999995),
+        _ani_row("m6", "c3", 0.90, 0.95, determined=False),
+        _ani_row("m7", "c3", 0.9999, 0.999999),
+        _ani_row("m8", "c4", 0.90, 0.95, determined=False),
+    ]
+
+    def _row(self, metric="dominant_strain_change", **kwargs):
+        got = _classify(_frame(self.ROWS), **kwargs)
+        return got[got.metric == metric].iloc[0]
+
+    def test_average_is_the_default(self):
+        row = self._row()
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (3, 1))
+        self.assertEqual(row.replicate_rule, "average")
+
+    def test_any_flags_a_cage_on_one_changed_mouse(self):
+        row = self._row(replicate_rule="any")
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (3, 2))
+        self.assertEqual(row.replicate_rule, "any")
+
+    def test_majority_needs_more_than_half_the_cage(self):
+        row = self._row(replicate_rule="majority")
+        # c1: 1 of 3.  c2: 1 of 2 is a tie, and a tie is not a majority.
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (3, 0))
+
+    def test_average_thresholds_the_mean_ani_of_the_cage(self):
+        row = self._row(replicate_rule="average")
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (3, 1))
+        self.assertEqual(row.replicate_rule, "average")
+
+    def test_average_ignores_undetermined_mice(self):
+        # With m6's 0.90 in the mean, c3 would read (0.90 + 0.9999) / 2 = 0.95 -> changed,
+        # and the count would be 2.  It is 1, so m6 was left out.  c4 stays voteless.
+        row = self._row(replicate_rule="average")
+        self.assertEqual(row.n_replicates_changed, 1)
+        self.assertEqual(row.n_replicates_with_call, 3)
+
+    def test_average_reads_the_metrics_own_ani_and_threshold(self):
+        # popANI against 0.99999: c1 mean 0.999964 and c2 mean 0.9999475 are both
+        # below the line, c3 (0.999999) is not -> 2, where conANI gave 1.
+        row = self._row(metric="strain_replacement", replicate_rule="average")
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (3, 2))
+
+    def test_the_mouse_block_never_depends_on_the_replicate_rule(self):
+        mouse_cols = ["n_mice_with_call", "n_mice_undetermined", "n_mice_changed", "strain_status"]
+        seen = {tuple(self._row(replicate_rule=rule)[mouse_cols]) for rule in ("any", "majority", "average")}
+        self.assertEqual(seen, {(6, 2, 2, "not_replaced")})
+
+    def test_average_matches_a_brute_force_loop(self):
+        # The same answer from plain Python, cage by cage, no pandas.
+        cages = {}
+        for r in self.ROWS:
+            if r["dominant_strain_change"] is not pd.NA:
+                cages.setdefault(r["replicate"], []).append(r["conANI"])
+        expected = sum(sum(v) / len(v) < CON_THRESHOLD for v in cages.values())
+        row = self._row(replicate_rule="average")
+        self.assertEqual((row.n_replicates_with_call, row.n_replicates_changed), (len(cages), expected))
+
+    def test_bad_rule_raises(self):
+        with self.assertRaises(ValueError):
+            classify_mags(_frame(self.ROWS), replicate_rule="median")
+
+    def test_average_without_ani_columns_fails_loud(self):
+        bare = _frame(self.ROWS).drop(columns=["conANI", "con_threshold"])
+        with self.assertRaises(ValueError):
+            classify_mags(bare, replicate_rule="average")
 
 
 def _key_rows(mag, n_changed, n_same, n_undetermined=0, group="40", transition="5mo_22mo"):
@@ -380,6 +500,13 @@ class TestReplacementClassificationCLI(unittest.TestCase):
         got = pd.read_csv(self.out, sep="\t", dtype=str, keep_default_na=False)
         self.assertEqual(set(got.tie_rule), {"unresolved"})
         self.assertEqual(set(got.min_voters), {"1"})
+
+    def test_replicate_rule_flag_reaches_the_table(self):
+        # The fixture's real turnover schema carries conANI / popANI, so "average" runs.
+        done = self._run(extra=("--min_voters", "1", "--replicate_rule", "average"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        got = pd.read_csv(self.out, sep="\t", dtype=str, keep_default_na=False)
+        self.assertEqual(set(got.replicate_rule), {"average"})
 
     def test_classifies_every_mag_for_both_metrics(self):
         done = self._run(extra=("--min_voters", "1"))

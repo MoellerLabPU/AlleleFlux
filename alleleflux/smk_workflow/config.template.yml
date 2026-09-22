@@ -85,6 +85,9 @@ analysis:
                                    # any (at least one did) | all (every one did)
     tie: "not_replaced"            # With vote_rule majority, an exact half-and-half vote (4 of 8) counts as:
                                    # not_replaced | replaced | unresolved
+    replicate_rule: "average"      # When a replicate holds several subjects (e.g. a cage), how they become its ONE
+                                   # vote: average (mean conANI / popANI of its subjects with a verdict is below the
+                                   # threshold) | any (one changed subject is enough) | majority (more than half)
 
   use_baseline_presence: False     # For each significant site: was the allele present at the baseline timepoint?
                                    # (alleleflux-baseline-presence; one job per timepoints-groups comparison, after the statistics)
