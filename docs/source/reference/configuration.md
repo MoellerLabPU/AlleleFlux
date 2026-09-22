@@ -35,6 +35,8 @@ Paths to required input files.
 | `metadata_path` | Path to sample metadata TSV file. Must contain columns: `sample_id`, `bam_path`, `subjectID`, `group`, `replicate`. For longitudinal data, also include `time`. |
 | `gtdb_path` | Path to GTDB-Tk taxonomy file (`gtdbtk.bac120.summary.tsv`). Used for taxonomic aggregation of scores. |
 | `mag_mapping_path` | Path to contig-to-MAG mapping file (TSV with `contig_name` and `mag_id` columns). |
+| `profiles_path` | *(Optional)* Path to an existing `profiles/` directory from a prior run. Reuses **only** the Step 1 pileup output; QC and the allele-frequency cache are still rebuilt. See [Artifact Reuse and Null Runs](../usage/artifact_reuse_and_null_runs.md). |
+| `reuse_from` | *(Optional)* Path to a completed run's **data-type output dir** (e.g. `.../output/longitudinal`). Reuses profiles **+ QC + allele-frequency cache** — only the group-dependent tail re-runs. Works standalone (no permutation required). See [Artifact Reuse and Null Runs](../usage/artifact_reuse_and_null_runs.md). |
 
 **Example:**
 
@@ -77,6 +79,10 @@ Core analysis settings.
 | `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
 | `use_cmh` | `true` | Enable Cochran-Mantel-Haenszel tests for stratified categorical analysis. Best for detecting consistent directional changes. |
+| `use_dnds` | `true` | Enable dN/dS (Nei-Gojobori) evolutionary-rate analysis. **Longitudinal data only.** Set to `false` to skip the dN/dS step entirely (its parameters live under the top-level [`dnds`](#dnds) section). |
+| `use_pairwise_ani` | `false` | Pairwise conANI/popANI between QC-passing sample pairs, one job per tested MAG (see [`pairwise_ani`](#pairwise_ani-strain_turnover-and-baseline_presence)). |
+| `use_strain_turnover` | `false` | Per-mouse strain-background verdicts per MAG plus the all-MAG classification. Requires `use_pairwise_ani` and longitudinal data. |
+| `use_baseline_presence` | `false` | For each significant site, was the allele present at the earlier timepoint? One job per comparison, after the statistics. |
 | `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
 | `groups_combinations` | Required | List of group pairs to compare (see below). |
 
@@ -226,6 +232,10 @@ statistics:
 
 Parameters for dN/dS (synonymous/non-synonymous) ratio calculations.
 
+:::{note}
+dN/dS analysis is **only applicable to longitudinal data** (`data_type: longitudinal`). To turn it on or off, use the [`analysis.use_dnds`](#analysis) toggle (defaults to `true`); the parameters below are read only when that toggle is enabled.
+:::
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `p_value_column` | `q_value` | Column name to use for significance in dN/dS calculations. |
@@ -243,6 +253,10 @@ dnds:
 
 ### regional_contrast
 
+:::{warning}
+**Experimental.** Regional contrast analysis was not used or benchmarked in the AlleleFlux publication. The shipped config template sets `use_regional_contrast: False`; set it to `True` to opt in.
+:::
+
 Parameters for regional contrast analysis (longitudinal data only). Detects genes or sliding windows where treatment and control groups show consistently different allele-frequency evolution across paired hosts.
 
 :::{note}
@@ -258,7 +272,7 @@ Regional contrast analysis is **only applicable to longitudinal data** (`data_ty
 | `min_informative_sites` | `5` | Minimum number of variable sites required per region. Regions with fewer sites are excluded. Set to `0` to disable. **Note:** Sites with `site_score == 0` (perfect evolutionary stasis) are counted if they exist in the input. |
 | `min_informative_fraction` | `0.0` | Minimum fraction of region length that must be covered by informative sites (0.0–1.0). Set to `0.0` to disable. |
 | `use_fisher` | `true` | Also compute Fisher combined p-values from percentile-derived empirical p-values (secondary/exploratory analysis). Set to `false` to skip this computationally intensive step. |
-| `use_regional_contrast` | `true` | Enable or disable regional contrast analysis entirely. Set to `false` to skip this analysis. |
+| `use_regional_contrast` | `false` | Enable or disable regional contrast analysis entirely. Off by default (experimental); set to `true` to run this analysis. |
 
 **Example with default settings:**
 
@@ -296,6 +310,31 @@ regional_contrast:
 - **use_fisher**: Fisher combined p-values provide an orthogonal statistical perspective but require additional computation. Set to `false` for large datasets if runtime is a concern.
 
 ---
+
+### pairwise_ani, strain_turnover and baseline_presence
+
+Settings for the strain-turnover branch (see the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md)). All three sit under `analysis:`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pairwise_ani.min_cov` | 5 | Reads required in both samples for a position to be compared; 1 disables the depth gate. Also the depth gate of baseline presence. |
+| `pairwise_ani.min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI; baseline presence). |
+| `pairwise_ani.fdr` | 1e-6 | Tolerated chance that sequencing error alone explains an allele (popANI; baseline presence). |
+| `pairwise_ani.pairs` | `within_subject` | `within_subject`, `transitions` (only same-subject pairs matching `timepoints_combinations`; what strain turnover consumes) or `all`. |
+| `pairwise_ani.store_snp_locations` | `within_subject` | `none`, `within_subject` or `all` (large). |
+| `strain_turnover.min_compared` | 0.1 | Fraction of the genome both samples must cover for a verdict. |
+| `strain_turnover.pop_threshold` | 0.99999 | popANI below this = `strain_replacement`. |
+| `strain_turnover.con_threshold` | 0.999 | conANI below this = `dominant_strain_change`. |
+| `strain_turnover.min_voters` | 8 | Fewest mice (or replicates) with a verdict that a MAG × group × transition needs. Below it the classification gives no verdict (`too_few_voters` / `no_voters`). Applies to the classification step only; changing it does not rerun pairwise ANI or the per-mouse calls. |
+| `strain_turnover.vote_rule` | `majority` | When a checked key counts as replaced: `majority` (more than half its voters changed), `any` (at least one did) or `all` (every one did). |
+| `strain_turnover.tie` | `not_replaced` | With `vote_rule: majority`, what an exact half-and-half vote means: `not_replaced`, `replaced` or `unresolved`. |
+| `strain_turnover.replicate_rule` | `average` | When a replicate holds several subjects (e.g. a cage), how they become its one vote in the replicate block: `average` (the mean conANI / popANI of its subjects with a verdict is below the threshold), `any` (one changed subject is enough) or `majority` (more than half). |
+| `baseline_presence.summary` | `two_sample_paired` | Which `p_value_summary` family to annotate. |
+| `baseline_presence.test_type` | required | Row filter, spelled as the summary file does (e.g. `two_sample_unpaired_tTest`, `LMM_abs`). |
+| `baseline_presence.threshold_column` | `q_value` | `q_value` (BH) or `min_p_value`. |
+| `baseline_presence.threshold` | 0.05 | Significance cutoff. |
+
+The MAG universe of this branch is the set of **tested** MAGs: the union over every comparison and enabled test of the MAGs the eligibility (and preprocessing, when enabled) checkpoints admitted. Resource overrides use the rule names `pairwise_ani` and `baseline_presence`; `strain_turnover` and `replacement_classification` run locally.
 
 ### Multiple Group Combinations
 
@@ -365,6 +404,7 @@ analysis:
   use_lmm: true
   use_significance_tests: true
   use_cmh: true
+  use_dnds: true
   timepoints_combinations:
     - timepoint: [pre, post]
       focus: post
