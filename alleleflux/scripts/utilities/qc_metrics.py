@@ -91,12 +91,37 @@ def load_and_validate_profile(
 
     # pa.input_stream handles .gz/.tsv.gz decompression robustly regardless of
     # the double extension — unlike pandas which requires explicit engine choice.
+    # The whole decompressed file is read into memory ONCE so that the line
+    # count below and the parser see the very same bytes.
     with pa.input_stream(profile_path) as stream:
-        tbl = pacsv.read_csv(
-            stream,
-            parse_options=pacsv.ParseOptions(delimiter="\t"),
-            convert_options=convert_opts,
+        raw = stream.read()
+
+    # The number of data rows the file holds, from the bytes themselves: one
+    # per newline, minus the header, plus one if the last line has no newline.
+    expected_rows = raw.count(b"\n") - 1 + (0 if raw.endswith(b"\n") or not raw else 1)
+
+    # use_threads=False: pyarrow's multithreaded chunk conversion is the stage
+    # that raised "a chunk failed converting for an unknown reason" on this data,
+    # and once returned a table missing its last chunk WITHOUT raising (2026-09,
+    # a ~3.6 M-row profile came back 12,330 rows short and QC recorded a wrong
+    # breadth).  Single-threaded parsing costs ~0.2 s more per large profile.
+    tbl = pacsv.read_csv(
+        pa.BufferReader(raw),
+        read_options=pacsv.ReadOptions(use_threads=False),
+        parse_options=pacsv.ParseOptions(delimiter="\t"),
+        convert_options=convert_opts,
+    )
+
+    # A short read must never pass silently: every downstream number (breadth,
+    # coverage, the pass/fail decision) would be quietly wrong.  Raising here
+    # fails the QC job loudly, and the workflow's retries take it from there.
+    if tbl.num_rows != expected_rows:
+        msg = (
+            f"Short read of profile for MAG {mag_id}, sample {sample_id}: parsed "
+            f"{tbl.num_rows} rows but the file holds {expected_rows}. file={profile_path}"
         )
+        logger.error(msg)
+        raise ValueError(msg)
 
     if tbl.num_rows == 0:
         msg = f"Empty profile for MAG {mag_id}. file={profile_path}"
