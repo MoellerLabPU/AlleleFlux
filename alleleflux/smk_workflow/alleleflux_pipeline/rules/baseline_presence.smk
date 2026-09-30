@@ -45,7 +45,9 @@ rule baseline_presence:
         profiles_dir=PROFILES_DIR,
         output_dir=os.path.join(OUTDIR, "baseline_presence"),
         summary_family=BASELINE_PRESENCE_FAMILY,
-        test_type=config["analysis"]["baseline_presence"]["test_type"],
+        # the shared constant (common.smk), not a direct config read: params are
+        # evaluated for every config, including ones without a baseline_presence block
+        test_type=BASELINE_PRESENCE_TEST_TYPE,
         threshold_column=config["analysis"].get("baseline_presence", {}).get("threshold_column", "q_value"),
         threshold=config["analysis"].get("baseline_presence", {}).get("threshold", 0.05),
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so

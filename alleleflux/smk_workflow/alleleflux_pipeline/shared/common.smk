@@ -1176,6 +1176,14 @@ def get_replacement_classification_path():
 # The baseline-presence summary family, read once: it names the input summary
 # file, the source directory and the output stem.
 BASELINE_PRESENCE_FAMILY = config["analysis"].get("baseline_presence", {}).get("summary", "two_sample_paired")
+# Which test's rows of that summary are annotated, also read once.  Default: the
+# family's t-test ("two_sample_paired" -> "two_sample_paired_tTest").  The rule's
+# --test_type and the output stem below BOTH use this constant, so a config
+# without a baseline_presence block gives them the same value instead of one of
+# them failing with a KeyError while the Snakefile is being read.
+BASELINE_PRESENCE_TEST_TYPE = config["analysis"].get("baseline_presence", {}).get(
+    "test_type", f"{BASELINE_PRESENCE_FAMILY}_tTest"
+)
 
 
 def get_baseline_presence_stem(timepoints="{timepoints}", groups="{groups}"):
@@ -1186,7 +1194,7 @@ def get_baseline_presence_stem(timepoints="{timepoints}", groups="{groups}"):
     "two_sample_paired_tTest", while "lmm" + "LMM_abs" gives "lmm_LMM_abs".
     """
     family = BASELINE_PRESENCE_FAMILY
-    test_type = config["analysis"].get("baseline_presence", {}).get("test_type", f"{family}_tTest")
+    test_type = BASELINE_PRESENCE_TEST_TYPE
     prefix = f"{family}_"
     stat = test_type[len(prefix):] if test_type.startswith(prefix) else test_type
     return os.path.join(OUTDIR, "baseline_presence", f"{timepoints}-{groups}_{family}_{stat}_baseline_presence")
