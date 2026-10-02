@@ -30,6 +30,10 @@ from alleleflux.scripts.analysis.baseline_presence import (
     output_label,
     candidate_alleles,
     load_significant_sites,
+    restrict_to_own_group,
+    check_baseline_scope,
+    SUMMARY_FAMILIES,
+    WITHIN_GROUP_FAMILIES,
     parse_comparison,
     summarise_sites,
     summary_columns,
@@ -440,6 +444,253 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         done = self._run("--summary", "two_sample_unpaired", "--test_type", "two_sample_unpaired_tTest")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("two_sample_unpaired", done.stderr)
+
+    def test_own_group_with_a_between_group_test_fails_before_writing(self):
+        # the same run succeeds with the default scope; own_group must stop it
+        # outright instead of quietly judging the site on both groups
+        done = self._run("--baseline_scope", "own_group")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("own_group", done.stderr)
+        self.assertIn("two_sample_paired", done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+
+class TestCheckBaselineScope(unittest.TestCase):
+    """own_group needs a site that belongs to ONE group: only the within-group
+    families (single_sample, lmm_across_time) have that.  The between-group
+    families compare the two groups, so they are refused, not silently widened."""
+
+    def test_comparison_scope_accepts_every_family(self):
+        for family in SUMMARY_FAMILIES:
+            check_baseline_scope(family, "comparison")  # no raise
+
+    def test_own_group_accepts_within_group_families(self):
+        for family in ("single_sample", "lmm_across_time"):
+            check_baseline_scope(family, "own_group")  # no raise
+
+    def test_own_group_refuses_between_group_families(self):
+        # two-sample tests and the two-way (group x time) LMM compare the groups
+        for family in ("two_sample_paired", "two_sample_unpaired", "lmm"):
+            with self.assertRaisesRegex(ValueError, "own_group") as caught:
+                check_baseline_scope(family, "own_group")
+            self.assertIn(family, str(caught.exception))  # names the culprit
+
+    def test_every_family_is_classified(self):
+        # a family added to SUMMARY_FAMILIES later must be placed on one side
+        self.assertTrue(set(WITHIN_GROUP_FAMILIES) <= set(SUMMARY_FAMILIES))
+
+    def test_cmh_is_not_offered_at_all(self):
+        # CMH gives one p per site, never per base, so it cannot name the allele:
+        # it is refused for every scope by --summary's choices, before any check
+        self.assertNotIn("cmh", SUMMARY_FAMILIES)
+
+
+class TestRestrictToOwnGroup(unittest.TestCase):
+    """--baseline_scope own_group: a within-group site keeps only its own group's
+    samples, at both timepoints."""
+
+    def test_keeps_own_group_at_both_timepoints(self):
+        rows = [
+            {"group_analyzed": "fat", "group": group, "time": time}
+            for group in ("fat", "control")
+            for time in ("pre", "end")
+        ]
+        kept = restrict_to_own_group(pd.DataFrame(rows))
+        self.assertEqual(sorted(kept.group.unique()), ["fat"])  # control rows dropped
+        self.assertEqual(sorted(kept.time.unique()), ["end", "pre"])  # both timepoints
+
+    def test_between_group_row_raises(self):
+        # a blank group_analyzed (a between-group site) must never get here:
+        # check_baseline_scope refuses those families first
+        df = pd.DataFrame({"group_analyzed": ["fat", ""], "group": ["fat", "fat"]})
+        with self.assertRaisesRegex(ValueError, "between-group"):
+            restrict_to_own_group(df)
+
+    def test_numeric_group_names_compare_as_text(self):
+        # group names like 40 are text throughout ("40" == "40"), never 40 vs "40"
+        df = pd.DataFrame({"group_analyzed": ["40", "40"], "group": ["40", "AL"]})
+        self.assertEqual(restrict_to_own_group(df).group.tolist(), ["40"])
+
+
+class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
+    """A WITHIN-group site (single_sample, significant in fat) where only the
+    CONTROL mice carry G at baseline.  Fat m1, m2: G 0/30 at pre, 24/30 and
+    21/30 at end.  Control m3, m4: G 5/30 at pre (present), 0/30 at end.
+
+    comparison (default): control's m3/m4 count too -> standing.  own_group:
+    the baseline is fat's own mice -> G never seen at pre -> de_novo_candidate."""
+
+    MAG = "MAG_A"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        run = self.run = os.path.join(self.tmp, "run")
+        prof = os.path.join(run, "profiles")
+
+        def with_site(a, c, g, t):
+            return [(p, 30, 0, 0, 0) for p in range(6) if p != 1] + [(1, a, c, g, t)]
+
+        pre = {
+            "m1": (30, 0, 0, 0),
+            "m2": (30, 0, 0, 0),
+            "m3": (25, 0, 5, 0),
+            "m4": (25, 0, 5, 0),
+        }
+        end = {
+            "m1": (6, 0, 24, 0),
+            "m2": (9, 0, 21, 0),
+            "m3": (30, 0, 0, 0),
+            "m4": (30, 0, 0, 0),
+        }
+        for mouse in pre:
+            _write_profile(prof, f"{mouse}_pre", self.MAG, with_site(*pre[mouse]))
+            _write_profile(prof, f"{mouse}_end", self.MAG, with_site(*end[mouse]))
+        meta = pd.DataFrame(
+            [
+                {
+                    "sample_id": f"{m}_{t}",
+                    "subjectID": m,
+                    "group": g,
+                    "time": t,
+                    "replicate": r,
+                    "bam_path": "x",
+                }
+                for m, g, r in (
+                    ("m1", "fat", "r1"),
+                    ("m2", "fat", "r2"),
+                    ("m3", "control", "r3"),
+                    ("m4", "control", "r4"),
+                )
+                for t in ("pre", "end")
+            ]
+        )
+        self.metadata = os.path.join(self.tmp, "metadata.tsv")
+        meta.to_csv(self.metadata, sep="\t", index=False)
+        sd = os.path.join(run, "p_value_summary", "pre_end-fat_control")
+        os.makedirs(sd)
+        pd.DataFrame(
+            {
+                "period": ["pre_end"],
+                "mag_id": [self.MAG],
+                "contig": ["c1"],
+                "position": [1],
+                "gene_id": ["g1"],
+                "test_type": ["single_sample_tTest"],
+                "group_analyzed": ["fat"],
+                "min_p_value": [0.001],
+                "source_file": [f"{self.MAG}_single_sample_fat.tsv.gz"],
+                "q_value": [0.01],
+            }
+        ).to_csv(
+            os.path.join(sd, "p_value_summary_single_sample_pre_end.tsv"),
+            sep="\t",
+            index=False,
+        )
+        td = os.path.join(
+            run, "significance_tests", "single_sample_pre_end-fat_control"
+        )
+        os.makedirs(td)
+        # only G hits the site's min p, so G is the one candidate allele
+        pd.DataFrame(
+            {
+                "contig": ["c1"],
+                "gene_id": ["g1"],
+                "position": [1],
+                "A_frequency_p_value_tTest_fat": [0.002],
+                "C_frequency_p_value_tTest_fat": [1.0],
+                "G_frequency_p_value_tTest_fat": [0.001],
+                "T_frequency_p_value_tTest_fat": [1.0],
+            }
+        ).to_csv(
+            os.path.join(td, f"{self.MAG}_single_sample_fat.tsv.gz"),
+            sep="\t",
+            index=False,
+            compression="gzip",
+        )
+        self.fasta = os.path.join(self.tmp, "ref.fa")
+        open(self.fasta, "w").write(">c1\nAAAAAA\n")
+        open(self.fasta + ".fai", "w").write("c1\t6\t4\t6\t7\n")
+        self.mapping = os.path.join(self.tmp, "map.tsv")
+        pd.DataFrame({"mag_id": [self.MAG], "contig_id": ["c1"]}).to_csv(
+            self.mapping, sep="\t", index=False
+        )
+        self.out = os.path.join(self.tmp, "out")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _run(self, *extra):
+        done = subprocess.run(
+            [
+                "alleleflux-baseline-presence",
+                "--run_dir",
+                self.run,
+                "--comparison",
+                "pre_end-fat_control",
+                "--summary",
+                "single_sample",
+                "--test_type",
+                "single_sample_tTest",
+                "--profiles_dir",
+                os.path.join(self.run, "profiles"),
+                "--metadata",
+                self.metadata,
+                "--fasta",
+                self.fasta,
+                "--mag_mapping",
+                self.mapping,
+                "--output_dir",
+                self.out,
+                "--cpus",
+                "2",
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        stem = os.path.join(
+            self.out, "pre_end-fat_control_single_sample_tTest_baseline_presence"
+        )
+        return (
+            pd.read_csv(stem + ".tsv.gz", sep="\t"),
+            pd.read_csv(stem + "_summary.tsv", sep="\t").iloc[0],
+        )
+
+    def test_own_group_scope_uses_only_the_sites_group(self):
+        long, s = self._run("--baseline_scope", "own_group")
+        self.assertEqual(
+            sorted(long.subjectID.unique()), ["m1", "m2"]
+        )  # control mice gone, both timepoints
+        self.assertEqual(len(long), 4)  # 1 allele x 2 fat mice x 2 timepoints
+        self.assertEqual(s.allele, "G")
+        self.assertEqual(s.origin_any_mouse, "de_novo_candidate")
+        self.assertEqual(
+            (int(s.n_pre_samples_allele_present), int(s.n_pre_samples_covered)), (0, 2)
+        )
+        self.assertEqual(
+            (int(s.total_reads_pre), int(s.allele_reads_pre)), (60, 0)
+        )  # fat mice only
+        self.assertEqual(int(s.n_mice_de_novo_candidate), 2)
+
+    def test_default_is_comparison_both_groups(self):
+        long, s = self._run()
+        self.assertEqual(len(long), 8)  # all four mice
+        self.assertEqual(
+            s.origin_any_mouse, "standing_variation"
+        )  # m3, m4 carry G at pre
+        self.assertEqual(
+            (int(s.n_pre_samples_allele_present), int(s.n_pre_samples_covered)), (2, 4)
+        )
+        self.assertEqual((int(s.total_reads_pre), int(s.allele_reads_pre)), (120, 10))
+
+    def test_unknown_scope_is_rejected(self):
+        done = subprocess.run(
+            ["alleleflux-baseline-presence", "--baseline_scope", "everyone", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(done.returncode, 0)
 
 
 if __name__ == "__main__":

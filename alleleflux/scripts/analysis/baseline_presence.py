@@ -10,8 +10,8 @@ cannot say where the allele came from.  Two stories fit the same p-value:
 * it **arose after** baseline, by mutation or by a different strain arriving.
 
 This command tells them apart from the raw reads.  For every significant site
-it takes the allele(s) the test flagged and, in EVERY sample of the comparison
-(both groups, both timepoints), counts that allele's reads and applies the same
+it takes the allele(s) the test flagged and, in every sample of the site's
+baseline scope (both timepoints), counts that allele's reads and applies the same
 presence rule the ANI work uses: at least ``min_cov`` reads at the position to
 say anything at all, then at least the null-model bar AND ``min_freq`` of reads
 to call the allele present.  Each sample gets one of four verdicts::
@@ -41,6 +41,23 @@ names (``pre`` / ``end`` for ``pre_end-fat_control``, ``5mo`` / ``22mo`` for
 DRiDO), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appear only
 as placeholders in templates and as shorthand in comments for "the earlier /
 the later timepoint of the comparison".
+
+Which samples count (``--baseline_scope``):
+
+* ``comparison`` (default): every sample of both groups.  Right when both groups
+  are one population at baseline (e.g. littermates split across diets).
+* ``own_group``: each site is judged only on the samples of the group it was
+  significant in, at both timepoints.  Right when groups are housed apart from
+  the start (single-diet cages): another group's baseline mice are a different
+  population.  A smaller baseline pool calls more alleles de novo, so the de novo
+  criteria carry more weight under it.
+
+``own_group`` needs a WITHIN-group test (``--summary single_sample`` or
+``lmm_across_time``, where every site has a ``group_analyzed``).  The
+between-group families (two_sample_paired, two_sample_unpaired, and lmm, the
+two-way group x time model) compare the two groups, so their sites have no own
+group: own_group with them stops the run before anything is read.  CMH is not a
+``--summary`` choice for either scope (one p per site, so no allele to follow).
 
 The ANI/strain work is OPTIONAL: ``--turnover_dir`` adds a ``strain_background``
 column; without it the command runs on any AlleleFlux output.
@@ -82,7 +99,6 @@ EVIDENCE_PRESENT = "present"
 EVIDENCE_BELOW_DETECTION = "below_detection"
 EVIDENCE_ABSENT = "absent"
 EVIDENCE_NOT_COVERED = "not_covered"
-
 
 
 class Timepoints(NamedTuple):
@@ -138,6 +154,12 @@ SUMMARY_FAMILIES = {
     "lmm": ("_p_value_", False),
     "lmm_across_time": ("_p_value_", False),
 }
+# The families whose sites belong to ONE group (``group_analyzed`` set): the
+# single-sample test and the per-group LMM across time.  Only these can take
+# ``--baseline_scope own_group``.  The rest (two_sample_paired,
+# two_sample_unpaired, and lmm = the two-way group x time model) compare the two
+# groups, so a site has no "own" group and own_group is refused for them.
+WITHIN_GROUP_FAMILIES = ("single_sample", "lmm_across_time")
 
 # Site identity shared by both outputs.
 SITE_KEYS = [
@@ -659,7 +681,9 @@ def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
         record.update(
             {
                 "origin_any_mouse": origin,
-                tps.name("n_{t0}_samples_allele_present"): int(t0_cov["allele_present"].sum()),
+                tps.name("n_{t0}_samples_allele_present"): int(
+                    t0_cov["allele_present"].sum()
+                ),
                 tps.name("n_{t0}_samples_covered"): len(t0_cov),
                 tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
                 tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
@@ -676,7 +700,9 @@ def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
             allele = int(part["allele_reads"].sum())
             record[tps.name(f"total_reads_{role}")] = total
             record[tps.name(f"allele_reads_{role}")] = allele
-            record[tps.name(f"allele_frequency_{role}")] = allele / total if total else np.nan
+            record[tps.name(f"allele_frequency_{role}")] = (
+                allele / total if total else np.nan
+            )
         rows.append(record)
     return pd.DataFrame(rows, columns=summary_columns(tps))
 
@@ -730,8 +756,60 @@ def _assess_one_sample(job: tuple) -> pd.DataFrame:
     )
 
 
+# --baseline_scope values; the first is the default (see the module docstring).
+BASELINE_SCOPES = ("comparison", "own_group")
+
+
+def check_baseline_scope(family: str, scope: str) -> None:
+    """Refuse ``own_group`` for a between-group test family, before any work.
+
+    ``own_group`` judges a site on the mice of the ONE group it was significant
+    in.  A between-group site (two_sample_paired, two_sample_unpaired, lmm) was
+    significant in the DIFFERENCE between two groups, so it has no own group;
+    rather than quietly falling back to both groups, the run stops.
+
+    Examples: ("single_sample", "own_group") -> ok; ("lmm_across_time",
+    "own_group") -> ok; ("two_sample_paired", "own_group") -> ValueError;
+    any family with "comparison" -> ok.
+    """
+    if scope == "own_group" and family not in WITHIN_GROUP_FAMILIES:
+        raise ValueError(
+            f"--baseline_scope own_group only applies to within-group tests "
+            f"(--summary {' or '.join(WITHIN_GROUP_FAMILIES)}); {family} compares "
+            f"two groups, so its sites have no own group. Use --baseline_scope comparison."
+        )
+
+
+def restrict_to_own_group(long: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the samples of the group each site was significant in.
+
+    ``long`` has one row per site x allele x sample, with the site's
+    ``group_analyzed`` and the sample's ``group``.  A row survives if the sample
+    belongs to the site's group.  Applied to BOTH timepoints, so the baseline,
+    the later timepoint, the same-mouse labels and the pooled reads all describe
+    one group.  Only within-group sites may arrive (``check_baseline_scope``
+    refuses the other families first); a blank ``group_analyzed`` raises.
+
+    Example: site significant within ``fat`` (group_analyzed "fat"): rows for
+    fat mice at pre and end stay, control mice's rows go.  Group names compare
+    as text, so a group called ``40`` matches ``"40"``.
+    """
+    analyzed = long["group_analyzed"].fillna("").astype(str)
+    # A blank here is a between-group site that slipped past check_baseline_scope:
+    # filtering it would drop all its rows ("" matches no mouse), so stop loudly.
+    if (analyzed == "").any():
+        raise ValueError(
+            f"{int((analyzed == '').sum()):,} rows have a blank group_analyzed "
+            f"(between-group sites); own_group needs within-group sites only"
+        )
+    own = long["group"].astype(str) == analyzed
+    return long[own].reset_index(drop=True)
+
+
 def chase_the_ancestors(args: argparse.Namespace) -> int:
     """Orchestrator: summary -> candidate alleles -> every sample's verdict -> two files."""
+    # First, before reading or writing anything: a wrong scope/family pair stops here.
+    check_baseline_scope(args.summary, args.baseline_scope)
     os.makedirs(args.output_dir, exist_ok=True)
     earlier, later, group_a, group_b = parse_comparison(args.comparison)
     tps = Timepoints(earlier, later)  # spells every timepoint-bearing name from here on
@@ -892,6 +970,15 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         on="sample_id",
         how="left",
     )
+    # Baseline scope: drop other groups' samples from within-group sites BEFORE
+    # anything is labelled or counted, so every downstream number sees one group.
+    if args.baseline_scope == "own_group":
+        n_before = len(long)
+        long = restrict_to_own_group(long)
+        logger.info(
+            f"baseline scope own_group: within-group sites judged on their own group's "
+            f"samples only ({n_before - len(long):,} other-group rows dropped)"
+        )
     long["strain_background"] = np.nan
     if args.turnover_dir:
         # Per (MAG, mouse) background for THIS period, from alleleflux-strain-turnover.
@@ -914,7 +1001,9 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     long["min_freq"] = args.min_freq
     # Earlier timepoint before later within a site: an ordered categorical sorts
     # by comparison order, not alphabetically ("end" < "pre" would flip them).
-    long["time"] = pd.Categorical(long["time"], categories=[earlier, later], ordered=True)
+    long["time"] = pd.Categorical(
+        long["time"], categories=[earlier, later], ordered=True
+    )
     long = long[LONG_COLUMNS].sort_values(
         ["mag_id", "contig", "position", "allele", "time", "group", "sample_id"]
     )
@@ -992,6 +1081,19 @@ def main():
     )
     parser.add_argument(
         "--mags", nargs="*", default=None, help="Restrict to these MAG ids"
+    )
+    parser.add_argument(
+        "--baseline_scope",
+        choices=BASELINE_SCOPES,
+        default=BASELINE_SCOPES[0],
+        help=(
+            "Samples a site is judged on: comparison = both groups (one population "
+            "at baseline, e.g. littermates split across diets); own_group = only "
+            "the group the site was significant in (groups housed apart).  "
+            "own_group works only with the within-group tests (--summary "
+            "single_sample or lmm_across_time); with a between-group test "
+            "(two_sample_paired, two_sample_unpaired, lmm) it is an error."
+        ),
     )
     parser.add_argument(
         "--min_cov",

@@ -96,6 +96,11 @@ analysis:
     test_type: "two_sample_paired_tTest"   # row filter, spelled as the summary file does (e.g. LMM_abs)
     threshold_column: "q_value"    # q_value (BH) or min_p_value
     threshold: 0.05
+    baseline_scope: "comparison"   # samples a site is judged on: comparison = both groups
+                                   # (one population at baseline, e.g. littermates split across diets);
+                                   # own_group = only its own group (groups housed apart, e.g. single-diet cages).
+                                   # own_group needs summary single_sample or lmm_across_time; with
+                                   # two_sample_paired, two_sample_unpaired or lmm the job stops with an error.
                                    # depth gate / presence rule reuse pairwise_ani.min_cov, min_freq, fdr
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
     - phylum                       # Remove or comment out levels you don't need; set to [] for MAG level only

@@ -50,6 +50,10 @@ rule baseline_presence:
         test_type=BASELINE_PRESENCE_TEST_TYPE,
         threshold_column=config["analysis"].get("baseline_presence", {}).get("threshold_column", "q_value"),
         threshold=config["analysis"].get("baseline_presence", {}).get("threshold", 0.05),
+        # which samples a site is judged on (comparison | own_group); the CLI's own
+        # default when the config does not say.  own_group needs a within-group
+        # summary family (single_sample / lmm_across_time); the CLI refuses the rest.
+        baseline_scope=config["analysis"].get("baseline_presence", {}).get("baseline_scope", "comparison"),
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -70,6 +74,7 @@ rule baseline_presence:
             --test_type {params.test_type} \
             --threshold_column {params.threshold_column} \
             --threshold {params.threshold} \
+            --baseline_scope {params.baseline_scope} \
             --profiles_dir {params.profiles_dir} \
             --metadata {input.metadata} \
             --fasta {input.fasta} \
