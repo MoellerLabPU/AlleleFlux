@@ -104,6 +104,10 @@ Detects parallel allele changes across timepoints while controlling for individu
 **Outliers** (`outliers/{mag}_{test}_outlier_genes.tsv`):
 `gene_id`, `gene_score_%`, `mag_score_%`, `p_value_binomial`, `p_value_poisson`
 
+:::{warning}
+**Experimental.** Outlier gene detection (binomial and Poisson tests) was not used or benchmarked in the AlleleFlux publication. It is off by default (`use_outlier_detection: False`); the outlier steps and examples on this page apply only if you opt in.
+:::
+
 ## Loading Results in Python
 
 ### Load and Display Top 10 MAGs by Parallelism Score

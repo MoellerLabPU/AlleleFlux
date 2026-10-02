@@ -167,6 +167,85 @@ class TestLoadAndValidateProfile(TestQCMetrics):
             os.unlink(profile_file)
 
 
+class TestLoadAndValidateProfileReadIntegrity(TestQCMetrics):
+    """The loader must never return fewer rows than the file holds.
+
+    Background: pyarrow's CSV reader once returned a table missing its final
+    chunk WITHOUT raising (one profile of ~3.6 M rows came back 12,330 rows
+    short), so QC recorded a wrong breadth.  The loader now counts the file's
+    lines itself and refuses a table whose row count differs.
+    """
+
+    PROFILE = {
+        "contig": ["contig1"] * 4 + ["contig2"] * 2,
+        "position": [1, 2, 3, 4, 1, 2],
+        "gene_id": ["g1", "g1", "g2", "g2", "g3", "g3"],
+        "total_coverage": [5, 6, 7, 8, 9, 10],
+    }
+
+    def _gz_profile(self, trailing_newline=True):
+        import gzip
+        path = tempfile.NamedTemporaryFile(delete=False, suffix=".tsv.gz").name
+        text = pd.DataFrame(self.PROFILE).to_csv(sep="\t", index=False)
+        if not trailing_newline:
+            text = text.rstrip("\n")
+        with gzip.open(path, "wt") as fh:
+            fh.write(text)
+        return path
+
+    def test_gzipped_profile_loads_every_row(self):
+        path = self._gz_profile()
+        try:
+            df = load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
+            self.assertEqual(len(df), 6)
+            self.assertEqual(df["total_coverage"].sum(), 45)
+        finally:
+            os.unlink(path)
+
+    def test_file_without_trailing_newline_is_counted_right(self):
+        path = self._gz_profile(trailing_newline=False)
+        try:
+            df = load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
+            self.assertEqual(len(df), 6)
+        finally:
+            os.unlink(path)
+
+    def test_a_short_read_is_refused(self):
+        # Simulate the silent-truncation bug: the parser hands back the table
+        # minus its last row.  The loader must notice and raise, never return it.
+        import pyarrow.csv as pacsv
+        real = pacsv.read_csv
+        def short_read(*a, **k):
+            tbl = real(*a, **k)
+            return tbl.slice(0, tbl.num_rows - 1)
+        path = self._gz_profile()
+        try:
+            with patch("alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv", side_effect=short_read):
+                with self.assertRaises(ValueError) as cm:
+                    load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
+            self.assertIn("5", str(cm.exception))   # rows read
+            self.assertIn("6", str(cm.exception))   # rows in the file
+        finally:
+            os.unlink(path)
+
+    def test_parser_runs_single_threaded(self):
+        # Multithreaded chunk conversion is where the reader failed; keep it off.
+        import pyarrow.csv as pacsv
+        seen = {}
+        real = pacsv.read_csv
+        def spy(*a, **k):
+            seen["read_options"] = k.get("read_options")
+            return real(*a, **k)
+        path = self._gz_profile()
+        try:
+            with patch("alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv", side_effect=spy):
+                load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
+            self.assertIsNotNone(seen["read_options"])
+            self.assertFalse(seen["read_options"].use_threads)
+        finally:
+            os.unlink(path)
+
+
 class TestCalculateBreadthMetrics(TestQCMetrics):
     """Test calculate_breadth_metrics function."""
 
