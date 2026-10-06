@@ -913,6 +913,7 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 | `--summary` | `two_sample_paired` | Summary family: `two_sample_paired`, `two_sample_unpaired`, `single_sample`, `lmm`, `lmm_across_time`. CMH is not offered (no per-base p-value). |
 | `--threshold_column` | `q_value` | `q_value` or `min_p_value`. |
 | `--threshold` | 0.05 | Significance cutoff. |
+| `--baseline_scope` | `comparison` | Samples a site is judged on: `comparison` = both groups; `own_group` = only the group the site was significant in (within-group tests only: `single_sample`, `lmm_across_time`; an error with any other family). |
 | `--turnover_dir` | — | Strain-turnover outputs; adds a `strain_background` column. |
 | `--mags` | all | Restrict to these MAG ids. |
 | `--min_cov` | 5 | Reads at a position before any verdict (1 = off). |
@@ -923,5 +924,5 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 
 #### Output
 
-`{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long: one row per site × allele × sample) and `..._summary.tsv` (one row per site × allele). Column names use the comparison's own timepoint labels.
+`{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long: one row per site × allele × sample) `..._summary.tsv` (one row per site × allele) and `..._rising.tsv` (one row per site × allele × group the allele rose in; see [Outputs](outputs.md)). Column names use the comparison's own timepoint labels.
 

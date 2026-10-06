@@ -195,6 +195,16 @@ Its columns come in two kinds:
   can disagree on purpose: a `de_novo_candidate` site can have a few baseline
   reads of the allele sitting in samples under the detection bar.
 
+**Rising table**, `..._baseline_presence_rising.tsv`: Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`, `other_group`, `other_group_frequency_change`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles tie on the p-value and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
+
+"Rose" means `frequency_change > 0`, computed the way the within-group test
+measures change: each mouse sampled at both timepoints, later minus earlier
+frequency; the mean per replicate; the mean over replicates.  `n_replicates` and
+`n_mice` say how many replicates and mice that rests on.  A within-group site is
+asked about its own group only; a between-group site about both groups, so an
+allele that rose in both gets one row per group.  Alleles with no mouse sampled
+at both timepoints have no change and no row; the run log counts them.
+
 ### Worked example (synthetic)
 
 Four mice, two per group, sampled at `pre` and `end`; allele G at one site.
@@ -211,6 +221,14 @@ Summary row: `origin_any_mouse = standing_variation` (m1 had it);
 `n_pre_samples_allele_present / n_pre_samples_covered = 1 / 3` (m4 is not
 covered and out of the denominator); `total_reads_pre = 92`,
 `allele_reads_pre = 6` (m4's two reads **are** in the total).
+
+A rising-table example (a different site from the one above): G and A tie, G
+rose in fat by +0.667 and in control by +0.017, A fell in both.  The rising
+table has two rows, both G, and none for A.  The fat row is
+`standing_variation` (a fat or control mouse had G at `pre`).  The control row
+is `allele_not_present_at_end`: its `end` check looks at control mice only, and
+neither has G above the bar there (2/30 and 0/30 reads), although the summary,
+which pools both groups' `end` samples, calls G standing.
 
 ## Running by hand
 

@@ -7,6 +7,9 @@ profile once (both groups, both timepoints).  It therefore sits AFTER the
 statistics stage: its targets are generated inside get_final_pipeline_outputs
 (checkpoint-aware), only where the family's summary target itself exists.
 
+Writes three files: the long table, the summary, and the rising table (only
+the allele that rose, per group, judged on that group's later samples).
+
 When use_strain_turnover is on, the turnover tables are joined in for the
 strain_background column and become an input dependency.
 """
@@ -34,6 +37,7 @@ rule baseline_presence:
     output:
         long=get_baseline_presence_stem() + ".tsv.gz",
         summary=get_baseline_presence_stem() + "_summary.tsv",
+        rising=get_baseline_presence_stem() + "_rising.tsv",
     retries: get_retries("baseline_presence")
     threads: get_threads("baseline_presence")
     resources:

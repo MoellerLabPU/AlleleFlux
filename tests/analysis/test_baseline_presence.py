@@ -31,6 +31,10 @@ from alleleflux.scripts.analysis.baseline_presence import (
     candidate_alleles,
     load_significant_sites,
     restrict_to_own_group,
+    frequency_change_by_group,
+    summarise_rising,
+    rising_columns,
+    RISING_COLUMNS,
     check_baseline_scope,
     SUMMARY_FAMILIES,
     WITHIN_GROUP_FAMILIES,
@@ -301,6 +305,306 @@ class TestSummariseSites(unittest.TestCase):
         self.assertEqual(int(got.total_reads_pre), 0)
         self.assertTrue(np.isnan(got.allele_frequency_pre))
 
+
+class TestFrequencyChangeByGroup(unittest.TestCase):
+    """The change the within-group test is built on: each mouse later minus
+    earlier, mean per replicate, mean over replicates."""
+
+    TPS = Timepoints("pre", "end")
+
+    @staticmethod
+    def _long(rows):
+        """rows: (mouse, replicate, group, time, allele, allele_reads, total_reads)."""
+        return pd.DataFrame(
+            [
+                {
+                    "mag_id": "MAG_A",
+                    "contig": "c1",
+                    "position": 1,
+                    "gene_id": "g1",
+                    "test_type": "two_sample_paired_tTest",
+                    "group_analyzed": "",
+                    "allele": allele,
+                    "subjectID": mouse,
+                    "replicate": rep,
+                    "group": grp,
+                    "time": time,
+                    "allele_reads": ar,
+                    "total_reads": tr,
+                }
+                for mouse, rep, grp, time, allele, ar, tr in rows
+            ]
+        )
+
+    def test_seesaw_pair_gets_opposite_changes(self):
+        # G 5/30 -> 24/30 and 0/30 -> 21/30 in r1; A is the other side of the seesaw
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 5, 30),
+                ("m1", "r1", "fat", "end", "G", 24, 30),
+                ("m2", "r1", "fat", "pre", "G", 0, 30),
+                ("m2", "r1", "fat", "end", "G", 21, 30),
+                ("m1", "r1", "fat", "pre", "A", 25, 30),
+                ("m1", "r1", "fat", "end", "A", 6, 30),
+                ("m2", "r1", "fat", "pre", "A", 30, 30),
+                ("m2", "r1", "fat", "end", "A", 9, 30),
+            ]
+        )
+        got = frequency_change_by_group(long, self.TPS).set_index("allele")
+        # brute force: m1 24/30-5/30 = 0.6333, m2 21/30-0 = 0.7, r1 mean = 0.6667
+        self.assertAlmostEqual(
+            got.loc["G", "frequency_change"], (19 / 30 + 21 / 30) / 2
+        )
+        self.assertAlmostEqual(
+            got.loc["A", "frequency_change"], -(19 / 30 + 21 / 30) / 2
+        )
+        self.assertEqual(int(got.loc["G", "n_replicates"]), 1)
+        self.assertEqual(int(got.loc["G", "n_mice"]), 2)  # m1, m2 in one cage
+        self.assertEqual(got.loc["G", "group"], "fat")
+
+    def test_replicates_weigh_equally(self):
+        # r1: two mice (+0.6, +0.2) -> +0.4 ; r2: one mouse (+0.1) -> +0.1
+        # group = (0.4 + 0.1) / 2 = 0.25, NOT the mouse mean (0.6+0.2+0.1)/3 = 0.3
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m1", "r1", "fat", "end", "G", 6, 10),
+                ("m2", "r1", "fat", "pre", "G", 0, 10),
+                ("m2", "r1", "fat", "end", "G", 2, 10),
+                ("m3", "r2", "fat", "pre", "G", 0, 10),
+                ("m3", "r2", "fat", "end", "G", 1, 10),
+            ]
+        )
+        got = frequency_change_by_group(long, self.TPS).iloc[0]
+        self.assertAlmostEqual(got.frequency_change, 0.25)
+        self.assertEqual(int(got.n_replicates), 2)
+        self.assertEqual(int(got.n_mice), 3)  # 3 mice in 2 cages
+
+    def test_unpaired_mouse_and_zero_read_sample_are_ignored(self):
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m1", "r1", "fat", "end", "G", 5, 10),  # +0.5, the only pair
+                ("m2", "r1", "fat", "end", "G", 10, 10),  # no pre sample: ignored
+                ("m3", "r1", "fat", "pre", "G", 0, 0),  # 0 reads at pre: no frequency
+                ("m3", "r1", "fat", "end", "G", 10, 10),
+            ]
+        )
+        got = frequency_change_by_group(long, self.TPS)
+        self.assertEqual(len(got), 1)
+        self.assertAlmostEqual(got.iloc[0].frequency_change, 0.5)
+        self.assertEqual(int(got.iloc[0].n_mice), 1)  # only m1 is paired
+
+    def test_site_with_no_paired_mouse_has_no_row(self):
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m2", "r1", "fat", "end", "G", 5, 10),
+            ]
+        )
+        self.assertTrue(frequency_change_by_group(long, self.TPS).empty)
+
+    def test_groups_are_separate(self):
+        # fat rises, control falls: one row each, never averaged together
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m1", "r1", "fat", "end", "G", 5, 10),
+                ("m3", "r2", "control", "pre", "G", 5, 10),
+                ("m3", "r2", "control", "end", "G", 0, 10),
+            ]
+        )
+        got = frequency_change_by_group(long, self.TPS).set_index("group")
+        self.assertAlmostEqual(got.loc["fat", "frequency_change"], 0.5)
+        self.assertAlmostEqual(got.loc["control", "frequency_change"], -0.5)
+
+    def test_numeric_group_names_stay_text(self):
+        long = self._long(
+            [
+                ("m1", "r1", "40", "pre", "G", 0, 10),
+                ("m1", "r1", "40", "end", "G", 5, 10),
+            ]
+        )
+        got = frequency_change_by_group(long, self.TPS)
+        self.assertEqual(got.iloc[0].group, "40")
+        self.assertIsInstance(got.iloc[0].group, str)
+
+    def test_two_samples_of_one_mouse_at_one_timepoint_raises(self):
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m1", "r1", "fat", "pre", "G", 1, 10),
+                ("m1", "r1", "fat", "end", "G", 5, 10),
+            ]
+        )
+        with self.assertRaises(pd.errors.MergeError):
+            frequency_change_by_group(long, self.TPS)
+
+    def test_blank_replicate_raises_instead_of_being_lumped(self):
+        # a blank cage label must not silently become one shared "blank" cage
+        long = self._long(
+            [
+                ("m1", "r1", "fat", "pre", "G", 0, 10),
+                ("m1", "r1", "fat", "end", "G", 5, 10),
+            ]
+        )
+        long["replicate"] = np.nan
+        with self.assertRaisesRegex(ValueError, "replicate"):
+            frequency_change_by_group(long, self.TPS)
+
+
+class TestSummariseRising(unittest.TestCase):
+    """Site c1:1, G and A tie (seesaw).  fat m1, m2 (r1); control m3, m4 (r2).
+    G reads pre/end: m1 5/30 -> 24/30, m2 0/30 -> 21/30, m3 1/30 -> 2/30,
+    m4 0/2 -> 0/30.  A is the rest of each pile.
+    Changes: G fat +0.667, G control +0.0167 (m3 +0.033, m4 0); A the negatives."""
+
+    TPS = Timepoints("pre", "end")
+    # mouse -> (replicate, group, G at pre, G at end, total at pre, total at end)
+    MICE = {
+        "m1": ("r1", "fat", 5, 24, 30, 30),
+        "m2": ("r1", "fat", 0, 21, 30, 30),
+        "m3": ("r2", "control", 1, 2, 30, 30),
+        "m4": ("r2", "control", 0, 0, 2, 30),
+    }
+    # (allele, mouse, time) -> status, by the presence rule (min_cov 5, bar 3, 5%)
+    STATUS = {
+        ("G", "m1", "pre"): "present",
+        ("G", "m1", "end"): "present",
+        ("G", "m2", "pre"): "absent",
+        ("G", "m2", "end"): "present",
+        ("G", "m3", "pre"): "below_detection",
+        ("G", "m3", "end"): "below_detection",
+        ("G", "m4", "pre"): "not_covered",
+        ("G", "m4", "end"): "absent",
+        ("A", "m1", "pre"): "present",
+        ("A", "m1", "end"): "present",
+        ("A", "m2", "pre"): "present",
+        ("A", "m2", "end"): "present",
+        ("A", "m3", "pre"): "present",
+        ("A", "m3", "end"): "present",
+        ("A", "m4", "pre"): "not_covered",
+        ("A", "m4", "end"): "present",
+    }
+
+    def _long(self, group_analyzed=""):
+        rows = []
+        for mouse, (rep, grp, g_pre, g_end, n_pre, n_end) in self.MICE.items():
+            for time, g, n in (("pre", g_pre, n_pre), ("end", g_end, n_end)):
+                for allele, reads in (("G", g), ("A", n - g)):
+                    status = self.STATUS[(allele, mouse, time)]
+                    rows.append(
+                        {
+                            "mag_id": "MAG_A",
+                            "contig": "c1",
+                            "position": 1,
+                            "gene_id": "g1",
+                            "test_type": "two_sample_paired_tTest",
+                            "group_analyzed": group_analyzed,
+                            "allele": allele,
+                            "q_value": 0.01,
+                            "n_alleles_tied_at_min_p": 2,
+                            "sample_id": f"{mouse}_{time}",
+                            "subjectID": mouse,
+                            "replicate": rep,
+                            "group": grp,
+                            "time": time,
+                            "allele_reads": reads,
+                            "total_reads": n,
+                            "allele_status": status,
+                            "allele_present": status == "present",
+                        }
+                    )
+        return label_origin_in_own_mouse(pd.DataFrame(rows), self.TPS)
+
+    def _rising(self, long):
+        change = frequency_change_by_group(long, self.TPS)
+        return summarise_rising(long, change, self.TPS)
+
+    def test_fallen_seesaw_partner_is_left_out(self):
+        got = self._rising(self._long())
+        self.assertEqual(set(got.allele), {"G"})  # A fell in both groups
+
+    def test_rose_in_both_groups_gives_one_row_per_group_with_its_own_end_check(
+        self,
+    ):
+        got = self._rising(self._long()).set_index("rose_in")
+        self.assertEqual(sorted(got.index), ["control", "fat"])
+        fat, control = got.loc["fat"], got.loc["control"]
+        # fat: m1 had G at pre (baseline = every pre sample) -> standing
+        self.assertEqual(fat.origin_any_mouse, "standing_variation")
+        self.assertAlmostEqual(fat.frequency_change, (19 / 30 + 21 / 30) / 2)
+        self.assertEqual(fat.other_group, "control")
+        self.assertEqual((int(fat.n_replicates), int(fat.n_mice)), (1, 2))
+        self.assertAlmostEqual(fat.other_group_frequency_change, (1 / 30 + 0) / 2)
+        self.assertEqual(
+            (int(fat.n_mice_standing_variation), int(fat.n_mice_de_novo_candidate)),
+            (1, 1),
+        )
+        # baseline reads: every pre sample; later reads: fat's own end samples only
+        self.assertEqual((int(fat.total_reads_pre), int(fat.allele_reads_pre)), (92, 6))
+        self.assertEqual(
+            (int(fat.total_reads_end), int(fat.allele_reads_end)), (60, 45)
+        )
+        # control: G rose a little, but no CONTROL end mouse has it present (m3 2/30
+        # is under the bar, m4 0/30) -> nothing to explain, judged on control alone
+        self.assertEqual(control.origin_any_mouse, "allele_not_present_at_end")
+        self.assertEqual(
+            (int(control.total_reads_end), int(control.allele_reads_end)), (60, 2)
+        )
+
+    def test_full_summary_is_unchanged_by_the_refactor(self):
+        # the pooled summary still reports both alleles, G standing via fat
+        summ = summarise_sites(self._long(), self.TPS).set_index("allele")
+        self.assertEqual(sorted(summ.index), ["A", "G"])
+        self.assertEqual(summ.loc["G", "origin_any_mouse"], "standing_variation")
+
+    def test_within_group_site_considers_only_its_own_group(self):
+        # a site significant within fat: control's small rise is not a candidate
+        got = self._rising(self._long(group_analyzed="fat"))
+        self.assertEqual(got.rose_in.tolist(), ["fat"])
+
+    def test_flat_or_unpaired_is_not_rising(self):
+        long = self._long()
+        flat = long.copy()
+        # make G identical at pre and end in every mouse: change 0 -> no G row
+        for mouse, (_, _, g_pre, _, n_pre, _) in self.MICE.items():
+            end_g = (
+                (flat.subjectID == mouse) & (flat.time == "end") & (flat.allele == "G")
+            )
+            flat.loc[end_g, ["allele_reads", "total_reads"]] = (g_pre, n_pre)
+        self.assertNotIn("G", set(self._rising(flat).allele))
+        # drop every pre sample: no mouse is paired -> no row at all
+        self.assertTrue(self._rising(long[long.time == "end"]).empty)
+
+    def test_unknown_change_is_counted_in_the_log(self):
+        # a within-fat site whose fat mice are unpaired (no pre sample) while a
+        # control mouse is paired: fat's change is unknown, so no rising row, and
+        # the log must count that (site, allele, group) candidate
+        long = self._long(group_analyzed="fat")
+        long = long[~((long.group == "fat") & (long.time == "pre"))]
+        with self.assertLogs(
+            "alleleflux.scripts.analysis.baseline_presence", level="INFO"
+        ) as logs:
+            got = self._rising(long)
+        self.assertTrue(got.empty)
+        self.assertTrue(
+            any(
+                "2 (site, allele, group) candidates had no mouse" in m
+                for m in logs.output
+            ),
+            logs.output,
+        )  # G-fat and A-fat
+
+    def test_columns_and_empty_input(self):
+        got = self._rising(self._long().iloc[0:0])
+        self.assertTrue(got.empty)
+        self.assertEqual(list(got.columns), rising_columns(self.TPS))
+        cols = rising_columns(self.TPS)
+        start = cols.index("q_value") + 1
+        self.assertEqual(cols[start : start + len(RISING_COLUMNS)], RISING_COLUMNS)
+
+
 # ---------------------------------------------------------------------------
 # End-to-end
 # ---------------------------------------------------------------------------
@@ -439,6 +743,15 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         long = pd.read_csv(os.path.join(self.out, "pre_end-fat_control_two_sample_paired_tTest_baseline_presence.tsv.gz"), sep="\t")
         self.assertEqual(len(long), 0)
         self.assertIn("allele_status", long.columns)
+        rise = pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+        )
+        self.assertEqual(len(rise), 0)
+        self.assertIn("rose_in", rise.columns)  # header-only, never a missing file
 
     def test_missing_summary_for_the_chosen_family_fails_loud(self):
         done = self._run("--summary", "two_sample_unpaired", "--test_type", "two_sample_unpaired_tTest")
@@ -453,6 +766,27 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertIn("own_group", done.stderr)
         self.assertIn("two_sample_paired", done.stderr)
         self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+    def test_rising_table_keeps_the_risen_allele_per_group(self):
+        # G rose in fat (+0.667) and a little in control (+0.017); A fell in both
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rise = pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+        ).set_index("rose_in")
+        self.assertEqual(set(rise.allele), {"G"})  # A fell: left out
+        self.assertEqual(sorted(rise.index), ["control", "fat"])  # G rose in both
+        fat, control = rise.loc["fat"], rise.loc["control"]
+        self.assertEqual(fat.origin_any_mouse, "standing_variation")
+        self.assertAlmostEqual(fat.frequency_change, (19 / 30 + 21 / 30) / 2)
+        self.assertEqual((int(fat.n_replicates), int(fat.n_mice)), (1, 2))
+        # judged on control's end mice only: m3 2/30 under the bar, m4 0/30
+        self.assertEqual(control.origin_any_mouse, "allele_not_present_at_end")
+        self.assertIn("rose in at least one group", done.stderr)  # counts logged
 
 
 class TestCheckBaselineScope(unittest.TestCase):
@@ -691,6 +1025,35 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(done.returncode, 0)
+
+    def _rising(self):
+        return pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_single_sample_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+        )
+
+    def test_rising_table_under_each_scope(self):
+        # comparison: control is in scope, so its change is reported alongside
+        self._run()
+        rise = self._rising()
+        self.assertEqual(len(rise), 1)  # the site's own group only
+        r = rise.iloc[0]
+        self.assertEqual((r.allele, r.rose_in), ("G", "fat"))
+        self.assertAlmostEqual(r.frequency_change, (0.8 + 0.7) / 2)  # r1, r2
+        self.assertEqual((int(r.n_replicates), int(r.n_mice)), (2, 2))
+        self.assertEqual(r.other_group, "control")
+        self.assertAlmostEqual(r.other_group_frequency_change, -5 / 30)
+        self.assertEqual(r.origin_any_mouse, "standing_variation")  # control had G
+        # own_group: fat alone, no other group; baseline = fat's mice -> de novo
+        shutil.rmtree(self.out)
+        self._run("--baseline_scope", "own_group")
+        r = self._rising().iloc[0]
+        self.assertTrue(pd.isna(r.other_group))  # "" reads back as NaN
+        self.assertTrue(pd.isna(r.other_group_frequency_change))
+        self.assertEqual(r.origin_any_mouse, "de_novo_candidate")
 
 
 if __name__ == "__main__":

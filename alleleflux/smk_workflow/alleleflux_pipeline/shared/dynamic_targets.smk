@@ -1122,4 +1122,4 @@ def generate_baseline_presence_targets(tp, gr):
     if wanted not in generate_p_value_summary_targets(tp, gr):
         return []
     stem = get_baseline_presence_stem(timepoints=tp, groups=gr)
-    return [f"{stem}.tsv.gz", f"{stem}_summary.tsv"]
+    return [f"{stem}.tsv.gz", f"{stem}_summary.tsv", f"{stem}_rising.tsv"]

@@ -21,7 +21,7 @@ to call the allele present.  Each sample gets one of four verdicts::
     absent           covered, zero reads of the allele
     not_covered      fewer than min_cov reads: no verdict, out of every denominator
 
-Two outputs per (comparison, test):
+Three outputs per (comparison, test):
 
 * ``{comparison}_{family}_{statistic}_baseline_presence.tsv.gz`` -- one row per site x allele
   x sample: allele reads, total reads, detection bar, status, the mouse / replicate / group /
@@ -33,12 +33,20 @@ Two outputs per (comparison, test):
   allele, their ratio) -- UNFILTERED, so "1,000 reads at baseline and the allele
   never seen" bounds its baseline frequency below 1/1,000.  Which framing is the
   paper's headline is a design question: littermates sharing a colony justify
-  "any mouse"; outbred, half-cross-sectional DRiDO mice justify
+  "any mouse"; outbred, half-cross-sectional cohorts justify
   "same mouse" plus a stable strain background.
+* ``..._rising.tsv`` -- the summary's columns plus ``rose_in``,
+  ``frequency_change``, ``n_replicates``, ``n_mice``, ``other_group``,
+  ``other_group_frequency_change``: one row per (site, allele, group the allele
+  ROSE in).  At a biallelic site both alleles tie and both are in the summary,
+  but only one rose; the one that fell was the common one at baseline and always
+  reads "standing", so it is left out here.  The end-point check and the
+  later-timepoint counts use the rose_in group's samples only.  This is the
+  table to count standing vs de novo from.
 
 Column names and origin labels are spelled with the comparison's OWN timepoint
 names (``pre`` / ``end`` for ``pre_end-fat_control``, ``5mo`` / ``22mo`` for
-DRiDO), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appear only
+an age series), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appear only
 as placeholders in templates and as shorthand in comments for "the earlier /
 the later timepoint of the comparison".
 
@@ -225,7 +233,7 @@ def find_summary_file(summary_dir: str, family: str, period: str) -> str:
     """The one ``p_value_summary_{family}_{period}*.tsv`` in a comparison directory.
 
     Older runs name it ``..._{period}.tsv``, newer ones
-    ``..._{period}-{groups}.tsv`` (DRiDO); the trailing ``*`` covers both.  The
+    ``..._{period}-{groups}.tsv``; the trailing ``*`` covers both.  The
     period is part of the pattern so that ``lmm`` never also matches
     ``lmm_across_time`` (same prefix).  Zero or two matches raise: no silent
     fallback to another family.
@@ -567,6 +575,80 @@ def label_origin_in_own_mouse(long: pd.DataFrame, tps: Timepoints) -> pd.DataFra
     return out.drop(columns="_own_t0_status")
 
 
+def frequency_change_by_group(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
+    """How much each candidate allele's frequency changed in each group.
+
+    The same three steps the within-group test is built on
+    (``allele_freq.calculate_allele_frequency_changes`` + ``get_mean_change``):
+
+    1. each mouse sampled at BOTH timepoints: later frequency minus earlier
+       frequency, frequency = ``allele_reads / total_reads`` (A+C+G+T).  A sample
+       with 0 reads has no frequency, so its mouse has no change;
+    2. mean over the mice of each replicate -> one change per replicate;
+    3. mean over the replicates -> the group's change.
+
+    The steps are the test's; the samples are this table's.  Like the test, any
+    read counts (no ``min_cov``: at thin sites few mice reach 5 reads at both
+    timepoints, so that floor would leave most changes unknown).  Unlike the
+    test, samples are not filtered by QC; on a cage-replicate run, QC-passing
+    samples alone gave the identical rose / fell call for every allele checked.
+
+    Parameters
+    ----------
+    long
+        The long table: ``SITE_KEYS`` + ``subjectID, replicate, group, time,
+        allele_reads, total_reads``.  ``group`` and ``time`` are text.
+    tps
+        Which timepoint label is the earlier and which the later.
+
+    Returns
+    -------
+    ``SITE_KEYS + ["group", "frequency_change", "n_replicates", "n_mice"]``: one row
+    per (site, allele, group) with at least one paired mouse.  A group with no
+    mouse sampled at both timepoints has no row (its change is unknown).
+
+    Example (allele G, fat, replicate r1): m1 5/30 -> 24/30 (+0.633), m2 0/30 ->
+    21/30 (+0.700); r1 mean +0.667; one replicate, so fat +0.667,
+    n_replicates 1, n_mice 2.  Its seesaw partner A gets -0.667.
+    """
+    mouse = SITE_KEYS + ["group", "replicate", "subjectID"]
+    # A blank in any key would be silently mishandled by groupby (dropped by
+    # default, or with dropna=False lumped into one "blank" replicate), so stop.
+    # Site keys are filled with "" upstream; blanks can only come from metadata.
+    blank = [c for c in mouse if long[c].isna().any()]
+    if blank:
+        raise ValueError(
+            f"blank values in {blank}: every sample needs a group, replicate and "
+            f"subjectID (check the metadata)"
+        )
+    seen = long[long["total_reads"] > 0]  # 0 reads: no frequency to compare
+    per_sample = seen[mouse + ["time"]].assign(
+        freq=(seen["allele_reads"] / seen["total_reads"]).to_numpy(),
+        group=seen["group"].astype(str),  # "40" stays "40" (numeric group names)
+    )
+    earlier = per_sample[per_sample["time"] == tps.earlier].drop(columns="time")
+    later = per_sample[per_sample["time"] == tps.later].drop(columns="time")
+    # Inner join on the mouse, its replicate and group: only mice with a sample at
+    # both timepoints carry a change (half a cross-sectional cohort has none).
+    # one_to_one: two samples of one mouse at one timepoint is broken input.
+    paired = later.merge(
+        earlier, on=mouse, suffixes=("_later", "_earlier"), validate="one_to_one"
+    )
+    paired["change"] = paired["freq_later"] - paired["freq_earlier"]
+    # Replicate first, then group: a replicate with 5 mice weighs the same as one
+    # with 1, as in the test (the replicate is the unit of replication).
+    per_replicate = paired.groupby(
+        SITE_KEYS + ["group", "replicate"], sort=True, dropna=False
+    )["change"].mean()
+    per_group = per_replicate.groupby(
+        SITE_KEYS + ["group"], sort=True, dropna=False
+    ).agg(frequency_change="mean", n_replicates="size")
+    # Mice behind the change, next to the cages: 16 paired mice in 12 cages
+    # weighs differently from 12 mice in 12 cages when judging a thin site.
+    n_mice = paired.groupby(SITE_KEYS + ["group"], sort=True, dropna=False).size()
+    return per_group.join(n_mice.rename("n_mice")).reset_index()
+
+
 # Summary column TEMPLATES (``{t0}`` / ``{t1}`` -> the comparison's timepoint names via
 # ``summary_columns``).  Shown here for pre_end.
 SUMMARY_COLUMN_TEMPLATES = [
@@ -609,6 +691,69 @@ def summary_columns(tps: Timepoints) -> list[str]:
     ``n_pre_samples_covered``, ``total_reads_end``, ...
     """
     return [tps.name(c) for c in SUMMARY_COLUMN_TEMPLATES]
+
+
+def _site_record(
+    key: tuple,
+    site_rows: pd.DataFrame,
+    t0: pd.DataFrame,
+    t1: pd.DataFrame,
+    tps: Timepoints,
+) -> dict:
+    """One summary record: the verdict and counts for one (site, allele).
+
+    Shared by ``summarise_sites`` (t1 = every later sample in scope) and
+    ``summarise_rising`` (t1 = the later samples of the group the allele rose
+    in).  ``t0`` is always every earlier sample in scope: the baseline.
+    ``site_rows`` supplies the site-level columns (``q_value``,
+    ``n_alleles_tied_at_min_p``).
+    """
+    t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
+    t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+    # Which mice / replicates had the allele at t0 (covered + present).
+    mice_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "subjectID"])
+    reps_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "replicate"])
+    record = dict(zip(SITE_KEYS, key))
+    for col in ("q_value", "n_alleles_tied_at_min_p"):
+        record[col] = site_rows[col].iloc[0] if col in site_rows.columns else np.nan
+    # A site verdict needs the allele to be SEEN at t1 in at least one covered
+    # sample; otherwise there is nothing whose origin to explain.
+    if not t1_cov["allele_present"].any():
+        origin = tps.name(ORIGIN_NOT_SEEN_AT_T1)
+    elif mice_t0_present:
+        origin = ORIGIN_STANDING
+    elif (t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION).any():
+        origin = tps.name(ORIGIN_DE_NOVO_BELOW_DETECTION)
+    elif (t0_cov["allele_status"] == EVIDENCE_ABSENT).any():
+        origin = ORIGIN_DE_NOVO
+    else:
+        origin = tps.name(ORIGIN_T0_NOT_COVERED)
+    record.update(
+        {
+            "origin_any_mouse": origin,
+            tps.name("n_{t0}_samples_allele_present"): int(
+                t0_cov["allele_present"].sum()
+            ),
+            tps.name("n_{t0}_samples_covered"): len(t0_cov),
+            tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
+            tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
+        }
+    )
+    for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
+        record[tps.name(f"n_mice_{label}")] = int(
+            (t1["origin_in_own_mouse"] == tps.name(label)).sum()
+        )
+    # Pooled reads, unfiltered: t0 / t1 here are ALL rows at the timepoint,
+    # not the covered subset, so thin and profile-less samples count too.
+    for role, part in (("{t0}", t0), ("{t1}", t1)):
+        total = int(part["total_reads"].sum())
+        allele = int(part["allele_reads"].sum())
+        record[tps.name(f"total_reads_{role}")] = total
+        record[tps.name(f"allele_reads_{role}")] = allele
+        record[tps.name(f"allele_frequency_{role}")] = (
+            allele / total if total else np.nan
+        )
+    return record
 
 
 def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
@@ -658,53 +803,118 @@ def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
     for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
         t0 = sub[sub["time"] == tps.earlier]
         t1 = sub[sub["time"] == tps.later]
-        t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
-        t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
-        # Which mice / replicates had the allele at t0 (covered + present).
-        mice_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "subjectID"])
-        reps_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "replicate"])
-        record = dict(zip(SITE_KEYS, key))
-        for col in ("q_value", "n_alleles_tied_at_min_p"):
-            record[col] = sub[col].iloc[0] if col in sub.columns else np.nan
-        # A site verdict needs the allele to be SEEN at t1 in at least one covered
-        # sample; otherwise there is nothing whose origin to explain.
-        if not t1_cov["allele_present"].any():
-            origin = tps.name(ORIGIN_NOT_SEEN_AT_T1)
-        elif mice_t0_present:
-            origin = ORIGIN_STANDING
-        elif (t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION).any():
-            origin = tps.name(ORIGIN_DE_NOVO_BELOW_DETECTION)
-        elif (t0_cov["allele_status"] == EVIDENCE_ABSENT).any():
-            origin = ORIGIN_DE_NOVO
-        else:
-            origin = tps.name(ORIGIN_T0_NOT_COVERED)
-        record.update(
-            {
-                "origin_any_mouse": origin,
-                tps.name("n_{t0}_samples_allele_present"): int(
-                    t0_cov["allele_present"].sum()
-                ),
-                tps.name("n_{t0}_samples_covered"): len(t0_cov),
-                tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
-                tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
-            }
-        )
-        for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
-            record[tps.name(f"n_mice_{label}")] = int(
-                (t1["origin_in_own_mouse"] == tps.name(label)).sum()
-            )
-        # Pooled reads, unfiltered: t0 / t1 here are ALL rows at the timepoint,
-        # not the covered subset, so thin and profile-less samples count too.
-        for role, part in (("{t0}", t0), ("{t1}", t1)):
-            total = int(part["total_reads"].sum())
-            allele = int(part["allele_reads"].sum())
-            record[tps.name(f"total_reads_{role}")] = total
-            record[tps.name(f"allele_reads_{role}")] = allele
-            record[tps.name(f"allele_frequency_{role}")] = (
-                allele / total if total else np.nan
-            )
-        rows.append(record)
+        rows.append(_site_record(key, sub, t0, t1, tps))
     return pd.DataFrame(rows, columns=summary_columns(tps))
+
+
+# Extra columns of the rising table, placed right after q_value.
+RISING_COLUMNS = [
+    "rose_in",  # the group this row's allele rose in
+    "frequency_change",  # its change there (frequency_change_by_group), > 0
+    # replicates (cages) of the rose_in group behind frequency_change: those with
+    # >= 1 mouse sampled at both timepoints (cages, not mice: 16 mice in 12 cages = 12)
+    "n_replicates",
+    "n_mice",  # the paired mice in those cages
+    "other_group",  # the comparison's other group in scope ("" if none)
+    "other_group_frequency_change",  # the allele's change there (NaN if unknown)
+]
+
+
+def rising_columns(tps: Timepoints) -> list[str]:
+    """``summary_columns(tps)`` with ``RISING_COLUMNS`` inserted after ``q_value``."""
+    cols = summary_columns(tps)
+    cut = cols.index("q_value") + 1
+    return cols[:cut] + RISING_COLUMNS + cols[cut:]
+
+
+def summarise_rising(
+    long: pd.DataFrame, change: pd.DataFrame, tps: Timepoints
+) -> pd.DataFrame:
+    """One row per (site, allele, group the allele ROSE in).
+
+    Fixes two things the pooled summary cannot say:
+
+    * **the seesaw.** At a biallelic site both alleles tie and are reported, but
+      only one of them rose; the one that fell was the common allele at baseline
+      and always reads "standing".  Here only alleles with
+      ``frequency_change > 0`` in a group get a row;
+    * **whose later samples count.** The end-point check ("is the allele present
+      in at least one covered later sample?") and the later-timepoint counts use
+      the ``rose_in`` group's samples only.  The baseline (``t0``) is unchanged:
+      every earlier sample in the run's ``--baseline_scope``.
+
+    Candidate groups: a within-group site (``group_analyzed`` set) is asked about
+    its own group only; a between-group site about every group present.  Fell,
+    flat (0) and unknown (no paired mouse) give no row.
+
+    Parameters
+    ----------
+    long
+        The long table after ``label_origin_in_own_mouse``.
+    change
+        ``frequency_change_by_group(long, tps)``.
+    tps
+        Earlier / later timepoint labels.
+
+    Returns
+    -------
+    ``rising_columns(tps)``.  Example (fat/control, G rose in fat +0.667 and in
+    control +0.017): two rows.  fat: standing_variation (m1 had G at pre),
+    later reads 45/60 from the fat mice only.  control: allele_not_present_at_end
+    (no control mouse has G above the bar at end), although the pooled summary
+    calls G standing.
+    """
+    # (site..., group) -> (change, n replicates, n mice); a missing key = change
+    # unknown (no mouse of that group sampled at both timepoints).
+    lookup = {
+        tuple(row[: len(SITE_KEYS) + 1]): row[len(SITE_KEYS) + 1 :]
+        for row in change[
+            SITE_KEYS + ["group", "frequency_change", "n_replicates", "n_mice"]
+        ].itertuples(index=False, name=None)
+    }
+    rows = []
+    n_unknown = 0  # candidate (site, allele, group) with no mouse at both timepoints
+    for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
+        groups_here = sorted(sub["group"].astype(str).unique())
+        if len(groups_here) > 2:
+            raise ValueError(
+                f"site {key}: {len(groups_here)} groups {groups_here}; a comparison has two"
+            )
+        analyzed = str(key[SITE_KEYS.index("group_analyzed")])
+        candidates = [analyzed] if analyzed else groups_here
+        # The baseline: every earlier sample in scope, whichever group rose.
+        t0 = sub[sub["time"] == tps.earlier]
+        for group in candidates:
+            if key + (group,) not in lookup:
+                n_unknown += 1  # counted here, where it is skipped: never silent
+            delta, n_reps, n_mice = lookup.get(key + (group,), (np.nan, 0, 0))
+            if not delta > 0:  # fell, flat, or no paired mouse (NaN > 0 is False)
+                continue
+            # The end-point check and later counts: this group's samples only.
+            t1 = sub[(sub["time"] == tps.later) & (sub["group"].astype(str) == group)]
+            record = _site_record(key, sub, t0, t1, tps)
+            others = [g for g in groups_here if g != group]
+            other = others[0] if others else ""
+            record.update(
+                {
+                    "rose_in": group,
+                    "frequency_change": delta,
+                    "n_replicates": int(n_reps),
+                    "n_mice": int(n_mice),
+                    "other_group": other,
+                    "other_group_frequency_change": (
+                        lookup.get(key + (other,), (np.nan, 0, 0))[0]
+                        if other
+                        else np.nan
+                    ),
+                }
+            )
+            rows.append(record)
+    logger.info(
+        f"{n_unknown:,} (site, allele, group) candidates had no mouse sampled at "
+        f"both timepoints: change unknown, no rising row"
+    )
+    return pd.DataFrame(rows, columns=rising_columns(tps))
 
 
 def _assess_one_sample(job: tuple) -> pd.DataFrame:
@@ -915,7 +1125,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     if not jobs:
         # No significant site for this test / threshold / MAG selection: a legitimate
         # outcome (Wilcoxon at n=8 cannot reach q<0.05, for instance).  Write the
-        # two files with headers only so a pipeline over many comparisons never trips.
+        # three files with headers only so a pipeline over many comparisons never trips.
         stem = os.path.join(
             args.output_dir,
             f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",
@@ -925,6 +1135,9 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         )
         pd.DataFrame(columns=summary_columns(tps)).to_csv(
             f"{stem}_summary.tsv", sep="\t", index=False
+        )
+        pd.DataFrame(columns=rising_columns(tps)).to_csv(
+            f"{stem}_rising.tsv", sep="\t", index=False
         )
         logger.info(f"no sites: wrote header-only outputs to {stem}*")
         return 0
@@ -1009,21 +1222,39 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     )
     long["time"] = long["time"].astype(str)
 
-    # ---- 5. Summary, then write both.
+    # ---- 5. Summary (every reported allele) and rising table (only the allele
+    # that rose, per group, judged on that group's later samples); write all three.
     summary = summarise_sites(long, tps)
+    change = frequency_change_by_group(long, tps)
+    rising = summarise_rising(long, change, tps)
     stem = os.path.join(
         args.output_dir,
         f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",
     )
     long.to_csv(f"{stem}.tsv.gz", sep="\t", index=False, compression="gzip")
     summary.to_csv(f"{stem}_summary.tsv", sep="\t", index=False)
+    rising.to_csv(f"{stem}_rising.tsv", sep="\t", index=False)
     logger.info(
-        f"wrote {len(long):,} long rows and {len(summary):,} summary rows to {stem}*"
+        f"wrote {len(long):,} long rows, {len(summary):,} summary rows and "
+        f"{len(rising):,} rising rows to {stem}*"
     )
     if len(summary):
         logger.info(
             f"origin_any_mouse: {summary['origin_any_mouse'].value_counts().to_dict()}"
         )
+        # Rows whose allele fell or stayed flat in every candidate group have no
+        # rising row; candidates with an unknown change are counted by
+        # summarise_rising itself.
+        ident = [c for c in SITE_KEYS if c != "test_type"]  # outputs carry no test_type
+        n_rose = rising[ident].drop_duplicates().shape[0]
+        logger.info(
+            f"{n_rose:,} of {len(summary):,} site x allele rows rose in at least one group"
+        )
+        if len(rising):
+            logger.info(
+                f"rising origin_any_mouse: "
+                f"{rising['origin_any_mouse'].value_counts().to_dict()}"
+            )
     return 0
 
 
