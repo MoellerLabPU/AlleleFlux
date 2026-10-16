@@ -36,9 +36,8 @@ Three outputs per (comparison, test):
   "any mouse"; outbred, half-cross-sectional cohorts justify
   "same mouse" plus a stable strain background.
 * ``..._rising.tsv`` -- the summary's columns plus ``rose_in``,
-  ``frequency_change``, ``n_replicates``, ``n_mice``, ``other_group``,
-  ``other_group_frequency_change``: one row per (site, allele, group the allele
-  ROSE in).  At a biallelic site both alleles tie and both are in the summary,
+  ``frequency_change``, ``n_replicates``, ``n_mice``: one row per (site,
+  allele, group the allele ROSE in).  At a biallelic site both alleles are candidates and both are in the summary,
   but only one rose; the one that fell was the common one at baseline and always
   reads "standing", so it is left out here.  The end-point check and the
   later-timepoint counts use the rose_in group's samples only.  This is the
@@ -92,6 +91,10 @@ import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
+from alleleflux.scripts.utilities.site_depth_filter import (
+    add_site_depth_filter_args,
+    site_depth_filter_from_args,
+)
 from alleleflux.scripts.analysis.ani.profile_io import (
     contig_lengths_for_mag,
     dense_contig_counts,
@@ -189,7 +192,7 @@ LONG_COLUMNS = [
     "group_analyzed",
     "min_p_value",
     "q_value",
-    "n_alleles_tied_at_min_p",
+    "n_candidate_alleles",
     "allele",
     "sample_id",
     "subjectID",
@@ -363,16 +366,34 @@ def load_significant_sites(
 
 
 def candidate_alleles(
-    sites: pd.DataFrame, source: pd.DataFrame, column_of
+    sites: pd.DataFrame,
+    source: pd.DataFrame,
+    column_of,
+    line_by_group: dict[str, float],
 ) -> pd.DataFrame:
-    """Which base(s) carried the significant p-value at each site.
+    """Which base(s) at each significant site are candidates for "the allele that rose".
 
     The summary's ``min_p_value`` is the minimum over the four per-base tests
-    (``p_value_summary.py``); the per-MAG source file still has all four.  A
-    base is a candidate when its p equals that minimum.  At a biallelic site
-    the two allele frequencies are complementary (A = 1 - G), so their tests
-    are the same test and BOTH bases tie -- that is why this returns a set,
-    reported with ``n_alleles_tied_at_min_p`` so ties are visible.
+    (``p_value_summary.py``); the per-MAG source file still has all four.  A base
+    is *tested* when its p < 1: the test writes exactly 1.0 for a base whose
+    frequency never changed in any sample ("identical values").  The rule:
+
+    * **two tested bases** (91% of significant sites in a cage-replicate run):
+      both are candidates.  Their frequencies are complementary (A = 1 - G), so
+      the two tests are one test; which base rose is decided downstream from the
+      frequency change (``summarise_rising``), never from the p-values;
+    * **three or four tested bases**: a base is a candidate when its own p is at
+      or below ``line_by_group[group_analyzed]``, the largest raw p that still
+      earned q <= threshold in this comparison and group (BH is monotone, so that
+      is exactly "would have q <= threshold itself").  A base that rose but is
+      not significant on its own is not a candidate;
+    * **no tested base** at a significant site: broken input, raises.
+
+    Why not "bases whose p equals min_p_value" (the old rule): the frequency
+    cache stores float32, so seesaw partners' p-values differ by ~1e-8 and a
+    tolerance-based tie fails for ~40% of two-base sites, silently dropping the
+    riser whenever the faller's p came out a hair smaller.  There is no tolerance
+    here; the only comparison is "p < 1" and "p <= line".
 
     Parameters
     ----------
@@ -386,16 +407,24 @@ def candidate_alleles(
     column_of
         ``allele_p_column(family, test_type)``: maps (base, group_analyzed) to
         the source column holding that base's p-value.
+    line_by_group
+        ``{group_analyzed: largest min_p_value with q <= threshold}`` over the
+        whole comparison (``"" ->`` line for two-sample families).  A site whose
+        group has no entry raises: the line must come from the same sites the
+        q-values were computed over.
 
     Returns
     -------
     ``sites`` expanded to one row per (site, allele), plus ``allele`` and
-    ``n_alleles_tied_at_min_p``.  Sites are matched to the source on contig,
-    position AND gene_id (so a gene-annotation disagreement is caught too); any
-    site without a match raises, listing the first few.
+    ``n_candidate_alleles`` (how many bases were kept at that site).  Sites are
+    matched to the source on contig, position AND gene_id (so a gene-annotation
+    disagreement is caught too); any site without a match raises, listing the
+    first few.
 
-    Example: A and G both at 8.1e-5, C and T at 1.0, min 8.1e-5 -> two rows,
-    alleles A and G, n_alleles_tied_at_min_p 2.
+    Examples (two-sample, line 0.0025): A and G at 8.1e-5 and 8.1e-5 + 1e-13,
+    C and T at 1.0 -> two rows, A and G, n_candidate_alleles 2.  A 1e-4, C 0.002,
+    G 0.5, T 1.0 -> A and C (G is tested but above the line), n 2; with the line
+    at 0.0015 -> A alone, n 1.
     """
     # Normalise the source's gene_id the way load_significant_sites normalised the
     # summary's: both files write a trailing space and NaN for intergenic positions.
@@ -413,31 +442,46 @@ def candidate_alleles(
         )
     rows = []
     for row in merged.itertuples(index=False):
+        group = str(row.group_analyzed)
+        if group not in line_by_group:
+            raise ValueError(
+                f"site {row.contig}:{row.position}: no significance line for group "
+                f"{group!r}; lines known for {sorted(line_by_group)}"
+            )
+        line = line_by_group[group]
         p_values = {}
         for base in BASES:
-            col = column_of(base, row.group_analyzed)
+            col = column_of(base, group)
             if col not in merged.columns:
                 raise ValueError(f"source file lacks column {col}")
             p_values[base] = getattr(row, col)
-        winners = [
-            b
-            for b, p in p_values.items()
-            if np.isclose(p, row.min_p_value, rtol=1e-9, atol=0.0)
-        ]
-        if not winners:
+        # Tested = the test ran on this base.  Exactly 1.0 is the test's own marker
+        # for "identical values in every sample" (see two_sample_*/single_sample.py);
+        # NaN would mean a test that could not run.  No tolerance: 0.999 is a test.
+        tested = {b: p for b, p in p_values.items() if np.isfinite(p) and p < 1.0}
+        if not tested:
             raise ValueError(
-                f"site {row.contig}:{row.position}: no per-base p equals min_p_value {row.min_p_value}"
+                f"site {row.contig}:{row.position} ({group!r}): significant "
+                f"(min_p_value {row.min_p_value}) but no tested base: p-values {p_values}"
             )
+        if len(tested) <= 2:
+            # Two tested bases are the seesaw pair (one test seen twice); one tested
+            # base is that pair with the partner's test not run.  Keep them all.
+            winners = sorted(tested)
+        else:
+            # Three or four real changes at one site: each riser must stand on its
+            # own.  The site's min-p base is always <= line (the site is significant).
+            winners = sorted(b for b, p in tested.items() if p <= line)
         for base in winners:
             rows.append(
                 {
                     **{c: getattr(row, c) for c in sites.columns},
                     "allele": base,
-                    "n_alleles_tied_at_min_p": len(winners),
+                    "n_candidate_alleles": len(winners),
                 }
             )
     return pd.DataFrame(
-        rows, columns=list(sites.columns) + ["allele", "n_alleles_tied_at_min_p"]
+        rows, columns=list(sites.columns) + ["allele", "n_candidate_alleles"]
     )
 
 
@@ -659,7 +703,7 @@ SUMMARY_COLUMN_TEMPLATES = [
     "gene_id",
     "group_analyzed",
     "allele",
-    "n_alleles_tied_at_min_p",
+    "n_candidate_alleles",
     "q_value",
     # the verdict under the loosest framing (any baseline mouse)
     "origin_any_mouse",
@@ -706,7 +750,7 @@ def _site_record(
     ``summarise_rising`` (t1 = the later samples of the group the allele rose
     in).  ``t0`` is always every earlier sample in scope: the baseline.
     ``site_rows`` supplies the site-level columns (``q_value``,
-    ``n_alleles_tied_at_min_p``).
+    ``n_candidate_alleles``).
     """
     t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
     t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
@@ -714,7 +758,7 @@ def _site_record(
     mice_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "subjectID"])
     reps_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "replicate"])
     record = dict(zip(SITE_KEYS, key))
-    for col in ("q_value", "n_alleles_tied_at_min_p"):
+    for col in ("q_value", "n_candidate_alleles"):
         record[col] = site_rows[col].iloc[0] if col in site_rows.columns else np.nan
     # A site verdict needs the allele to be SEEN at t1 in at least one covered
     # sample; otherwise there is nothing whose origin to explain.
@@ -815,8 +859,6 @@ RISING_COLUMNS = [
     # >= 1 mouse sampled at both timepoints (cages, not mice: 16 mice in 12 cages = 12)
     "n_replicates",
     "n_mice",  # the paired mice in those cages
-    "other_group",  # the comparison's other group in scope ("" if none)
-    "other_group_frequency_change",  # the allele's change there (NaN if unknown)
 ]
 
 
@@ -834,7 +876,7 @@ def summarise_rising(
 
     Fixes two things the pooled summary cannot say:
 
-    * **the seesaw.** At a biallelic site both alleles tie and are reported, but
+    * **the seesaw.** At a biallelic site both alleles are candidates and are reported, but
       only one of them rose; the one that fell was the common allele at baseline
       and always reads "standing".  Here only alleles with
       ``frequency_change > 0`` in a group get a row;
@@ -893,20 +935,12 @@ def summarise_rising(
             # The end-point check and later counts: this group's samples only.
             t1 = sub[(sub["time"] == tps.later) & (sub["group"].astype(str) == group)]
             record = _site_record(key, sub, t0, t1, tps)
-            others = [g for g in groups_here if g != group]
-            other = others[0] if others else ""
             record.update(
                 {
                     "rose_in": group,
                     "frequency_change": delta,
                     "n_replicates": int(n_reps),
                     "n_mice": int(n_mice),
-                    "other_group": other,
-                    "other_group_frequency_change": (
-                        lookup.get(key + (other,), (np.nan, 0, 0))[0]
-                        if other
-                        else np.nan
-                    ),
                 }
             )
             rows.append(record)
@@ -921,12 +955,27 @@ def _assess_one_sample(job: tuple) -> pd.DataFrame:
     """Worker: one (MAG, sample) -> verdict rows for every candidate (site, allele) of that MAG.
 
     ``job`` = (mag_id, sample_id, profile_path, contig_lengths, candidates,
-    model, min_freq, min_cov) where ``candidates`` has ``contig, position,
-    allele``.  Loads the profile once and assesses every site on every contig.
+    model, min_freq, min_cov, site_filter) where ``candidates`` has ``contig,
+    position, allele``.  Loads the profile once and assesses every site on every contig.
     Module-level so it pickles into ``multiprocessing.Pool``.
     """
-    mag_id, sample_id, path, contig_lengths, candidates, model, min_freq, min_cov = job
-    dense = dense_contig_counts(load_profile(path), contig_lengths)
+    (
+        mag_id,
+        sample_id,
+        path,
+        contig_lengths,
+        candidates,
+        model,
+        min_freq,
+        min_cov,
+        site_filter,
+    ) = job
+    # The site-depth filter runs on the profile first; a removed site reads as
+    # not_covered for this sample.  No QC row is on hand here (samples come from
+    # the metadata), so the loader takes the mean from the profile itself.
+    dense = dense_contig_counts(
+        load_profile(path, site_filter=site_filter), contig_lengths
+    )
     frames = []
     for (contig, allele), sub in candidates.groupby(["contig", "allele"], sort=True):
         positions = sub["position"].to_numpy(dtype=np.int64)
@@ -1053,6 +1102,19 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     )
     test_type = args.test_type  # names the output files and the p-value columns
     column_of = allele_p_column(args.summary, test_type)
+    # The significance line per group: the largest raw p among the sites that
+    # passed the threshold, over the WHOLE comparison (before any --mags filter),
+    # because the q-values were computed over all of them.  candidate_alleles
+    # uses it at sites with three or four tested bases; see its docstring.
+    line_by_group = (
+        sites.groupby(sites["group_analyzed"].fillna("").astype(str))["min_p_value"]
+        .max()
+        .to_dict()
+    )
+    logger.info(
+        "significance line (largest raw p with "
+        f"{args.threshold_column} <= {args.threshold}) per group: {line_by_group}"
+    )
     if args.mags:
         sites = sites[sites["mag_id"].isin(args.mags)]
     tests_dir = os.path.join(
@@ -1070,7 +1132,9 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
                 dtype={"contig": str, "gene_id": str},
             )
             frames.append(
-                candidate_alleles(chunk.drop(columns="source_file"), source, column_of)
+                candidate_alleles(
+                    chunk.drop(columns="source_file"), source, column_of, line_by_group
+                )
             )
         candidates_by_mag[mag_id] = pd.concat(frames, ignore_index=True)
     n_cand = sum(len(c) for c in candidates_by_mag.values())
@@ -1080,6 +1144,8 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
 
     # ---- 3. One job per (MAG, sample); every job loads its own profile once.
     model = build_error_model(min_base_quality=args.min_base_quality, fdr=args.fdr)
+    site_filter = site_depth_filter_from_args(args)
+    logger.info(f"site-depth filter: {site_filter}")
     jobs = []
     no_profile = (
         []
@@ -1106,6 +1172,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
                     model,
                     args.min_freq,
                     args.min_cov,
+                    site_filter,
                 )
             )
     logger.info(
@@ -1345,6 +1412,7 @@ def main():
         help="Base quality assumed by the null model",
     )
     parser.add_argument("--cpus", type=int, default=multiprocessing.cpu_count())
+    add_site_depth_filter_args(parser)
     args = parser.parse_args()
     return chase_the_ancestors(args)
 

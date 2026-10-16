@@ -185,6 +185,7 @@ class TestLoadAndValidateProfileReadIntegrity(TestQCMetrics):
 
     def _gz_profile(self, trailing_newline=True):
         import gzip
+
         path = tempfile.NamedTemporaryFile(delete=False, suffix=".tsv.gz").name
         text = pd.DataFrame(self.PROFILE).to_csv(sep="\t", index=False)
         if not trailing_newline:
@@ -214,31 +215,43 @@ class TestLoadAndValidateProfileReadIntegrity(TestQCMetrics):
         # Simulate the silent-truncation bug: the parser hands back the table
         # minus its last row.  The loader must notice and raise, never return it.
         import pyarrow.csv as pacsv
+
         real = pacsv.read_csv
+
         def short_read(*a, **k):
             tbl = real(*a, **k)
             return tbl.slice(0, tbl.num_rows - 1)
+
         path = self._gz_profile()
         try:
-            with patch("alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv", side_effect=short_read):
+            with patch(
+                "alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv",
+                side_effect=short_read,
+            ):
                 with self.assertRaises(ValueError) as cm:
                     load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
-            self.assertIn("5", str(cm.exception))   # rows read
-            self.assertIn("6", str(cm.exception))   # rows in the file
+            self.assertIn("5", str(cm.exception))  # rows read
+            self.assertIn("6", str(cm.exception))  # rows in the file
         finally:
             os.unlink(path)
 
     def test_parser_runs_single_threaded(self):
         # Multithreaded chunk conversion is where the reader failed; keep it off.
         import pyarrow.csv as pacsv
+
         seen = {}
         real = pacsv.read_csv
+
         def spy(*a, **k):
             seen["read_options"] = k.get("read_options")
             return real(*a, **k)
+
         path = self._gz_profile()
         try:
-            with patch("alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv", side_effect=spy):
+            with patch(
+                "alleleflux.scripts.utilities.qc_metrics.pacsv.read_csv",
+                side_effect=spy,
+            ):
                 load_and_validate_profile(path, "MAG001", "s1", self.contig_to_mag)
             self.assertIsNotNone(seen["read_options"])
             self.assertFalse(seen["read_options"].use_threads)
@@ -319,16 +332,60 @@ class TestCalculateCoverageMetrics(TestQCMetrics):
     """Test calculate_coverage_metrics function."""
 
     def test_coverage_no_filter(self):
-        """Test coverage calculation without filter."""
+        """Two numbers, two jobs (decision 2026-10-15): average_coverage is the
+        mean over covered positions (MIDAS2's mean, the site filter's reference);
+        average_coverage_including_zeros is the sum over the genome size (the
+        QC threshold's number)."""
         df = pd.DataFrame({"total_coverage": [10.0, 20.0, 30.0]})
 
         result = calculate_coverage_metrics(
             df, denom=1000000, mag_size=1000000, using_filter=False
         )
 
+        # covered-sites mean: 60 / 3
+        self.assertAlmostEqual(result["average_coverage"], 20.0)
         # Sum = 60, denom = 1M
-        self.assertAlmostEqual(result["average_coverage"], 60.0 / 1000000)
+        self.assertAlmostEqual(
+            result["average_coverage_including_zeros"], 60.0 / 1000000
+        )
         self.assertIsNone(result["average_coverage_genome"])
+
+    def test_covered_sites_mean_ignores_zero_rows(self):
+        # a zero row (N-only position of an old profile) is in neither the
+        # numerator nor the denominator of the covered-sites mean, but the
+        # including-zeros number is unaffected either way
+        df = pd.DataFrame({"total_coverage": [10.0, 0.0, 30.0]})
+        result = calculate_coverage_metrics(
+            df, denom=100, mag_size=100, using_filter=False
+        )
+        self.assertAlmostEqual(result["average_coverage"], 20.0)
+        self.assertAlmostEqual(result["average_coverage_including_zeros"], 0.4)
+
+    def test_no_covered_rows_gives_zero_mean(self):
+        # MIDAS2 leaves mean coverage at 0 when nothing is covered; the site
+        # filter treats 0 as "no pile to compare against"
+        df = pd.DataFrame({"total_coverage": [0.0, 0.0]})
+        result = calculate_coverage_metrics(
+            df, denom=100, mag_size=100, using_filter=False
+        )
+        self.assertEqual(result["average_coverage"], 0.0)
+        self.assertEqual(result["average_coverage_including_zeros"], 0.0)
+
+    def test_covered_sites_mean_is_the_site_filters_mean(self):
+        """QC stores the number the site-depth filter divides by: the two
+        functions must agree on the same positions."""
+        from alleleflux.scripts.utilities.site_depth_filter import mean_coverage
+
+        counts = pd.DataFrame(
+            {"A": [8, 0, 0, 1], "C": [0, 4, 0, 0], "G": [2, 0, 0, 0], "T": [0, 0, 0, 2]}
+        )
+        df = counts.assign(total_coverage=counts.sum(axis=1))
+        result = calculate_coverage_metrics(
+            df, denom=1000, mag_size=1000, using_filter=False
+        )
+        self.assertEqual(result["average_coverage"], mean_coverage(counts))
+        # depths 10, 4, 0, 3: the zero row is excluded, so 17 / 3 not 17 / 4
+        self.assertAlmostEqual(result["average_coverage"], 17 / 3)
 
     def test_coverage_with_filter(self):
         """Test coverage calculation with filter."""
@@ -342,8 +399,10 @@ class TestCalculateCoverageMetrics(TestQCMetrics):
             total_coverage_sum_genome=1000.0,  # Genome-wide sum
         )
 
-        # Filtered: 60 / 10 = 6.0
-        self.assertAlmostEqual(result["average_coverage"], 6.0)
+        # covered-sites mean of the filtered rows: 60 / 3
+        self.assertAlmostEqual(result["average_coverage"], 20.0)
+        # Filtered, including zeros over the denominator: 60 / 10 = 6.0
+        self.assertAlmostEqual(result["average_coverage_including_zeros"], 6.0)
         # Genome-wide: 1000 / 1M = 0.001
         self.assertAlmostEqual(result["average_coverage_genome"], 0.001)
 
@@ -355,7 +414,9 @@ class TestCalculateCoverageMetrics(TestQCMetrics):
             df, denom=0, mag_size=1000000, using_filter=False
         )
 
-        self.assertTrue(np.isnan(result["average_coverage"]))
+        self.assertTrue(np.isnan(result["average_coverage_including_zeros"]))
+        # the covered-sites mean does not use the denominator
+        self.assertAlmostEqual(result["average_coverage"], 15.0)
 
     def test_coverage_missing_genome_param(self):
         """Test error when using_filter=True but genome param missing."""
@@ -380,7 +441,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         """Test basic median and std calculations."""
         df = pd.DataFrame({"total_coverage": [10.0, 20.0, 30.0]})
 
-        result = calculate_median_and_std_metrics(df, denom=1000, avg_cov=0.06)
+        result = calculate_median_and_std_metrics(
+            df, denom=1000, avg_cov_including_zeros=0.06
+        )
 
         # Median of [10, 20, 30] = 20
         self.assertAlmostEqual(result["median_coverage"], 20.0)
@@ -393,7 +456,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         """Test median calculation including zeros for absent positions."""
         df = pd.DataFrame({"total_coverage": [10.0, 20.0, 30.0]})
 
-        result = calculate_median_and_std_metrics(df, denom=10, avg_cov=6.0)
+        result = calculate_median_and_std_metrics(
+            df, denom=10, avg_cov_including_zeros=6.0
+        )
 
         # 3 observed + 7 absent (zeros) = [10, 20, 30, 0, 0, 0, 0, 0, 0, 0]
         # Median = 5.0
@@ -405,10 +470,10 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
     def test_std_including_zeros(self):
         """Test std calculation including zeros using variance formula."""
         df = pd.DataFrame({"total_coverage": [10.0, 20.0, 30.0]})
-        avg_cov = 6.0  # (10+20+30) / 10 = 6.0
+        avg_cov_including_zeros = 6.0  # (10+20+30) / 10 = 6.0
         denom = 10
 
-        result = calculate_median_and_std_metrics(df, denom, avg_cov)
+        result = calculate_median_and_std_metrics(df, denom, avg_cov_including_zeros)
 
         # Var(X) = E[X²] - E[X]²
         # E[X²] = (100 + 400 + 900) / 10 = 140
@@ -416,7 +481,7 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         # Var = 140 - 36 = 104
         # Std = sqrt(104) ≈ 10.198
         ex2 = (100 + 400 + 900) / 10
-        var = ex2 - (avg_cov**2)
+        var = ex2 - (avg_cov_including_zeros**2)
         expected_std = np.sqrt(var)
         self.assertAlmostEqual(result["coverage_std_including_zeros"], expected_std)
 
@@ -424,7 +489,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         """Test with some zero coverage values."""
         df = pd.DataFrame({"total_coverage": [10.0, 0.0, 20.0, 0.0, 30.0]})
 
-        result = calculate_median_and_std_metrics(df, denom=100, avg_cov=0.6)
+        result = calculate_median_and_std_metrics(
+            df, denom=100, avg_cov_including_zeros=0.6
+        )
 
         # Median of non-zero: [10, 20, 30] = 20
         self.assertAlmostEqual(result["median_coverage"], 20.0)
@@ -440,7 +507,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         """Test with empty dataframe."""
         df = pd.DataFrame({"total_coverage": []})
 
-        result = calculate_median_and_std_metrics(df, denom=100, avg_cov=0.0)
+        result = calculate_median_and_std_metrics(
+            df, denom=100, avg_cov_including_zeros=0.0
+        )
 
         # All should be NaN except median_including_zeros (which is 0)
         self.assertTrue(np.isnan(result["median_coverage"]))
@@ -451,7 +520,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         """Test with all zero coverage."""
         df = pd.DataFrame({"total_coverage": [0.0, 0.0, 0.0]})
 
-        result = calculate_median_and_std_metrics(df, denom=100, avg_cov=0.0)
+        result = calculate_median_and_std_metrics(
+            df, denom=100, avg_cov_including_zeros=0.0
+        )
 
         # No positions with coverage > 0
         self.assertTrue(np.isnan(result["median_coverage"]))
@@ -465,7 +536,9 @@ class TestCalculateMedianAndStdMetrics(TestQCMetrics):
         df = pd.DataFrame({"total_coverage": [10.0, 20.0, 30.0, 40.0, 50.0]})
 
         with patch("alleleflux.scripts.utilities.qc_metrics.logger") as mock_logger:
-            result = calculate_median_and_std_metrics(df, denom=3, avg_cov=50.0)
+            result = calculate_median_and_std_metrics(
+                df, denom=3, avg_cov_including_zeros=50.0
+            )
 
             # Should log warning
             mock_logger.warning.assert_called()
@@ -637,7 +710,7 @@ class TestCheckCoverageThreshold(TestQCMetrics):
     def test_coverage_pass_no_filter(self):
         """Test coverage passes threshold without filter."""
         passed, reason = check_coverage_threshold(
-            avg_cov=15.0,
+            avg_cov_including_zeros=15.0,
             avg_cov_genome=None,
             threshold=10.0,
             breadth_passed=True,
@@ -653,7 +726,7 @@ class TestCheckCoverageThreshold(TestQCMetrics):
         """Test coverage fails threshold without filter."""
         with patch("alleleflux.scripts.utilities.qc_metrics.logger") as mock_logger:
             passed, reason = check_coverage_threshold(
-                avg_cov=5.0,
+                avg_cov_including_zeros=5.0,
                 avg_cov_genome=None,
                 threshold=10.0,
                 breadth_passed=True,
@@ -671,7 +744,7 @@ class TestCheckCoverageThreshold(TestQCMetrics):
     def test_coverage_cascading_failure(self):
         """Test coverage fails when breadth check failed (cascading)."""
         passed, reason = check_coverage_threshold(
-            avg_cov=50.0,  # High coverage (irrelevant)
+            avg_cov_including_zeros=50.0,  # High coverage (irrelevant)
             avg_cov_genome=None,
             threshold=10.0,
             breadth_passed=False,  # Breadth failed
@@ -686,7 +759,7 @@ class TestCheckCoverageThreshold(TestQCMetrics):
     def test_coverage_pass_with_filter(self):
         """Test coverage passes when using filter (checks genome-wide)."""
         passed, reason = check_coverage_threshold(
-            avg_cov=50.0,  # Filtered coverage
+            avg_cov_including_zeros=50.0,  # Filtered coverage
             avg_cov_genome=15.0,  # Genome-wide coverage
             threshold=10.0,
             breadth_passed=True,
@@ -703,7 +776,7 @@ class TestCheckCoverageThreshold(TestQCMetrics):
         """Test coverage fails when using filter (checks genome-wide)."""
         with patch("alleleflux.scripts.utilities.qc_metrics.logger") as mock_logger:
             passed, reason = check_coverage_threshold(
-                avg_cov=100.0,  # Filtered coverage (high, but irrelevant)
+                avg_cov_including_zeros=100.0,  # Filtered coverage (high, but irrelevant)
                 avg_cov_genome=5.0,  # Genome-wide coverage (low)
                 threshold=10.0,
                 breadth_passed=True,

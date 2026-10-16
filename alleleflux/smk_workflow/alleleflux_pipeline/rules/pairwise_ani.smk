@@ -50,6 +50,9 @@ rule pairwise_ani:
         min_freq=PRESENCE_RULE["min_freq"],
         fdr=PRESENCE_RULE["fdr"],
         min_base_quality=PRESENCE_RULE["min_base_quality"],
+        # Per-site depth filter flags, shared with allele_freq_cache and
+        # baseline_presence so every profile reader filters identically.
+        site_filter_args=SITE_DEPTH_FILTER_ARGS,
         pairs=config["analysis"].get("pairwise_ani", {}).get("pairs", "within_subject"),
         # --transitions is only meaningful for pairs == "transitions"; built from the
         # configured timepoint combinations (EARLIER:LATER each), and left empty for
@@ -83,5 +86,6 @@ rule pairwise_ani:
             --pairs {params.pairs} \
             {params.transitions_arg} \
             --store_snp_locations {params.store_snp_locations} \
+            {params.site_filter_args} \
             --cpus {threads}
         """

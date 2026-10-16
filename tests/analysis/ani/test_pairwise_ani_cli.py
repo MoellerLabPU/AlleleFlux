@@ -5,6 +5,7 @@ must be invoked via ``conda run -n alleleflux``): profiles, QC and reference are
 built on disk exactly in the production formats, the command runs, and the output
 files are read back and checked.
 """
+
 import gzip
 import os
 import shutil
@@ -25,7 +26,9 @@ def _write_profile(directory, sample, mag, rows):
     with gzip.open(path, "wt") as handle:
         handle.write(PROFILE_HEADER)
         for contig, pos, ref, a, c, g, t in rows:
-            handle.write(f"{contig}\t{pos}\t{ref}\t{a + c + g + t}\t{a}\t{c}\t{g}\t{t}\t0\t\n")
+            handle.write(
+                f"{contig}\t{pos}\t{ref}\t{a + c + g + t}\t{a}\t{c}\t{g}\t{t}\t0\t\n"
+            )
 
 
 class TestPairwiseAniCLI(unittest.TestCase):
@@ -41,26 +44,32 @@ class TestPairwiseAniCLI(unittest.TestCase):
         # position 5 has only 2 reads -- below the default min_cov of 5.
         base = [("c1", p, "A", 20, 0, 0, 0) for p in range(6)]
         _write_profile(self.profiles, "S1", self.MAG, base)
-        s2 = [("c1", 0, "A", 0, 0, 20, 0)] + [("c1", p, "A", 20, 0, 0, 0) for p in range(1, 6)]
+        s2 = [("c1", 0, "A", 0, 0, 20, 0)] + [
+            ("c1", p, "A", 20, 0, 0, 0) for p in range(1, 6)
+        ]
         _write_profile(self.profiles, "S2", self.MAG, s2)
-        s3 = [("c1", p, "A", 20, 0, 0, 0) for p in range(5)] + [("c1", 5, "A", 2, 0, 0, 0)]
+        s3 = [("c1", p, "A", 20, 0, 0, 0) for p in range(5)] + [
+            ("c1", 5, "A", 2, 0, 0, 0)
+        ]
         _write_profile(self.profiles, "S3", self.MAG, s3)
 
         # QC file in the real quality_control.py column layout (a subset).
         # S1 and S3 share mouse m1 (pre and end) -- the within-subject pair.
         self.qc = os.path.join(self.tmp, f"{self.MAG}_QC.tsv")
-        pd.DataFrame({
-            "sample_id": ["S1", "S2", "S3"],
-            "MAG_ID": [self.MAG] * 3,
-            "file_path": ["x"] * 3,
-            "group": ["fat", "control", "fat"],
-            "subjectID": ["m1", "m2", "m1"],
-            "replicate": [1, 1, 1],
-            "time": ["pre", "pre", "end"],
-            "genome_size": [6, 6, 6],           # matches the reference: the happy path
-            "breadth": [1.0, 1.0, 1.0],         # matches the profiles: the happy path
-            "coverage_threshold_passed": [True, True, True],
-        }).to_csv(self.qc, sep="\t", index=False)
+        pd.DataFrame(
+            {
+                "sample_id": ["S1", "S2", "S3"],
+                "MAG_ID": [self.MAG] * 3,
+                "file_path": ["x"] * 3,
+                "group": ["fat", "control", "fat"],
+                "subjectID": ["m1", "m2", "m1"],
+                "replicate": [1, 1, 1],
+                "time": ["pre", "pre", "end"],
+                "genome_size": [6, 6, 6],  # matches the reference: the happy path
+                "breadth": [1.0, 1.0, 1.0],  # matches the profiles: the happy path
+                "coverage_threshold_passed": [True, True, True],
+            }
+        ).to_csv(self.qc, sep="\t", index=False)
 
         # Tiny reference plus its .fai, matching how the pipeline supplies lengths.
         self.fasta = os.path.join(self.tmp, "ref.fa")
@@ -79,22 +88,49 @@ class TestPairwiseAniCLI(unittest.TestCase):
     def _run(self, *extra):
         command = [
             "alleleflux-pairwise-ani",
-            "--mag", self.MAG,
-            "--profiles_dir", self.profiles,
-            "--qc_files", self.qc,
-            "--fasta", self.fasta,
-            "--mag_mapping", self.mag_mapping,
-            "--output_dir", self.out,
+            "--mag",
+            self.MAG,
+            "--profiles_dir",
+            self.profiles,
+            "--qc_files",
+            self.qc,
+            "--fasta",
+            self.fasta,
+            "--mag_mapping",
+            self.mag_mapping,
+            "--output_dir",
+            self.out,
             # Most tests exercise the full pair matrix; the user-chosen DEFAULT is
             # within_subject and has its own dedicated test below.  argparse takes
             # the LAST occurrence, so *extra can still override this.
-            "--pairs", "all",
+            "--pairs",
+            "all",
             *extra,
         ]
         return subprocess.run(command, capture_output=True, text=True)
 
     def _read(self, suffix):
         return pd.read_csv(os.path.join(self.out, f"{self.MAG}{suffix}"), sep="\t")
+
+    def test_site_depth_filter_removes_a_pile_from_the_comparison(self):
+        """S1 gets a 200-read pile at position 2 (20x elsewhere): S1's mean is (100 + 200) / 6
+        = 50 and 200 / 50 = 4 > 3, so that position is dropped for S1 and every pair with
+        S1 compares 5 of 6 positions; with the filter off all 6 are compared."""
+        s1 = [
+            ("c1", p, "A", 20, 0, 0, 0) if p != 2 else ("c1", 2, "A", 200, 0, 0, 0)
+            for p in range(6)
+        ]
+        _write_profile(self.profiles, "S1", self.MAG, s1)
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        on = self._read("_pairwise_ani.tsv")
+        pair = on[(on.sample1 == "S1") & (on.sample2 == "S2")].iloc[0]
+        self.assertEqual(int(pair["compared_bases_count"]), 5)
+        done = self._run("--disable_site_depth_filter")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        off = self._read("_pairwise_ani.tsv")
+        pair = off[(off.sample1 == "S1") & (off.sample2 == "S2")].iloc[0]
+        self.assertEqual(int(pair["compared_bases_count"]), 6)
 
     def test_writes_expected_pair_table(self):
         completed = self._run()
@@ -108,7 +144,7 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertEqual(int(row["population_SNPs"]), 1)
         self.assertAlmostEqual(row["conANI"], 5 / 6)
         self.assertAlmostEqual(row["percent_genome_compared"], 1.0)
-        self.assertEqual(int(row["min_cov"]), 5)          # the gate travels with the row
+        self.assertEqual(int(row["min_cov"]), 5)  # the gate travels with the row
         # Metadata attached for BOTH sides, never blank (the 2026-06-18 lesson).
         self.assertEqual(row["subjectID_1"], "m1")
         self.assertEqual(row["group_2"], "control")
@@ -124,25 +160,27 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertEqual(self._run("--min_cov", "1").returncode, 0)
         table = self._read("_pairwise_ani.tsv")
         shallow = table[(table.sample1 == "S1") & (table.sample2 == "S3")].iloc[0]
-        self.assertEqual(int(shallow["compared_bases_count"]), 6)   # was 5 at min_cov 5
-        self.assertEqual(int(shallow["min_cov"]), 1)                # stamped accordingly
+        self.assertEqual(int(shallow["compared_bases_count"]), 6)  # was 5 at min_cov 5
+        self.assertEqual(int(shallow["min_cov"]), 1)  # stamped accordingly
 
     def test_writes_sample_table_with_min_cov_breadth(self):
         self.assertEqual(self._run().returncode, 0)
         samples = self._read("_pairwise_ani_samples.tsv")
         self.assertEqual(sorted(samples["sample_id"]), ["S1", "S2", "S3"])
         s3 = samples[samples.sample_id == "S3"].iloc[0]
-        self.assertEqual(int(s3["n_positions"]), 6)             # covered everywhere...
-        self.assertAlmostEqual(s3["breadth"], 1.0)              # kept, QC-verified
-        self.assertAlmostEqual(s3["breadth_minCov"], 5 / 6)     # ...but deep at 5 of 6
+        self.assertEqual(int(s3["n_positions"]), 6)  # covered everywhere...
+        self.assertAlmostEqual(s3["breadth"], 1.0)  # kept, QC-verified
+        self.assertAlmostEqual(s3["breadth_minCov"], 5 / 6)  # ...but deep at 5 of 6
         # mean_coverage deliberately absent: QC's average_coverage is authoritative.
         self.assertNotIn("mean_coverage", samples.columns)
 
     def test_within_subject_mode_restricts_pairs(self):
         self.assertEqual(self._run("--pairs", "within_subject").returncode, 0)
         table = self._read("_pairwise_ani.tsv")
-        self.assertEqual(len(table), 1)                          # only S1-S3 share m1
-        self.assertEqual({table.iloc[0]["sample1"], table.iloc[0]["sample2"]}, {"S1", "S3"})
+        self.assertEqual(len(table), 1)  # only S1-S3 share m1
+        self.assertEqual(
+            {table.iloc[0]["sample1"], table.iloc[0]["sample2"]}, {"S1", "S3"}
+        )
 
     def test_snp_locations_written_for_within_subject_by_default(self):
         self.assertEqual(self._run().returncode, 0)
@@ -157,13 +195,20 @@ class TestPairwiseAniCLI(unittest.TestCase):
         # "none" means nothing to store: no header-only placeholder either, so a
         # directory listing never suggests locations were recorded.
         self.assertEqual(self._run("--store_snp_locations", "none").returncode, 0)
-        self.assertFalse(os.path.exists(os.path.join(self.out, f"{self.MAG}_pairwise_ani_snp_locations.tsv.gz")))
-        self.assertTrue(os.path.exists(os.path.join(self.out, f"{self.MAG}_pairwise_ani.tsv")))
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.out, f"{self.MAG}_pairwise_ani_snp_locations.tsv.gz")
+            )
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.out, f"{self.MAG}_pairwise_ani.tsv"))
+        )
 
     def test_snp_locations_all_records_the_fixed_difference(self):
         self.assertEqual(self._run("--store_snp_locations", "all").returncode, 0)
         locations = pd.read_csv(
-            os.path.join(self.out, f"{self.MAG}_pairwise_ani_snp_locations.tsv.gz"), sep="\t"
+            os.path.join(self.out, f"{self.MAG}_pairwise_ani_snp_locations.tsv.gz"),
+            sep="\t",
         )
         flagged = locations[(locations.sample1 == "S1") & (locations.sample2 == "S2")]
         self.assertEqual(len(flagged), 1)
@@ -179,22 +224,33 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         table = self._read("_pairwise_ani.tsv")
         self.assertEqual(len(table), 0)
-        self.assertIn("popANI", table.columns)                   # schema survives emptiness
+        self.assertIn("popANI", table.columns)  # schema survives emptiness
 
     def test_default_pairs_mode_is_within_subject(self):
         """A bare invocation (no --pairs flag) compares only same-mouse pairs --
         the default chosen during review 2026-09-01."""
         command = [
-            "alleleflux-pairwise-ani", "--mag", self.MAG,
-            "--profiles_dir", self.profiles, "--qc_files", self.qc,
-            "--fasta", self.fasta, "--mag_mapping", self.mag_mapping,
-            "--output_dir", self.out,
+            "alleleflux-pairwise-ani",
+            "--mag",
+            self.MAG,
+            "--profiles_dir",
+            self.profiles,
+            "--qc_files",
+            self.qc,
+            "--fasta",
+            self.fasta,
+            "--mag_mapping",
+            self.mag_mapping,
+            "--output_dir",
+            self.out,
         ]
         completed = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         table = self._read("_pairwise_ani.tsv")
-        self.assertEqual(len(table), 1)          # only S1-S3 share mouse m1
-        self.assertEqual({table.iloc[0]["sample1"], table.iloc[0]["sample2"]}, {"S1", "S3"})
+        self.assertEqual(len(table), 1)  # only S1-S3 share mouse m1
+        self.assertEqual(
+            {table.iloc[0]["sample1"], table.iloc[0]["sample2"]}, {"S1", "S3"}
+        )
 
     def test_replicate_travels_to_both_outputs(self):
         """Downstream analyses read out per replicate; both tables must carry it."""
@@ -215,10 +271,16 @@ class TestPairwiseAniCLI(unittest.TestCase):
         serial = self._read("_pairwise_ani.tsv")
         serial_samples = self._read("_pairwise_ani_samples.tsv")
         serial_locations = self._read("_pairwise_ani_snp_locations.tsv.gz")
-        self.assertEqual(self._run("--store_snp_locations", "all", "--cpus", "2").returncode, 0)
+        self.assertEqual(
+            self._run("--store_snp_locations", "all", "--cpus", "2").returncode, 0
+        )
         pd.testing.assert_frame_equal(serial, self._read("_pairwise_ani.tsv"))
-        pd.testing.assert_frame_equal(serial_samples, self._read("_pairwise_ani_samples.tsv"))
-        pd.testing.assert_frame_equal(serial_locations, self._read("_pairwise_ani_snp_locations.tsv.gz"))
+        pd.testing.assert_frame_equal(
+            serial_samples, self._read("_pairwise_ani_samples.tsv")
+        )
+        pd.testing.assert_frame_equal(
+            serial_locations, self._read("_pairwise_ani_snp_locations.tsv.gz")
+        )
         self.assertEqual(len(serial_locations), 2)
 
     def test_only_paired_samples_are_loaded_and_summarised(self):
@@ -231,10 +293,15 @@ class TestPairwiseAniCLI(unittest.TestCase):
     def test_transitions_mode_builds_only_the_configured_comparisons(self):
         """pre:end on the fixture -> the single same-mouse pair S1(pre)-S3(end);
         S2 (mouse m2, pre only) has no 'end' partner and is not loaded."""
-        self.assertEqual(self._run("--pairs", "transitions", "--transitions", "pre:end").returncode, 0)
+        self.assertEqual(
+            self._run("--pairs", "transitions", "--transitions", "pre:end").returncode,
+            0,
+        )
         table = self._read("_pairwise_ani.tsv")
         self.assertEqual(len(table), 1)
-        self.assertEqual((table.iloc[0]["sample1"], table.iloc[0]["sample2"]), ("S1", "S3"))
+        self.assertEqual(
+            (table.iloc[0]["sample1"], table.iloc[0]["sample2"]), ("S1", "S3")
+        )
         samples = self._read("_pairwise_ani_samples.tsv")
         self.assertEqual(sorted(samples["sample_id"]), ["S1", "S3"])
 
@@ -289,22 +356,34 @@ class TestEnumeratePairs(unittest.TestCase):
     """Direct unit tests for ``enumerate_pairs`` (no subprocess): a two-mouse,
     three-timepoint roster where mouse m2 was never sampled at 10mo."""
 
-    ROSTER = pd.DataFrame({
-        "sample_id": ["S1", "S2", "S3", "S4", "S5"],
-        "subjectID": ["m1", "m2", "m1", "m2", "m1"],
-        "time":      ["5mo", "5mo", "10mo", "16mo", "16mo"],
-    })
+    ROSTER = pd.DataFrame(
+        {
+            "sample_id": ["S1", "S2", "S3", "S4", "S5"],
+            "subjectID": ["m1", "m2", "m1", "m2", "m1"],
+            "time": ["5mo", "5mo", "10mo", "16mo", "16mo"],
+        }
+    )
 
     def test_transitions_pair_each_mouse_across_the_configured_timepoints(self):
         from alleleflux.scripts.analysis.ani.pairwise_ani import enumerate_pairs
-        pairs = enumerate_pairs(self.ROSTER, "transitions", [("5mo", "10mo"), ("5mo", "16mo")])
+
+        pairs = enumerate_pairs(
+            self.ROSTER, "transitions", [("5mo", "10mo"), ("5mo", "16mo")]
+        )
         # m1: 5mo->10mo (S1,S3) and 5mo->16mo (S1,S5); m2 only has 5mo->16mo (S2,S4).
         # No later-vs-later pair (S3,S5), which within_subject WOULD emit.
         self.assertEqual(pairs, [("S1", "S3"), ("S1", "S5"), ("S2", "S4")])
 
     def test_two_samples_for_one_mouse_at_one_timepoint_is_an_error(self):
         from alleleflux.scripts.analysis.ani.pairwise_ani import enumerate_pairs
-        roster = pd.concat([self.ROSTER, pd.DataFrame(
-            {"sample_id": ["S6"], "subjectID": ["m1"], "time": ["5mo"]})])
+
+        roster = pd.concat(
+            [
+                self.ROSTER,
+                pd.DataFrame(
+                    {"sample_id": ["S6"], "subjectID": ["m1"], "time": ["5mo"]}
+                ),
+            ]
+        )
         with self.assertRaisesRegex(ValueError, "m1.*5mo"):
             enumerate_pairs(roster, "transitions", [("5mo", "10mo")])

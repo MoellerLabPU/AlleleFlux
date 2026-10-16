@@ -68,14 +68,18 @@ from alleleflux.scripts.analysis.ani.profile_io import (
     qc_passing_samples,
 )
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.site_depth_filter import (
+    add_site_depth_filter_args,
+    site_depth_filter_from_args,
+)
 
 logger = logging.getLogger(__name__)
 
 # Per-sample summary table schema (fixed so empty outputs still carry a header).
 # breadth is kept for convenience but VERIFIED against QC's recorded value (guard
-# below); mean_coverage is deliberately absent -- QC's average_coverage is the one
-# authoritative copy, and a near-duplicate here (ours would exclude N) is an
-# inconsistency factory.
+# below); mean_coverage is deliberately absent -- QC's average_coverage (the
+# covered-sites mean over A+C+G+T, since 2026-10-15) is the one authoritative
+# copy, and a near-duplicate here is an inconsistency factory.
 SAMPLE_COLUMNS = [
     "MAG_ID",
     "sample_id",
@@ -103,18 +107,24 @@ def parse_transitions(specs: list[str]) -> list[tuple[str, str]]:
     transitions = []
     for spec in specs:
         if spec.count(":") != 1:
-            raise ValueError(f"Transition {spec!r} must look like EARLIER:LATER (e.g. 5mo:22mo)")
+            raise ValueError(
+                f"Transition {spec!r} must look like EARLIER:LATER (e.g. 5mo:22mo)"
+            )
         earlier, later = (part.strip() for part in spec.split(":"))
         if not earlier or not later:
             raise ValueError(f"Transition {spec!r} has an empty timepoint")
         if earlier == later:
-            raise ValueError(f"Degenerate transition {spec!r}: both sides are the same timepoint")
+            raise ValueError(
+                f"Degenerate transition {spec!r}: both sides are the same timepoint"
+            )
         transitions.append((earlier, later))
     return transitions
 
 
 def enumerate_pairs(
-    samples_df: pd.DataFrame, mode: str, transitions: list[tuple[str, str]] | None = None
+    samples_df: pd.DataFrame,
+    mode: str,
+    transitions: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str]]:
     """Ordered, de-duplicated sample pairs from the QC roster.
 
@@ -144,15 +154,22 @@ def enumerate_pairs(
         zip(samples_df["sample_id"].astype(str), samples_df["subjectID"].astype(str))
     )
     if mode == "within_subject":
-        return [p for p in itertools.combinations(sample_ids, 2)
-                if subject_of[p[0]] == subject_of[p[1]]]
+        return [
+            p
+            for p in itertools.combinations(sample_ids, 2)
+            if subject_of[p[0]] == subject_of[p[1]]
+        ]
 
     # mode == "transitions"
     if not transitions:
-        raise ValueError("--pairs transitions requires --transitions EARLIER:LATER [...]")
+        raise ValueError(
+            "--pairs transitions requires --transitions EARLIER:LATER [...]"
+        )
     if "time" not in samples_df.columns:
         raise ValueError("--pairs transitions requires a time column in the QC file")
-    time_of = dict(zip(samples_df["sample_id"].astype(str), samples_df["time"].astype(str)))
+    time_of = dict(
+        zip(samples_df["sample_id"].astype(str), samples_df["time"].astype(str))
+    )
     # One sample per (mouse, timepoint).  A mouse sampled twice at the same
     # timepoint has no single "before" or "after" and is a roster error, so raise
     # rather than silently pairing both (0 such cases in DRiDO's 2,250 samples).
@@ -183,20 +200,33 @@ def _load_one_sample(job: tuple) -> tuple[str, dict, dict]:
 
     Module-level (not a closure) so it pickles into ``multiprocessing.Pool``
     workers.  ``job`` = (sample_id, profile_path, contig_lengths, min_cov,
-    genome_length).  Returns ``(sample_id, dense_by_contig, stats)`` where
+    genome_length, site_filter, mean_cov); ``mean_cov`` is QC's covered-sites
+    ``average_coverage`` for the sample, or None when the QC roster lacks the
+    column (the loader then uses the profile's own mean).  Returns
+    ``(sample_id, dense_by_contig, stats)`` where
     ``stats`` holds ``n_positions``, ``breadth`` (>=1x) and ``breadth_minCov``.
 
     Example: a 6 bp contig covered at 20x everywhere except position 5 at 2x,
     min_cov 5 -> n_positions 6, breadth 1.0, breadth_minCov 5/6.
     """
-    sample_id, path, contig_lengths, min_cov, genome_length = job
-    profile = load_profile(path)
+    sample_id, path, contig_lengths, min_cov, genome_length, site_filter, mean_cov = job
+    profile = load_profile(path, site_filter=site_filter, mean_cov=mean_cov)
     dense = dense_contig_counts(profile, contig_lengths)
     # Stats while the frame is still in hand, so the parent never re-reads.
+    # Breadth (>=1x) is what QC measured on the UNFILTERED profile and is
+    # cross-checked against QC's number below, so count the rows the site-depth
+    # filter removed back in; breadth_minCov describes what can actually be
+    # compared, so it stays on the filtered rows.
+    removed = profile.attrs.get("site_depth_filter", {})
+    n_covered = (
+        len(profile)
+        + removed.get("n_removed_low", 0)
+        + removed.get("n_removed_high", 0)
+    )
     coverage = profile["coverage"].to_numpy()
     stats = {
-        "n_positions": len(profile),                                    # covered >=1x
-        "breadth": len(profile) / genome_length,                        # fraction >=1x
+        "n_positions": n_covered,  # covered >=1x, before the site-depth filter
+        "breadth": n_covered / genome_length,  # fraction >=1x, as QC measured it
         # Fraction deep enough to ever be compared (QC has no min_cov-aware breadth).
         "breadth_minCov": int((coverage >= min_cov).sum()) / genome_length,
     }
@@ -220,6 +250,8 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     # MAY be empty (low-abundance MAG): everything below still runs and produces
     # header-only outputs, so a pipeline over all MAGs never crashes here.
     samples = qc_passing_samples(args.qc_files, args.mag)
+    site_filter = site_depth_filter_from_args(args)
+    logger.info(f"site-depth filter: {site_filter}")
 
     # ---- consistency guard: QC recorded the genome size IT used (same FASTA +
     # mapping, at QC time).  If it disagrees with the .fai-derived sum we are
@@ -280,7 +312,25 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
             raise FileNotFoundError(
                 f"MAG {args.mag}: profile missing for QC-passing sample {sample_id}: {path}"
             )
-        jobs.append((sample_id, path, contig_lengths, args.min_cov, genome_length))
+        # QC's covered-sites mean for this sample feeds the site-depth filter;
+        # a roster without the column (older QC) lets the loader use the
+        # profile's own mean instead.
+        mean_cov = (
+            float(row.average_coverage)
+            if "average_coverage" in roster.columns and pd.notna(row.average_coverage)
+            else None
+        )
+        jobs.append(
+            (
+                sample_id,
+                path,
+                contig_lengths,
+                args.min_cov,
+                genome_length,
+                site_filter,
+                mean_cov,
+            )
+        )
 
     if args.cpus > 1 and len(jobs) > 1:
         # Loading (gzip + parse + scatter) dominates runtime and is embarrassingly
@@ -294,7 +344,9 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
             loaded = pool.map(_load_one_sample, jobs)
     else:
         loaded = [_load_one_sample(job) for job in jobs]
-    logger.info(f"MAG {args.mag}: loaded {len(loaded)} profiles with {args.cpus} cpu(s)")
+    logger.info(
+        f"MAG {args.mag}: loaded {len(loaded)} profiles with {args.cpus} cpu(s)"
+    )
 
     dense_by_sample: dict[str, dict] = {}
     sample_records = []
@@ -367,7 +419,9 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     pair_out = os.path.join(args.output_dir, f"{args.mag}_pairwise_ani.tsv")
     pair_table.to_csv(pair_out, sep="\t", index=False)
     if args.store_snp_locations == "none":
-        logger.info(f"Wrote {pair_out} ({len(pair_table)} pairs); SNP locations not stored")
+        logger.info(
+            f"Wrote {pair_out} ({len(pair_table)} pairs); SNP locations not stored"
+        )
         return 0
     location_out = os.path.join(
         args.output_dir, f"{args.mag}_pairwise_ani_snp_locations.tsv.gz"
@@ -385,8 +439,8 @@ def main():
     setup_logging()  # once, here, per house rule -- never in the libraries
     parser = argparse.ArgumentParser(
         description="Pairwise conANI/popANI between the QC-passing sample pairs of "
-                    "one MAG, over all genome positions covered >= min_cov in both "
-                    "samples. See the module docstring for method and worked example.",
+        "one MAG, over all genome positions covered >= min_cov in both "
+        "samples. See the module docstring for method and worked example.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--mag", required=True, help="MAG identifier")
@@ -473,6 +527,7 @@ def main():
         "(~3.6 s per DRiDO profile). Comparison is single-threaded; outputs are "
         "identical for any value",
     )
+    add_site_depth_filter_args(parser)
     args = parser.parse_args()
     # Validate the transition specs here, at the door, so a typo fails before
     # any profile is read; None stays None for the other modes.

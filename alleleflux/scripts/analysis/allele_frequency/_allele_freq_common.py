@@ -25,6 +25,11 @@ import logging
 
 import pandas as pd
 
+from alleleflux.scripts.utilities.site_depth_filter import (
+    SiteDepthFilter,
+    apply_site_depth_filter,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -35,7 +40,7 @@ import pandas as pd
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 # Columns retained in the Parquet cache.  Everything else written by
-# process_mag_files (MAG_ID, ref_base, N, breadth, genome_size,
+# process_mag_files (MAG_ID, ref_base, breadth, genome_size,
 # average_coverage) is dropped before writing to avoid bloating the file
 # with data no downstream consumer reads.
 #
@@ -47,11 +52,22 @@ NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 #   LMM.py (across_time):    subjectID, contig, gene_id, position, group,
 #       replicate, time, *_frequency
 CACHE_COLUMNS_BASE = [
-    "contig", "position", "gene_id",
+    "contig",
+    "position",
+    "gene_id",
     "total_coverage",
-    "A", "C", "G", "T",
-    "sample_id", "group", "subjectID", "replicate",
-    "A_frequency", "T_frequency", "G_frequency", "C_frequency",
+    "A",
+    "C",
+    "G",
+    "T",
+    "sample_id",
+    "group",
+    "subjectID",
+    "replicate",
+    "A_frequency",
+    "T_frequency",
+    "G_frequency",
+    "C_frequency",
 ]
 # Longitudinal adds the "time" column so Stage 2 can pair timepoints.
 CACHE_COLUMNS_LONGITUDINAL = CACHE_COLUMNS_BASE + ["time"]
@@ -72,8 +88,8 @@ PROFILE_READ_DTYPES = {
     # gene_id may be non-numeric (e.g. "k141_0_1") — keep as string.
     "gene_id": "string",
     "contig": "string",
-    # N and ref_base are dropped from the cache; leaving them at default
-    # dtype is fine since they're discarded immediately after column select.
+    # ref_base is dropped from the cache; leaving it at default dtype is fine
+    # since it's discarded immediately after column select.
 }
 
 # Low/medium-cardinality string columns that should be encoded as Arrow
@@ -99,6 +115,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # QC loading
 # ---------------------------------------------------------------------------
+
 
 def load_qc_results(qc_file_path, mag_id):
     """Load a per-MAG QC TSV and return only the samples that passed.
@@ -160,7 +177,13 @@ def load_qc_results(qc_file_path, mag_id):
 # Multiprocessing helpers
 # ---------------------------------------------------------------------------
 
-def init_worker(metadata, data_type):
+
+# Overwritten by init_worker in every worker process; the module-level value
+# is what process_mag_files sees when called without a pool (tests, scripts).
+SITE_FILTER = SiteDepthFilter()
+
+
+def init_worker(metadata, data_type, site_filter=None):
     """Initialise each worker process with shared, read-only state.
 
     Called as the ``initializer`` argument of ``multiprocessing.Pool``.
@@ -179,10 +202,16 @@ def init_worker(metadata, data_type):
     data_type : str
         ``"single"`` or ``"longitudinal"``.  Controls whether a ``time``
         column is attached to each row in ``process_mag_files``.
+    site_filter : SiteDepthFilter or None
+        Per-site depth rule applied to every profile before frequencies are
+        computed.  ``None`` means the house defaults (filter on, no floor,
+        ratio 3.0); pass ``SiteDepthFilter(enabled=False)`` to switch it off.
     """
     global metadata_dict
     global DATA_TYPE
+    global SITE_FILTER
     metadata_dict = metadata
+    SITE_FILTER = site_filter if site_filter is not None else SiteDepthFilter()
     DATA_TYPE = data_type
 
 
@@ -233,14 +262,17 @@ def process_mag_files(args):
 
     Flow
     ----
-    1. Read the gzipped profile TSV from ``filepath``.
-    2. Attach ``sample_id`` (so rows can be traced back after concatenation).
+    1. Read the gzipped profile TSV from ``filepath`` (``total_coverage`` is
+       A + C + G + T by construction, see profile_mags.build_profile_row).
+    2. Attach ``sample_id`` (so rows can be traced back after concatenation),
+       then apply the per-site depth filter against this sample's QC
+       ``average_coverage`` (``SITE_FILTER``, set by ``init_worker``).
     3. Look up per-sample metadata (group, subjectID, replicate, time) from
        the ``metadata_dict`` global populated by ``init_worker``.
     4. Call ``calculate_frequencies`` to add the four frequency columns.
     5. Select only the columns in ``CACHE_COLUMNS_*`` — dropping MAG_ID,
-       ref_base, N, breadth, genome_size, average_coverage which no
-       downstream cache consumer reads.
+       ref_base, breadth, genome_size, average_coverage (and N in older
+       profiles) which no downstream cache consumer reads.
 
     Parameters
     ----------
@@ -272,6 +304,19 @@ def process_mag_files(args):
         logger.error(f"Sample ID not found for sample {sample_id}")
         return None
 
+    # Per-site depth filter, per sample, BEFORE anything downstream sees the
+    # rows: a site whose depth is far above this sample's mean coverage of the
+    # MAG carries reads from another organism, and its "frequency" would be a
+    # mixing ratio, not an allele frequency.  The mean is QC's covered-sites
+    # average_coverage for this sample (build_metadata_from_qc checked the QC
+    # table is new enough for that column to mean that).  The frame that comes
+    # back is what calculate_frequencies below divides by total_coverage, so
+    # the filter must run here, before the frequencies, never after.
+    df, filter_summary = apply_site_depth_filter(
+        df, SITE_FILTER, metadata_info["average_coverage"]
+    )
+    filter_summary.update({"sample_id": sample_id, "mag_id": mag_id})
+
     df["group"] = metadata_info["group"]
     df["subjectID"] = metadata_info["subjectID"]
     df["replicate"] = metadata_info["replicate"]
@@ -284,7 +329,7 @@ def process_mag_files(args):
     df = calculate_frequencies(df)
 
     # Drop columns not consumed by any downstream cache reader.
-    # Excluded: MAG_ID (redundant — derivable from filename), ref_base and N
+    # Excluded: MAG_ID (redundant — derivable from filename), ref_base
     # (never read by Stage 2/CMH/LMM), breadth/genome_size/average_coverage
     # (QC metrics that downstream rules re-read from QC TSVs if needed).
     keep = (
@@ -305,12 +350,16 @@ def process_mag_files(args):
         if col in df.columns:
             df[col] = df[col].astype("category")
 
+    # The per-sample filter summary rides along for the cache writer's sidecar
+    # TSV; pandas ``attrs`` survive the column selection and casts above.
+    df.attrs["site_depth_filter"] = filter_summary
     return df
 
 
 # ---------------------------------------------------------------------------
 # Metadata helpers
 # ---------------------------------------------------------------------------
+
 
 def build_metadata_from_qc(qc_df):
     """Convert a QC DataFrame into the structures needed by the worker pool.
@@ -333,6 +382,17 @@ def build_metadata_from_qc(qc_df):
     """
     metadata = {}
     tuples = []
+    # The site-depth filter divides each sample's site depths by this table's
+    # ``average_coverage``, which is the covered-sites mean ONLY in QC tables
+    # written from 2026-10-15 on; older tables store the genome-size mean under
+    # that name and would make every site look like a pile.  The newer tables
+    # also carry ``average_coverage_including_zeros``: require it as the marker.
+    if "average_coverage_including_zeros" not in qc_df.columns:
+        raise ValueError(
+            "QC table has no 'average_coverage_including_zeros' column, so its "
+            "'average_coverage' is not the covered-sites mean the site-depth "
+            "filter needs. Re-run QC with the current AlleleFlux version."
+        )
     for _, row in qc_df.iterrows():
         sample_id = str(row["sample_id"])
         meta = {

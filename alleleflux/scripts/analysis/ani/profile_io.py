@@ -17,13 +17,15 @@ The inputs, concretely
 A profile file has one row per COVERED genome position (0-based) of one sample x
 one MAG.  A real line from SLG1007's profile, and where its numbers land::
 
-    contig        position  ref  total_coverage  A  C  G  T  N
-    k141_102792   0         G    4               2  0  1  1  0
+    contig        position  ref  total_coverage  A  C  G  T
+    k141_102792   0         G    4               2  0  1  1
 
     dense["k141_102792"][0] == [2, 0, 1, 1]      (uint16, order A,C,G,T)
-    coverage there          == 4                 (A+C+G+T; the file's
-                                                  total_coverage column also counts
-                                                  N calls and is deliberately unused)
+    coverage there          == 4                 (A+C+G+T, computed here; the
+                                                  file's total_coverage holds the
+                                                  same sum and is left unread so
+                                                  the loader depends on nothing
+                                                  but the four base columns)
 
 Two file-format facts drive everything here.  Profiles contain **only covered
 positions** -- an absent row means zero coverage, not missing data -- so the dense
@@ -37,9 +39,8 @@ Library module: imported by the rest of the ani package and by tests; never run
 directly, hence no ``if __name__ == "__main__"`` block.  The one runnable entry
 point of this feature is the ``alleleflux-pairwise-ani`` command (pairwise_ani.py).
 
-Older profiles (pre-samtools-optimisation)
-carry an extra ``mapq_scores`` column; ``usecols`` makes the loader indifferent
-to it.
+``usecols`` reads only the columns named above, so extra columns in a profile
+are ignored and a missing one raises.
 """
 
 import logging
@@ -49,13 +50,18 @@ import numpy as np
 import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
+from alleleflux.scripts.utilities.site_depth_filter import (
+    SiteDepthFilter,
+    apply_site_depth_filter,
+    mean_coverage,
+)
 from alleleflux.scripts.utilities.utilities import build_contig_length_index
 
 logger = logging.getLogger(__name__)
 
-# Read only what the comparison needs: ref_base, total_coverage, N, mapq_scores and
-# gene_id are all unused.  usecols also makes the loader indifferent to the extra
-# mapq_scores column in older profiles -- and raises if a needed column is absent.
+# Read only what the comparison needs: ref_base, total_coverage and gene_id are
+# unused.  usecols makes the loader indifferent to any extra column -- and
+# raises if a needed column is absent.
 _PROFILE_USECOLS = ["contig", "position", *BASES]
 _PROFILE_DTYPES = {
     "contig": str,
@@ -90,7 +96,9 @@ def profile_path(profiles_dir: str, sample_id: str, mag_id: str) -> str:
     Example: ``profile_path("/profiles", "SLG1007", "bins_35")`` ->
     ``/profiles/SLG1007/SLG1007_bins_35_profiled.tsv.gz``.
     """
-    return os.path.join(profiles_dir, sample_id, f"{sample_id}_{mag_id}_profiled.tsv.gz")
+    return os.path.join(
+        profiles_dir, sample_id, f"{sample_id}_{mag_id}_profiled.tsv.gz"
+    )
 
 
 def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
@@ -234,7 +242,9 @@ def contig_lengths_for_mag(
     # -- and the engine's contig-outer loop would emit SNP-location rows in a
     # different order each time. This keeps the output reproducible.
     lengths = {
-        contig: int(length) for contig, length in all_lengths.items() if contig in wanted
+        contig: int(length)
+        for contig, length in all_lengths.items()
+        if contig in wanted
     }
 
     # Every mapped contig must exist in the reference; anything left over means
@@ -248,12 +258,27 @@ def contig_lengths_for_mag(
     return lengths
 
 
-def load_profile(path: str, include_gene_id: bool = False) -> pd.DataFrame:
+def load_profile(
+    path: str,
+    include_gene_id: bool = False,
+    site_filter: SiteDepthFilter | None = None,
+    mean_cov: float | None = None,
+) -> pd.DataFrame:
     """Read one profile file into ``contig, position, A, C, G, T, coverage``.
 
-    ``coverage`` is computed here as A + C + G + T -- NOT the file's
-    ``total_coverage`` column, which also counts N calls and would silently
-    disagree with inStrain-style coverage semantics.
+    ``site_filter`` applies the per-site depth rule to this sample's rows before
+    anything downstream (pairwise ANI, strain turnover, baseline presence) sees
+    them; ``None`` = no filtering, which keeps every existing library caller
+    byte-identical.  ``mean_cov`` is the sample's covered-sites mean from QC
+    (``average_coverage``); when the caller has no QC row on hand (baseline
+    presence works from the metadata, not QC) it is computed from this very
+    profile, which for a per-MAG profile is the same number QC stored.  The
+    summary lands in ``table.attrs["site_depth_filter"]`` with a
+    ``mean_source`` of ``"qc"`` or ``"profile"``.
+
+    ``coverage`` is computed here as A + C + G + T, the inStrain-style
+    coverage.  The profile's ``total_coverage`` holds the same sum (see
+    profile_mags.build_profile_row) and is left unread.
 
     Parameters
     ----------
@@ -270,7 +295,7 @@ def load_profile(path: str, include_gene_id: bool = False) -> pd.DataFrame:
         If a required column is absent (pandas raises on ``usecols``) or the same
         ``(contig, position)`` appears twice -- both mean a corrupt profile.
     """
-    # usecols prunes the unused columns, tolerates the legacy mapq_scores one, and
+    # usecols prunes the unused columns (ref_base, total_coverage, gene_id) and
     # raises ValueError if a required column is missing (the fail-loud we want).
     # gene_id is read only on request: the ANI comparison never needs it, the
     # strain-turnover tools do (for candidate annotation).
@@ -291,7 +316,7 @@ def load_profile(path: str, include_gene_id: bool = False) -> pd.DataFrame:
     # assignment below writes to a real frame, not a view (SettingWithCopyWarning).
     kept = ["contig", "position", *BASES] + (["gene_id"] if include_gene_id else [])
     table = table[kept].copy()
-    # A + C + G + T only: N calls are deliberately excluded (module docstring).
+    # A + C + G + T (module docstring).
     table["coverage"] = table[list(BASES)].sum(axis=1).astype("int32")
     if include_gene_id:
         # Blank gene_id (intergenic positions) reads as NaN; normalise to "".
@@ -299,6 +324,17 @@ def load_profile(path: str, include_gene_id: bool = False) -> pd.DataFrame:
         # gene_id goes LAST so the ANI columns sit at the same offsets whether or
         # not the optional column was requested.
         table = table[["contig", "position", *BASES, "coverage", "gene_id"]]
+    if site_filter is not None:
+        # Same rule, same place in the flow, as the cache worker: drop the rows
+        # the filter would drop for this sample before anyone sees them.
+        source = "qc" if mean_cov is not None else "profile"
+        if mean_cov is None:
+            mean_cov = mean_coverage(table)
+        table, summary = apply_site_depth_filter(table, site_filter, mean_cov)
+        # coverage follows the (possibly zeroed) counts, as MIDAS2's depth does
+        table["coverage"] = table[list(BASES)].sum(axis=1).astype("int32")
+        summary["mean_source"] = source
+        table.attrs["site_depth_filter"] = summary
     return table
 
 

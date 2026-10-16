@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 # allele one step forward in this cycle (A→T→G→C→A).
 BASES = ["A", "T", "G", "C"]
 
+
 def generate_random_sequence(length: int) -> str:
     """Return a random DNA string of the given length."""
     return "".join(random.choices(BASES, k=length))
@@ -78,22 +79,22 @@ def generate_gene_sequence(length: int) -> str:
     excluded from the internal codons so Prodigal-style parsers don't
     truncate the gene early.
     """
-    length = (length // 3) * 3   # round down to codon boundary
+    length = (length // 3) * 3  # round down to codon boundary
     if length < 6:
         length = 6
 
-    seq = "ATG"   # mandatory start codon
+    seq = "ATG"  # mandatory start codon
 
     # Standard genetic code stop codons (TAA/TAG/TGA), from Biopython's
     # translation table rather than a hardcoded literal.
     stop_codons = CodonTable.standard_dna_table.stop_codons
     stop_set = set(stop_codons)
-    while len(seq) < length - 3:          # -3 leaves room for the stop codon
+    while len(seq) < length - 3:  # -3 leaves room for the stop codon
         codon = "".join(random.choices(BASES, k=3))
         if codon not in stop_set:
             seq += codon
 
-    seq += random.choice(stop_codons)   # append stop codon
+    seq += random.choice(stop_codons)  # append stop codon
     return seq
 
 
@@ -163,23 +164,20 @@ def create_mag_structure(
         contig_chars = list(generate_random_sequence(length))
 
         genes = []
-        used_regions = []   # list of (start, end) for overlap checking
+        used_regions = []  # list of (start, end) for overlap checking
 
         for j in range(genes_per_contig):
             gene_id = f"{contig_id}_gene{j+1}"
             gene_length = random.randint(150, min(400, length // 2))
 
-            for _ in range(50):   # 50 placement attempts per gene
+            for _ in range(50):  # 50 placement attempts per gene
                 start = random.randint(50, length - gene_length - 50)
                 end = start + gene_length
 
                 # Reject if this region overlaps any already-placed gene.
                 # Condition: two intervals [s1,e1] and [s2,e2] do NOT overlap
                 # iff e1 < s2 or s1 > e2 — so they DO overlap if neither holds.
-                overlap = any(
-                    not (end < us or start > ue)
-                    for us, ue in used_regions
-                )
+                overlap = any(not (end < us or start > ue) for us, ue in used_regions)
                 if not overlap:
                     strand = random.choice([1, -1])
                     gene_seq = generate_gene_sequence(gene_length)
@@ -199,21 +197,25 @@ def create_mag_structure(
                     contig_chars[start:end] = list(embed_seq)
 
                     used_regions.append((start, end))
-                    genes.append({
-                        "gene_id": gene_id,
-                        "start": start,
-                        "end": end,
-                        "strand": strand,
-                        "sequence": gene_seq,
-                    })
+                    genes.append(
+                        {
+                            "gene_id": gene_id,
+                            "start": start,
+                            "end": end,
+                            "strand": strand,
+                            "sequence": gene_seq,
+                        }
+                    )
                     break
 
-        mag["contigs"].append({
-            "contig_id": contig_id,
-            "length": length,
-            "sequence": "".join(contig_chars),
-            "genes": sorted(genes, key=lambda x: x["start"]),
-        })
+        mag["contigs"].append(
+            {
+                "contig_id": contig_id,
+                "length": length,
+                "sequence": "".join(contig_chars),
+                "genes": sorted(genes, key=lambda x: x["start"]),
+            }
+        )
 
     return mag
 
@@ -328,7 +330,7 @@ def write_gtdb_taxonomy(mags: List[Dict], output_path: Path) -> None:
     with open(output_path, "w") as f:
         f.write("user_genome\tclassification\n")
         for i, mag in enumerate(mags):
-            tax = taxonomies[i % len(taxonomies)]   # cycle through the 4 lineages
+            tax = taxonomies[i % len(taxonomies)]  # cycle through the 4 lineages
             f.write(f"{mag['mag_id']}\t{tax}\n")
     logger.info(f"Wrote GTDB taxonomy: {output_path}")
 
@@ -376,13 +378,15 @@ def generate_sample_structure(
                 # Both timepoints for this subject are emitted together so they
                 # share the same subjectID, which is what the paired tests require.
                 for timepoint in timepoints:
-                    samples.append({
-                        "sample_id": f"{group}_subj{subject_id}_{timepoint}",
-                        "subjectID": f"subj{subject_id}",
-                        "group": group,
-                        "replicate": replicate,
-                        "time": timepoint,
-                    })
+                    samples.append(
+                        {
+                            "sample_id": f"{group}_subj{subject_id}_{timepoint}",
+                            "subjectID": f"subj{subject_id}",
+                            "group": group,
+                            "replicate": replicate,
+                            "time": timepoint,
+                        }
+                    )
                 subject_id += 1
 
     else:
@@ -394,13 +398,15 @@ def generate_sample_structure(
         for group in groups:
             for rep_idx in range(samples_per_group):
                 replicate = replicate_letters[rep_idx % len(replicate_letters)]
-                samples.append({
-                    "sample_id": f"{group}_sample{subject_id}",
-                    "subjectID": f"subj{subject_id}",
-                    "group": group,
-                    "replicate": replicate,
-                    "time": timepoints[0] if timepoints else "t1",
-                })
+                samples.append(
+                    {
+                        "sample_id": f"{group}_sample{subject_id}",
+                        "subjectID": f"subj{subject_id}",
+                        "group": group,
+                        "replicate": replicate,
+                        "time": timepoints[0] if timepoints else "t1",
+                    }
+                )
                 subject_id += 1
 
     return samples
@@ -601,7 +607,6 @@ def generate_profile_data(
                 # `counts[dominant_base] += remaining` before the sum if exact
                 # depth preservation is needed.
                 total_coverage = counts["A"] + counts["C"] + counts["G"] + counts["T"]
-                n_count = 0   # synthetic reads have no ambiguous bases
 
                 # Find which gene (if any) this position falls inside.
                 # Half-open: a position equal to end is just past the gene's
@@ -615,7 +620,7 @@ def generate_profile_data(
                 rows.append(
                     f"{contig['contig_id']}\t{pos}\t{ref_base}\t{total_coverage}"
                     f"\t{counts['A']}\t{counts['C']}\t{counts['G']}\t{counts['T']}"
-                    f"\t{n_count}\t{gene_id}"
+                    f"\t{gene_id}"
                 )
 
         profiles[mag["mag_id"]] = rows
@@ -639,7 +644,7 @@ def write_profiles(
     for mag_id, rows in profiles.items():
         filepath = sample_dir / f"{sample['sample_id']}_{mag_id}_profiled.tsv.gz"
         with gzip.open(filepath, "wt") as f:
-            f.write("contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tN\tgene_id\n")
+            f.write("contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tgene_id\n")
             for row in rows:
                 f.write(row + "\n")
 
@@ -660,7 +665,9 @@ def generate_significant_sites(
             for contig in mag["contigs"]:
                 for gene in contig["genes"]:
                     n = min(num_sites_per_gene, gene["end"] - gene["start"])
-                    positions = sorted(random.sample(range(gene["start"], gene["end"]), n))
+                    positions = sorted(
+                        random.sample(range(gene["start"], gene["end"]), n)
+                    )
                     for pos in positions:
                         p_val = random.uniform(1e-7, 1e-4)
                         q_val = p_val * random.uniform(5, 20)
@@ -734,7 +741,7 @@ def write_config(
         metadata_filename = "sample_metadata.tsv"
         # profiles_path line is present in profile mode.
         profiles_line = (
-            f'  # Use the pre-generated profiles directly — skips the profiling step.\n'
+            f"  # Use the pre-generated profiles directly — skips the profiling step.\n"
             f'  profiles_path: "profiles"'
         )
         output_subdir = "output"
@@ -759,13 +766,13 @@ def write_config(
         run_name = "generated_test_bams"
         metadata_filename = "sample_metadata_bams.tsv"
         # profiles_path is intentionally absent — pipeline profiles from BAMs.
-        profiles_line = (
-            "  # profiles_path intentionally omitted — pipeline profiles directly from BAMs."
-        )
+        profiles_line = "  # profiles_path intentionally omitted — pipeline profiles directly from BAMs."
         output_subdir = "output_bams"
         # wgsim writes Phred ~23 regardless of error rate; raise to ≥20 for real data.
         min_base_quality = 0
-        bq_comment = "  # wgsim writes Phred ~23 to every base; raise to ≥20 for real data.\n"
+        bq_comment = (
+            "  # wgsim writes Phred ~23 to every base; raise to ≥20 for real data.\n"
+        )
         config_filename = f"config_with_bams_{data_type}.yml"
 
     config = f"""{header}
@@ -866,36 +873,72 @@ def main():
         description="Generate synthetic AlleleFlux test data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--output_dir", "-o", type=str, required=True,
-                        help="Output directory for generated data")
-    parser.add_argument("--num_mags", "-m", type=int, default=2,
-                        help="Number of MAGs to generate")
-    parser.add_argument("--num_samples", "-s", type=int, default=8,
-                        help="Number of samples (must be divisible by groups × timepoints)")
-    parser.add_argument("--num_contigs_per_mag", type=int, default=2,
-                        help="Number of contigs per MAG")
-    parser.add_argument("--genes_per_contig", type=int, default=3,
-                        help="Number of genes to place per contig")
-    parser.add_argument("--contig_length_min", type=int, default=800,
-                        help="Minimum contig length (bp)")
-    parser.add_argument("--contig_length_max", type=int, default=2000,
-                        help="Maximum contig length (bp)")
-    parser.add_argument("--data_type", type=str, choices=["single", "longitudinal"],
-                        default="longitudinal",
-                        help="Experimental design: single timepoint or longitudinal")
-    parser.add_argument("--groups", type=str, nargs="+",
-                        default=["control", "treatment"],
-                        help="Experimental group names")
-    parser.add_argument("--timepoints", type=str, nargs="+",
-                        default=None,
-                        help="Timepoint labels. Auto-defaults based on --data_type if omitted: "
-                             "'pre post' for longitudinal, 't1' for single.")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed — use the same seed to reproduce identical data")
-    parser.add_argument("--coverage_min", type=int, default=20,
-                        help="Minimum per-position coverage")
-    parser.add_argument("--coverage_max", type=int, default=80,
-                        help="Maximum per-position coverage")
+    parser.add_argument(
+        "--output_dir",
+        "-o",
+        type=str,
+        required=True,
+        help="Output directory for generated data",
+    )
+    parser.add_argument(
+        "--num_mags", "-m", type=int, default=2, help="Number of MAGs to generate"
+    )
+    parser.add_argument(
+        "--num_samples",
+        "-s",
+        type=int,
+        default=8,
+        help="Number of samples (must be divisible by groups × timepoints)",
+    )
+    parser.add_argument(
+        "--num_contigs_per_mag", type=int, default=2, help="Number of contigs per MAG"
+    )
+    parser.add_argument(
+        "--genes_per_contig",
+        type=int,
+        default=3,
+        help="Number of genes to place per contig",
+    )
+    parser.add_argument(
+        "--contig_length_min", type=int, default=800, help="Minimum contig length (bp)"
+    )
+    parser.add_argument(
+        "--contig_length_max", type=int, default=2000, help="Maximum contig length (bp)"
+    )
+    parser.add_argument(
+        "--data_type",
+        type=str,
+        choices=["single", "longitudinal"],
+        default="longitudinal",
+        help="Experimental design: single timepoint or longitudinal",
+    )
+    parser.add_argument(
+        "--groups",
+        type=str,
+        nargs="+",
+        default=["control", "treatment"],
+        help="Experimental group names",
+    )
+    parser.add_argument(
+        "--timepoints",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Timepoint labels. Auto-defaults based on --data_type if omitted: "
+        "'pre post' for longitudinal, 't1' for single.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed — use the same seed to reproduce identical data",
+    )
+    parser.add_argument(
+        "--coverage_min", type=int, default=20, help="Minimum per-position coverage"
+    )
+    parser.add_argument(
+        "--coverage_max", type=int, default=80, help="Maximum per-position coverage"
+    )
 
     args = parser.parse_args()
 
@@ -930,18 +973,22 @@ def main():
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Generating synthetic data in: {output_dir}")
-    logger.info(f"{args.num_mags} MAGs, {args.num_samples} samples, {args.data_type} design")
+    logger.info(
+        f"{args.num_mags} MAGs, {args.num_samples} samples, {args.data_type} design"
+    )
 
     # --- MAG structures -------------------------------------------------
     mags = []
     for i in range(args.num_mags):
-        mag_id = f"MAG_{i+1:03d}"   # zero-padded: MAG_001, MAG_002, ...
-        mags.append(create_mag_structure(
-            mag_id,
-            num_contigs=args.num_contigs_per_mag,
-            contig_length_range=(args.contig_length_min, args.contig_length_max),
-            genes_per_contig=args.genes_per_contig,
-        ))
+        mag_id = f"MAG_{i+1:03d}"  # zero-padded: MAG_001, MAG_002, ...
+        mags.append(
+            create_mag_structure(
+                mag_id,
+                num_contigs=args.num_contigs_per_mag,
+                contig_length_range=(args.contig_length_min, args.contig_length_max),
+                genes_per_contig=args.genes_per_contig,
+            )
+        )
 
     # --- Reference files ------------------------------------------------
     write_reference_fasta(mags, output_dir / "reference" / "combined_mags.fasta")

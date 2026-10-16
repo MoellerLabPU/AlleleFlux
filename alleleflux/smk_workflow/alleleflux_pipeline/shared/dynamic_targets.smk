@@ -1104,6 +1104,75 @@ def generate_replacement_classification_targets():
     return [get_replacement_classification_path()]
 
 
+def generate_rising_table_targets():
+    """Every comparison's rising table over the whole (timepoints x groups) grid.
+
+    The ONE list that both the rising_origin rule's input function and
+    generate_rising_origin_targets read, so the summary is requested exactly
+    when its inputs exist.  Empty when baseline presence is off, when
+    allele_analysis_only is set, or when no comparison has an eligible MAG
+    (generate_baseline_presence_targets already gates all three).
+    Checkpoint-dependent through generate_p_value_summary_targets, like the
+    per-comparison targets.
+    """
+    return [
+        t
+        for tp in timepoints_labels
+        for gr in groups_labels
+        for t in generate_baseline_presence_targets(tp, gr)
+        if t.endswith("_rising.tsv")
+    ]
+
+
+def generate_rising_origin_targets():
+    """Run-once standing-vs-de-novo tally over every comparison's rising table.
+
+    Not scoped by (tp, gr), so it is added once after the per-combination loop
+    in the Snakefile.  Requested only when at least one rising table will exist:
+    with none, alleleflux-rising-origin would run on an empty folder and raise
+    FileNotFoundError (audit F23), so the target is simply not made.
+    """
+    if not generate_rising_table_targets():
+        return []
+    return [os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_summary.tsv")]
+
+
+def generate_allele_freq_cache_sidecar_targets():
+    """Every site-depth-filter sidecar the cache jobs of this run will write.
+
+    One cache file exists per (MAG, timepoint) for every MAG that passes QC
+    eligibility in some configured comparison; its sidecar sits next to it.
+    The MAG universe comes from the QC eligibility checkpoint, so this is
+    checkpoint-dependent: call it from get_final_pipeline_outputs or a rule's
+    input *function*, never at parse time.
+
+    Example: comparisons pre_end and pre_post x fat_control, 80 and 79 QC-
+    eligible MAGs -> sidecars for the union of MAGs at pre, end and post.
+    """
+    sidecars = set()
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            tps = tp.split("_") if DATA_TYPE == "longitudinal" else [tp]
+            for mag in _get_mags_by_eligibility(tp, gr, eligibility_type="all"):
+                for timepoint in tps:
+                    cache = get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
+                    sidecars.add(cache[: -len(".parquet")] + "_site_depth_filter.tsv")
+    return sorted(sidecars)
+
+
+def generate_site_depth_filter_summary_targets():
+    """Run-once rollup of every cache sidecar (what the site-depth filter removed).
+
+    Not scoped by (tp, gr): added once after the per-combination loop in the
+    Snakefile, like the rising-origin summary.  Requested only when at least one
+    cache file (hence sidecar) will exist; with none the summary command would
+    find no sidecars and raise.
+    """
+    if not generate_allele_freq_cache_sidecar_targets():
+        return []
+    return [os.path.join(OUTDIR, "site_depth_filter", "site_depth_filter_summary.tsv")]
+
+
 def generate_baseline_presence_targets(tp, gr):
     """Baseline-presence outputs for one comparison, only where its summary file will exist.
 

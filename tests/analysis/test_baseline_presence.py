@@ -117,27 +117,62 @@ class TestLoadSignificantSites(unittest.TestCase):
 
 
 class TestCandidateAlleles(unittest.TestCase):
-    def test_two_sample_ties_keep_both_bases(self):
-        sites = pd.DataFrame({"contig": ["c1", "c1"], "position": [10, 20], "gene_id": ["g1", ""],
-                              "min_p_value": [0.001, 0.03], "group_analyzed": ["", ""]})
-        source = pd.DataFrame({
-            "contig": ["c1", "c1"], "position": [10, 20], "gene_id": ["g1 ", np.nan],   # real-file quirks
-            "A_frequency_p_value_tTest": [0.001, 0.5], "C_frequency_p_value_tTest": [1.0, 0.03],
-            "G_frequency_p_value_tTest": [0.001, 0.9], "T_frequency_p_value_tTest": [1.0, 1.0],
-        })
-        got = candidate_alleles(sites, source, allele_p_column("two_sample_paired", "two_sample_paired_tTest"))
-        self.assertEqual(got[got.position == 10].allele.tolist(), ["A", "G"])   # complementary pair
-        self.assertEqual(got[got.position == 20].allele.tolist(), ["C"])
-        self.assertEqual(got.n_alleles_tied_at_min_p.tolist(), [2, 2, 1])
+    """The candidate rule: every base with a real test (p < 1) at a two-letter
+    site; at a site with three or four tested bases, only those significant on
+    their own (p <= the comparison's BH line for that group).  No tie tolerance."""
 
-    def test_single_sample_reads_the_group_suffixed_column(self):
+    # staticmethod: a plain function stored on a class would be bound as a method
+    TWO = staticmethod(allele_p_column("two_sample_paired", "two_sample_paired_tTest"))
+
+    def test_two_letter_site_keeps_both_bases_even_when_float32_noise_breaks_the_tie(self):
+        # position 10: exact twins; position 20: twins that differ in the 9th digit
+        # (the cache stores float32, so the seesaw partners' p never tie bit-for-bit);
+        # position 30: a single tested base.
+        sites = pd.DataFrame({"contig": ["c1"] * 3, "position": [10, 20, 30], "gene_id": ["g1", "", ""],
+                              "min_p_value": [0.001, 0.001455849740, 0.03], "group_analyzed": [""] * 3})
+        source = pd.DataFrame({
+            "contig": ["c1"] * 3, "position": [10, 20, 30], "gene_id": ["g1 ", np.nan, np.nan],   # real-file quirks
+            "A_frequency_p_value_tTest": [0.001, 1.0, 0.03], "C_frequency_p_value_tTest": [1.0, 0.001455849740, 1.0],
+            "G_frequency_p_value_tTest": [0.001, 1.0, 1.0], "T_frequency_p_value_tTest": [1.0, 0.001455849790, 1.0],
+        })
+        got = candidate_alleles(sites, source, self.TWO, {"": 0.03})
+        self.assertEqual(got[got.position == 10].allele.tolist(), ["A", "G"])   # complementary pair
+        self.assertEqual(got[got.position == 20].allele.tolist(), ["C", "T"])   # the old rtol=1e-9 rule kept only C
+        self.assertEqual(got[got.position == 30].allele.tolist(), ["A"])
+        self.assertEqual(got.n_candidate_alleles.tolist(), [2, 2, 2, 2, 1])
+
+    def test_multi_letter_site_keeps_only_bases_significant_on_their_own(self):
+        # Three tested bases: A 1e-4 (the site's min), C 0.002, G 0.5; T untested.
+        sites = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"],
+                              "min_p_value": [1e-4], "group_analyzed": [""]})
+        source = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"],
+                               "A_frequency_p_value_tTest": [1e-4], "C_frequency_p_value_tTest": [0.002],
+                               "G_frequency_p_value_tTest": [0.5], "T_frequency_p_value_tTest": [1.0]})
+        wide = candidate_alleles(sites, source, self.TWO, {"": 0.0025})     # line above C's p: A and C
+        self.assertEqual(wide.allele.tolist(), ["A", "C"])
+        self.assertEqual(wide.n_candidate_alleles.tolist(), [2, 2])
+        narrow = candidate_alleles(sites, source, self.TWO, {"": 0.0015})   # line between them: A only
+        self.assertEqual(narrow.allele.tolist(), ["A"])
+        self.assertEqual(narrow.n_candidate_alleles.tolist(), [1])
+
+    def test_single_sample_reads_the_group_suffixed_column_and_that_groups_line(self):
         sites = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"], "min_p_value": [0.004], "group_analyzed": ["fat"]})
         source = pd.DataFrame({
             "contig": ["c1"], "position": [10], "gene_id": ["g1"],
             "A_frequency_p_value_tTest_fat": [0.9], "C_frequency_p_value_tTest_fat": [0.004],
             "G_frequency_p_value_tTest_fat": [0.9], "T_frequency_p_value_tTest_fat": [1.0],
         })
-        self.assertEqual(candidate_alleles(sites, source, allele_p_column("single_sample", "single_sample_tTest")).allele.tolist(), ["C"])
+        col = allele_p_column("single_sample", "single_sample_tTest")
+        self.assertEqual(candidate_alleles(sites, source, col, {"fat": 0.01}).allele.tolist(), ["C"])   # 3 tested: A, G above the line
+        with self.assertRaisesRegex(ValueError, "fat"):                  # a group with no line is a broken call
+            candidate_alleles(sites, source, col, {"control": 0.01})
+
+    def test_significant_site_with_no_tested_base_raises(self):
+        sites = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"], "min_p_value": [0.001], "group_analyzed": [""]})
+        source = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"],
+                               **{f"{b}_frequency_p_value_tTest": [1.0] for b in "ACGT"}})
+        with self.assertRaisesRegex(ValueError, "no tested base"):
+            candidate_alleles(sites, source, self.TWO, {"": 0.05})
 
     def test_site_missing_from_source_raises_and_names_it(self):
         sites = pd.DataFrame({"contig": ["c1", "c1"], "position": [10, 99], "gene_id": ["g1", "g1"],
@@ -145,14 +180,14 @@ class TestCandidateAlleles(unittest.TestCase):
         source = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"],
                                **{f"{b}_frequency_p_value_tTest": [1.0] for b in "ACGT"}})
         with self.assertRaisesRegex(ValueError, "1 of 2 sites.*99"):
-            candidate_alleles(sites, source, allele_p_column("two_sample_paired", "two_sample_paired_tTest"))
+            candidate_alleles(sites, source, self.TWO, {"": 0.05})
 
     def test_gene_id_disagreement_is_a_mismatch(self):
         sites = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g1"], "min_p_value": [1.0], "group_analyzed": [""]})
         source = pd.DataFrame({"contig": ["c1"], "position": [10], "gene_id": ["g2"],
                                **{f"{b}_frequency_p_value_tTest": [1.0] for b in "ACGT"}})
         with self.assertRaises(ValueError):
-            candidate_alleles(sites, source, allele_p_column("two_sample_paired", "two_sample_paired_tTest"))
+            candidate_alleles(sites, source, self.TWO, {"": 0.05})
 
     def test_column_registry_covers_every_family_that_reports_per_base_p(self):
         col = allele_p_column("two_sample_unpaired", "two_sample_unpaired_MannWhitney_abs")
@@ -275,7 +310,7 @@ class TestSummariseSites(unittest.TestCase):
         got = summarise_sites(label_origin_in_own_mouse(self._long(), self.TPS), self.TPS).iloc[0]
         self.assertEqual(list(got.index), summary_columns(self.TPS))
         self.assertEqual(list(got.index), [
-            "mag_id", "contig", "position", "gene_id", "group_analyzed", "allele", "n_alleles_tied_at_min_p", "q_value",
+            "mag_id", "contig", "position", "gene_id", "group_analyzed", "allele", "n_candidate_alleles", "q_value",
             "origin_any_mouse", "n_pre_samples_allele_present", "n_pre_samples_covered",
             "n_replicates_with_allele_at_pre", "pre_mice_allele_present",
             "n_mice_standing_variation", "n_mice_de_novo_candidate", "n_mice_de_novo_candidate_below_detection_at_pre",
@@ -503,7 +538,7 @@ class TestSummariseRising(unittest.TestCase):
                             "group_analyzed": group_analyzed,
                             "allele": allele,
                             "q_value": 0.01,
-                            "n_alleles_tied_at_min_p": 2,
+                            "n_candidate_alleles": 2,
                             "sample_id": f"{mouse}_{time}",
                             "subjectID": mouse,
                             "replicate": rep,
@@ -534,9 +569,7 @@ class TestSummariseRising(unittest.TestCase):
         # fat: m1 had G at pre (baseline = every pre sample) -> standing
         self.assertEqual(fat.origin_any_mouse, "standing_variation")
         self.assertAlmostEqual(fat.frequency_change, (19 / 30 + 21 / 30) / 2)
-        self.assertEqual(fat.other_group, "control")
         self.assertEqual((int(fat.n_replicates), int(fat.n_mice)), (1, 2))
-        self.assertAlmostEqual(fat.other_group_frequency_change, (1 / 30 + 0) / 2)
         self.assertEqual(
             (int(fat.n_mice_standing_variation), int(fat.n_mice_de_novo_candidate)),
             (1, 1),
@@ -670,6 +703,21 @@ class TestBaselinePresenceCLI(unittest.TestCase):
             "--output_dir", self.out, "--cpus", "2", *extra,
         ], capture_output=True, text=True)
 
+    def test_site_depth_filter_makes_a_pile_not_covered(self):
+        """m2_pre gets a 300-read pile at the site (30x elsewhere): mean (150 + 300) / 6 = 75,
+        300 / 75 = 4 > 3 -> the site is removed for that sample and reads as not_covered;
+        with the filter off it is covered and the allele absent (0 G of 300)."""
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m2_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6) if p != 1] + [(1, 300, 0, 0, 0)])
+        long_file = os.path.join(self.out, "pre_end-fat_control_two_sample_paired_tTest_baseline_presence.tsv.gz")
+        done = self._run(); self.assertEqual(done.returncode, 0, done.stderr)
+        g = pd.read_csv(long_file, sep="\t").query("allele == 'G'").set_index("sample_id")
+        self.assertEqual(g.loc["m2_pre"].allele_status, "not_covered")
+        done = self._run("--disable_site_depth_filter"); self.assertEqual(done.returncode, 0, done.stderr)
+        g = pd.read_csv(long_file, sep="\t").query("allele == 'G'").set_index("sample_id")
+        self.assertEqual(g.loc["m2_pre"].allele_status, "absent")
+        self.assertEqual(int(g.loc["m2_pre"].total_reads), 300)
+
     def test_long_table_one_row_per_site_allele_sample(self):
         done = self._run()
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -682,7 +730,7 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual(g.loc["m4_pre"].allele_status, "not_covered"); self.assertTrue(pd.isna(g.loc["m4_pre"].allele_frequency))
         row = g.loc["m1_pre"]
         self.assertEqual((row.mag_id, row.contig, int(row.position), row.gene_id, row.subjectID, row.replicate, row.group,
-                          row.time, int(row.n_alleles_tied_at_min_p), int(row.min_cov)),
+                          row.time, int(row.n_candidate_alleles), int(row.min_cov)),
                          (self.MAG, "c1", 1, "g1", "m1", "r1", "fat", "pre", 2, 5))
         self.assertNotIn("timepoint_role", long.columns)             # the real label is the only timepoint column
         self.assertEqual(sorted(long.allele.unique()), ["A", "G"])
@@ -924,13 +972,15 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
             run, "significance_tests", "single_sample_pre_end-fat_control"
         )
         os.makedirs(td)
-        # only G hits the site's min p, so G is the one candidate allele
+        # A and G are the seesaw pair (A falls as G rises): one test seen twice,
+        # p-values equal up to float32 noise.  Both are candidates; the rising
+        # table, not the p-values, decides that G is the one that rose.
         pd.DataFrame(
             {
                 "contig": ["c1"],
                 "gene_id": ["g1"],
                 "position": [1],
-                "A_frequency_p_value_tTest_fat": [0.002],
+                "A_frequency_p_value_tTest_fat": [0.001000001],
                 "C_frequency_p_value_tTest_fat": [1.0],
                 "G_frequency_p_value_tTest_fat": [0.001],
                 "T_frequency_p_value_tTest_fat": [1.0],
@@ -986,9 +1036,11 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
         stem = os.path.join(
             self.out, "pre_end-fat_control_single_sample_tTest_baseline_presence"
         )
+        summary = pd.read_csv(stem + "_summary.tsv", sep="\t")
+        self.assertEqual(sorted(summary.allele), ["A", "G"])  # both seesaw partners
         return (
             pd.read_csv(stem + ".tsv.gz", sep="\t"),
-            pd.read_csv(stem + "_summary.tsv", sep="\t").iloc[0],
+            summary[summary.allele == "G"].iloc[0],  # the riser's row
         )
 
     def test_own_group_scope_uses_only_the_sites_group(self):
@@ -996,7 +1048,7 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
         self.assertEqual(
             sorted(long.subjectID.unique()), ["m1", "m2"]
         )  # control mice gone, both timepoints
-        self.assertEqual(len(long), 4)  # 1 allele x 2 fat mice x 2 timepoints
+        self.assertEqual(len(long), 8)  # 2 alleles x 2 fat mice x 2 timepoints
         self.assertEqual(s.allele, "G")
         self.assertEqual(s.origin_any_mouse, "de_novo_candidate")
         self.assertEqual(
@@ -1009,7 +1061,7 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
 
     def test_default_is_comparison_both_groups(self):
         long, s = self._run()
-        self.assertEqual(len(long), 8)  # all four mice
+        self.assertEqual(len(long), 16)  # 2 alleles x all four mice x 2 timepoints
         self.assertEqual(
             s.origin_any_mouse, "standing_variation"
         )  # m3, m4 carry G at pre
@@ -1044,16 +1096,20 @@ class TestBaselineScopeWithinGroupCLI(unittest.TestCase):
         self.assertEqual((r.allele, r.rose_in), ("G", "fat"))
         self.assertAlmostEqual(r.frequency_change, (0.8 + 0.7) / 2)  # r1, r2
         self.assertEqual((int(r.n_replicates), int(r.n_mice)), (2, 2))
-        self.assertEqual(r.other_group, "control")
-        self.assertAlmostEqual(r.other_group_frequency_change, -5 / 30)
         self.assertEqual(r.origin_any_mouse, "standing_variation")  # control had G
-        # own_group: fat alone, no other group; baseline = fat's mice -> de novo
+        # own_group: fat alone; baseline = fat's mice -> de novo
         shutil.rmtree(self.out)
         self._run("--baseline_scope", "own_group")
         r = self._rising().iloc[0]
-        self.assertTrue(pd.isna(r.other_group))  # "" reads back as NaN
-        self.assertTrue(pd.isna(r.other_group_frequency_change))
         self.assertEqual(r.origin_any_mouse, "de_novo_candidate")
+
+    def test_rising_table_has_no_other_group_columns(self):
+        # dropped: under own_group the other group's mice are gone before counting,
+        # so the columns were always blank there, and nothing downstream reads them
+        self._run()
+        cols = set(self._rising().columns)
+        self.assertNotIn("other_group", cols)
+        self.assertNotIn("other_group_frequency_change", cols)
 
 
 if __name__ == "__main__":

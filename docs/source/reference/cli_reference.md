@@ -165,10 +165,11 @@ Creates `{output_dir}/{sampleID}/{sampleID}_{mag_id}_profiled.tsv.gz` with colum
 - `contig`: Contig identifier
 - `position`: 0-based genomic position
 - `ref_base`: Reference base at position
-- `total_coverage`: Total read coverage
-- `A`, `C`, `G`, `T`, `N`: Base counts
-- `mapq_scores`: MAPQ scores for reads
+- `total_coverage`: Read coverage, equal to `A + C + G + T`
+- `A`, `C`, `G`, `T`: Base counts (ambiguous `N` calls are not counted; positions with no A/C/G/T read are not written)
 - `gene_id`: Overlapping gene identifier (if any)
+
+Profiles written by earlier versions carried an extra `N` column summed into `total_coverage`; they are not supported by this version. Re-profile.
 
 #### Examples
 
@@ -306,12 +307,19 @@ alleleflux-qc --root-dir PROFILES --mag-id MAG --output-dir DIR [options]
 | `--fasta` | None | Path to reference FASTA (optional). |
 | `--mag-mapping-file` | None | Contig-to-MAG mapping file (optional). |
 | `--breadth-threshold` | 0.1 | Minimum breadth of coverage (0-1). |
-| `--coverage-threshold` | 1.0 | Minimum average coverage depth. |
+| `--coverage-threshold` | 1.0 | Minimum `average_coverage_including_zeros` (summed depth / genome size). |
 | `--data-type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
 
 #### Output
 
-Creates `{mag_id}_QC.tsv` with QC results including `breadth_threshold_passed` column.
+Creates `{mag_id}_QC.tsv`, one row per sample, with the sample metadata, `genome_size`, and:
+
+- `breadth`, `breadth_threshold_passed`, `breadth_fail_reason`: fraction of the genome with at least one read, and the breadth check
+- `average_coverage`: mean depth over the **covered** positions only (summed depth / number of positions with at least one read). This is the reference the per-site depth filter divides by (see `quality_control.site_depth_filter` in the config); it is computed once here and read from this table downstream.
+- `average_coverage_including_zeros`: summed depth / genome size, with uncovered positions counted as zero. This is the number `--coverage-threshold` tests (`coverage_threshold_passed`, `coverage_fail_reason`).
+- `median_coverage`, `median_coverage_including_zeros`, `coverage_std`, `coverage_std_including_zeros`, `length_weighted_coverage`: further depth statistics (the `_including_zeros` ones treat uncovered positions as zero)
+
+The two averages answer different questions: a genome with a handful of very deep positions can have a high `average_coverage` and a near-zero `average_coverage_including_zeros`, and it is the latter that decides whether the sample is kept.
 
 #### Examples
 
@@ -590,6 +598,28 @@ alleleflux-list-mags --input-dir DIR [--output-file FILE]
 
 ---
 
+### Site-depth filter flags
+
+`alleleflux-cache-allele-freq`, `alleleflux-pairwise-ani` and `alleleflux-baseline-presence` all read profiles, and all take the same flags for the per-site depth filter; the workflow passes them to the three from the one `quality_control.site_depth_filter` config block so every reader filters identically.
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--disable_site_depth_filter` | off | Do not apply the filter; profiles are used as-is. |
+| `--site_depth` | 0 | Minimum depth at a position after counting; 0 = no floor (MIDAS2 uses 5). |
+| `--site_ratio` | 3.0 | Drop a position when its depth divided by the sample's mean coverage over covered positions (QC's `average_coverage`) exceeds this. |
+| `--min_allele_reads` | 0 | A base count must exceed this to count toward the position's depth; 0 = every read counts (MIDAS2 uses 2). |
+| `--zero_low_counts` | off | MIDAS2 behaviour: at kept positions, base counts not exceeding `--min_allele_reads` are set to zero for everything downstream. Off = kept positions keep their original counts. |
+
+### `alleleflux-site-filter-summary` — what the site-depth filter removed, run-wide
+
+```bash
+alleleflux-site-filter-summary --cache_dir RUN/allele_freq_cache --output site_depth_filter_summary.tsv
+```
+
+Run automatically by the workflow once every cache job has finished (local rule `site_depth_filter_summary`, outputs under `site_depth_filter/`); also usable by hand. Stacks every `*_site_depth_filter.tsv` sidecar the cache jobs wrote into one table (one row per sample × MAG × timepoint) and writes a per-MAG × timepoint rollup next to it as `<output stem>_by_mag.tsv` with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high`. Fails loudly when the directory holds no sidecars.
+
+---
+
 ### Additional accessory tools
 
 - `alleleflux-positions-qc` — Position-level QC filtering
@@ -829,6 +859,7 @@ alleleflux-pairwise-ani --mag MAG --profiles_dir DIR --qc_files QC [QC ...] \
 | `--pairs` | `within_subject` | `all`, `within_subject` (every same-mouse pair) or `transitions` (same-mouse pairs matching `--transitions`). |
 | `--transitions` | — | `EARLIER:LATER` pairs for `--pairs transitions`, e.g. `pre:end`. |
 | `--store_snp_locations` | `within_subject` | Which pairs also get per-position SNP rows: `none`, `within_subject`, `all`. |
+| `--disable_site_depth_filter`, `--site_depth`, `--site_ratio`, `--min_allele_reads`, `--zero_low_counts` | see below | The per-site depth filter, applied to each profile as it is loaded (see [Site-depth filter flags](#site-depth-filter-flags)). |
 | `--cpus` | 1 | Workers for loading profiles; results are identical for any value. |
 
 #### Output
@@ -885,6 +916,27 @@ alleleflux-replacement-classification --turnover_dir DIR --output_path TSV \
 
 ---
 
+### `alleleflux-rising-origin` — standing vs de novo for the alleles that rose
+
+```bash
+alleleflux-rising-origin --rising_dir DIR --output_dir DIR \
+  [--classification TABLE [TABLE ...]] [--strain_metric METRIC] [--status_column COLUMN]
+```
+
+Reads every `*_baseline_presence_rising.tsv` in `--rising_dir` and counts, per comparison × group, the rising alleles in each origin category.
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--rising_dir` | required | Folder of rising tables (`baseline_presence/`). |
+| `--output_dir` | required | Output directory. |
+| `--classification` | — | `replacement_classification.tsv` table(s), one per voter floor (`min_voters`). When given, de novo in a replaced MAG becomes `new_strain` and the summary is split by floor and strain class. |
+| `--strain_metric` | `dominant_strain_change` | Classification metric (`dominant_strain_change` = conANI; `strain_replacement` = popANI, stricter). |
+| `--status_column` | `strain_status_replicates` | Verdict column: replicates vote, or `strain_status` for mice. |
+
+Outputs `rising_origin_alleles.tsv` and `rising_origin_summary.tsv`; see [Outputs](outputs.md).
+
+---
+
 ### `alleleflux-baseline-presence` — was each significant allele present at baseline?
 
 ```bash
@@ -920,6 +972,7 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 | `--min_freq` | 0.05 | Presence frequency floor. |
 | `--fdr` | 1e-6 | Null-model false-discovery rate. |
 | `--min_base_quality` | 30 | Base quality assumed by the null model. |
+| `--disable_site_depth_filter`, `--site_depth`, `--site_ratio`, `--min_allele_reads`, `--zero_low_counts` | see below | The per-site depth filter, applied to each profile as it is loaded; a removed position reads as `not_covered` for that sample (see [Site-depth filter flags](#site-depth-filter-flags)). |
 | `--cpus` | all | Worker processes (one profile load per MAG × sample). |
 
 #### Output

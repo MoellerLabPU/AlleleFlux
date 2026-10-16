@@ -85,6 +85,24 @@ Position-level allele frequencies across samples.
 | `{sample}_coverage` | int | Read depth |
 | `gene_id` | str | Overlapping gene |
 
+### Site-Depth Filter Sidecars
+
+**Path:** `allele_freq_cache/{timepoint}/{mag}_{timepoint}_allele_frequency_site_depth_filter.tsv`
+
+Written next to every allele-frequency cache file: what the per-site depth filter (`quality_control.site_depth_filter`) did to each sample's profile before the cache was built. One row per sample.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sample_id`, `mag_id`, `timepoint` | str | The sample and MAG the row describes |
+| `mean_coverage` | float | The sample's mean coverage over covered positions (QC's `average_coverage`), the number each position's depth was compared against |
+| `mean_coverage_after_filter` | float | The same mean over the positions that were kept; the drop from `mean_coverage` is how much pile the filter removed from this sample |
+| `n_sites_covered` | int | Positions with at least one read before filtering |
+| `n_removed_low` | int | Positions dropped for depth below `site_depth` (0 with the default floor of 0) |
+| `n_removed_high` | int | Positions dropped for depth above `site_ratio` × `mean_coverage` |
+| `n_kept` | int | Positions that entered the cache |
+
+The workflow's `site_depth_filter_summary` rule runs `alleleflux-site-filter-summary` once every cache job has finished and writes `site_depth_filter/site_depth_filter_summary.tsv` (every sidecar stacked into one run-level table) and `site_depth_filter/site_depth_filter_summary_by_mag.tsv` next to it, one row per MAG × timepoint with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high` (the share of covered positions the ceiling removed). The same filter, with the same settings, is applied inside `alleleflux-pairwise-ani` and `alleleflux-baseline-presence` when they read profiles; a position removed for a sample reads as not covered there.
+
 ## Statistical Test Results
 
 :::{seealso}
@@ -324,7 +342,26 @@ Long table: one row per significant site × allele × sample, with `allele_reads
 
 Summary: one row per site × allele. Sample-count columns (`origin_any_mouse`, `n_{earlier}_samples_allele_present`, `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`, `n_mice_standing_variation`, `n_mice_de_novo_candidate`, ...) apply the presence rule; read-count columns (`total_reads_{tp}`, `allele_reads_{tp}`, `allele_frequency_{tp}`) are unfiltered sums over every sample at that timepoint. Timepoint names in column headers are the comparison's own labels.
 
-Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`, `other_group`, `other_group_frequency_change`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles tie on the p-value and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
+Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles are candidates and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
+
+### Rising Origin
+
+**Path:** `baseline_presence/rising_origin/rising_origin_summary.tsv`, `rising_origin_alleles.tsv`
+
+Written by `alleleflux-rising-origin` once every comparison's rising table exists. Each rising allele gets one origin:
+
+| origin | meaning |
+|---|---|
+| `standing_variation` | present in at least one covered earlier sample |
+| `de_novo` | earlier samples covered, the allele in none of them |
+| `de_novo_below_detection` | a few earlier reads, under the detection bar |
+| `new_strain` | (with strain verdicts) de novo, but in a MAG whose strain was replaced in that comparison x group: the allele most likely arrived with the new strain |
+| `not_present_later` | no covered later sample of the group shows it |
+| `baseline_not_covered` | no earlier sample deep enough to judge |
+
+The first four are verdicts. With strain turnover on, every allele is joined to its MAG's verdict for that period: a within-group allele reads the group it rose in, and a between-group allele reads both groups and takes the dirtier arm. A MAG never classified is `unverified` (`strain_status = not_in_strain_table`).
+
+Summary: one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the four verdicts). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
 
 ## File Format Notes
 

@@ -74,6 +74,7 @@ class TestQualityControl(unittest.TestCase):
 
         # Pre-inverted MAG -> contigs index (mirrors what main() builds)
         from collections import defaultdict
+
         mag_to_contigs = defaultdict(set)
         for contig, mid in self.contig_to_mag.items():
             mag_to_contigs[mid].add(contig)
@@ -124,8 +125,11 @@ class TestProcessMagFiles(TestQualityControl):
                 result["breadth"], 4 / 1000000
             )  # 4 positions with coverage >= 1
             self.assertEqual(
-                result["average_coverage"], 50.0 / 1000000
-            )  # sum of coverage / genome size
+                result["average_coverage_including_zeros"], 50.0 / 1000000
+            )  # sum of coverage / genome size: the QC threshold's number
+            self.assertEqual(
+                result["average_coverage"], 12.5
+            )  # mean over the 4 covered positions: the site filter's reference
             self.assertEqual(
                 result["median_coverage"], 12.5
             )  # median of [10, 20, 5, 15]
@@ -143,6 +147,32 @@ class TestProcessMagFiles(TestQualityControl):
                 result["breadth_threshold_passed"] or result["breadth_fail_reason"]
             )
 
+        finally:
+            os.unlink(profile_file)
+
+    def test_coverage_threshold_uses_the_including_zeros_number(self):
+        """One deep position in a 1 Mb genome: the covered-sites mean (100x)
+        would sail past a 1x threshold, the genome-size mean (0.0001x) must
+        not.  The threshold tests the latter; both are reported."""
+        profile_data = {
+            "contig": ["contig1"],
+            "position": [1],
+            "gene_id": ["gene1"],
+            "total_coverage": [100.0],
+        }
+        profile_file = self.create_temp_profile(profile_data)
+        try:
+            result = process_mag_files(("sample1", profile_file, "MAG001", 0.0, 1.0))
+            self.assertEqual(result["average_coverage"], 100.0)
+            self.assertEqual(
+                result["average_coverage_including_zeros"], 100.0 / 1000000
+            )
+            self.assertTrue(result["breadth_threshold_passed"])
+            self.assertFalse(result["coverage_threshold_passed"])
+            self.assertIn("including zeros", result["coverage_fail_reason"])
+            # std over the whole genome is built from the including-zeros mean
+            expected_std = np.sqrt(100.0**2 / 1000000 - (100.0 / 1000000) ** 2)
+            self.assertAlmostEqual(result["coverage_std_including_zeros"], expected_std)
         finally:
             os.unlink(profile_file)
 
@@ -453,6 +483,7 @@ class TestAggregation(TestQualityControl):
                     0.0002,
                 ],  # Should be included in aggregation
                 "average_coverage": [50.0, 60.0],
+                "average_coverage_including_zeros": [0.05, 0.06],
                 "median_coverage": [45.0, 55.0],
                 "median_coverage_including_zeros": [0.1, 0.2],
                 "coverage_std": [15.0, 20.0],
@@ -472,6 +503,12 @@ class TestAggregation(TestQualityControl):
 
         # Verify breadth_genome aggregation
         self.assertAlmostEqual(result.iloc[0]["breadth_genome_mean"], 0.00015)
+
+        # Both coverage numbers are aggregated (decision 2026-10-15)
+        self.assertIn("average_coverage_including_zeros_mean", result.columns)
+        self.assertAlmostEqual(
+            result.iloc[0]["average_coverage_including_zeros_mean"], 0.055
+        )
 
         # Test overall aggregation
         result_overall = aggregate_mag_stats(df_results, "MAG001", [], overall=True)

@@ -45,10 +45,22 @@ from alleleflux.scripts.utilities.utilities import extract_mag_id, load_mag_mapp
 
 logger = logging.getLogger(__name__)
 
-# Output header for profile TSVs (mapq_scores removed in optimization)
+# Output header for profile TSVs: nine columns.  total_coverage is A+C+G+T.
+# Ambiguous (N) calls are tallied by the parser only to tell "no base at all"
+# from "a base it could not read"; the tally is discarded, so N is neither a
+# column nor part of total_coverage (decision 2026-10-15: every reader defines
+# coverage as the four-base sum, so the file says the same thing).  Profiles
+# written by earlier versions (with an N column) are not supported: re-profile.
 PROFILE_HEADER = [
-    "contig", "position", "ref_base", "total_coverage",
-    "A", "C", "G", "T", "N", "gene_id",
+    "contig",
+    "position",
+    "ref_base",
+    "total_coverage",
+    "A",
+    "C",
+    "G",
+    "T",
+    "gene_id",
 ]
 
 
@@ -93,8 +105,12 @@ def _parse_mpileup_bases(ref_base, bases_str):
 
       N / n         Ambiguous base call — the sequencer could not resolve the
                     base. This IS a real base call (unlike * / < / >) and is
-                    counted in the n counter. Example: "N" means one read
-                    where the base could not be determined.
+                    counted in the n counter so the parser can tell "no base
+                    at all" from "a base it could not read". The n counter is
+                    diagnostic only: build_profile_row() leaves it out of
+                    total_coverage and the profile has no N column.
+                    Example: "N" means one read where the base could not be
+                    determined.
 
       ^<q>          Start of a read segment. The character immediately after ^
                     encodes the read's mapping quality as a flag character, but
@@ -130,10 +146,11 @@ def _parse_mpileup_bases(ref_base, bases_str):
                     Common in RNA-seq data; can appear in metagenomics too.
                     Example: "<" — one read skipping over this position.
 
-    The distinction between N (counted) and * / < / > (not counted):
+    The distinction between N (counted here) and * / < / > (not counted):
       - N means a read WAS here and tried to call a base but failed (ambiguous)
       - * / < / > mean a read WAS here but has NO base at all to report
     Counting * / < / > as N would incorrectly imply an attempted base call.
+    Neither reaches the profile: coverage there is A+C+G+T.
 
     Parameters
     ----------
@@ -147,7 +164,8 @@ def _parse_mpileup_bases(ref_base, bases_str):
     -------
     tuple of (int, int, int, int, int)
         Counts of (A, C, G, T, N) observed across all reads at this position.
-        N counts ambiguous base calls only — not deletions or reference skips.
+        N counts ambiguous base calls only — not deletions or reference skips —
+        and is not written to the profile (see build_profile_row).
 
     Example
     -------
@@ -178,19 +196,19 @@ def _parse_mpileup_bases(ref_base, bases_str):
     while i < length:
         ch = bases_str[i]
 
-        if ch == '^':
+        if ch == "^":
             # Read start marker. The next character is a mapping quality flag
             # for this read — NOT a base call and NOT part of the mapq_str
             # column. Skip both ^ and the following char.
             i += 2
             continue
 
-        if ch == '$':
+        if ch == "$":
             # Read end marker. Single character, no base associated.
             i += 1
             continue
 
-        if ch in ('+', '-'):
+        if ch in ("+", "-"):
             # Indel annotation. Format: +<n><bases> or -<n><bases>.
             # This token is attached to the preceding base call and describes
             # what happens AFTER this position. The preceding base was already
@@ -204,10 +222,10 @@ def _parse_mpileup_bases(ref_base, bases_str):
                 num_str.append(bases_str[i])
                 i += 1
             # Step 3: skip over that many inserted/deleted base characters
-            i += int(''.join(num_str)) if num_str else 0
+            i += int("".join(num_str)) if num_str else 0
             continue
 
-        if ch in ('*', '<', '>'):
+        if ch in ("*", "<", ">"):
             # * = deletion placeholder: read is present but has a gap here.
             # < / > = reference skip: read spans this position via a splice
             #         or alignment gap and has no base here.
@@ -220,18 +238,18 @@ def _parse_mpileup_bases(ref_base, bases_str):
         # Any letter is an explicit base call; lowercase = reverse strand,
         # uppercase = forward strand. Uppercasing normalizes both to the same.
         # N/n is an ambiguous call — the sequencer could not resolve the base.
-        if ch in ('.', ','):
+        if ch in (".", ","):
             b = ref_base
         else:
             b = ch.upper()
 
-        if b == 'A':
+        if b == "A":
             a += 1
-        elif b == 'C':
+        elif b == "C":
             c += 1
-        elif b == 'G':
+        elif b == "G":
             g += 1
-        elif b == 'T':
+        elif b == "T":
             t += 1
         else:
             # Catches N/n (ambiguous base calls) and any unexpected characters.
@@ -241,6 +259,36 @@ def _parse_mpileup_bases(ref_base, bases_str):
         i += 1
 
     return a, c, g, t, n
+
+
+def build_profile_row(contig, pos, ref_base, bases_str):
+    """Turn one mpileup line's base string into one profile row, or None.
+
+    The row is ``(contig, pos, ref_base, total_coverage, A, C, G, T)`` with
+    ``total_coverage = A + C + G + T`` — one field per PROFILE_HEADER column
+    except gene_id, which the writer appends after its gene lookup.
+
+    Ambiguous calls (N) are NOT part of total_coverage and have no column:
+    every reader (QC, the allele-frequency cache, the ANI loader) defines
+    coverage as the four-base sum, so a position where every read is an N
+    carries no information and is skipped (None), exactly like a position
+    where every read is a deletion or reference skip.
+
+    Examples
+    --------
+    >>> build_profile_row("ctg1", 5, "A", "..N")
+    ('ctg1', 5, 'A', 2, 2, 0, 0, 0)
+    >>> build_profile_row("ctg1", 5, "A", "NNn") is None
+    True
+    """
+    a, c, g, t, _n = _parse_mpileup_bases(ref_base, bases_str)
+    total = a + c + g + t
+    if total == 0:
+        # Every read here was a deletion, a reference skip or an ambiguous
+        # call: no base to report, so no row (old profiles wrote N-only rows
+        # with total_coverage = N; readers drop those for the same reason).
+        return None
+    return (contig, pos, ref_base, total, a, c, g, t)
 
 
 def process_contig_mpileup(args_tuple):
@@ -283,14 +331,21 @@ def process_contig_mpileup(args_tuple):
             double-counting by passing samtools --ignore-overlaps flag.
 
     Returns:
-        list: List of tuples (contig, position, ref_base, total, A, C, G, T, N)
-              Example: [('MRGM_0050_contig_2', 88966, 'T', 2, 0, 0, 2, 0, 0)]
+        list: List of tuples (contig, position, ref_base, total, A, C, G, T)
+              with total = A + C + G + T (see build_profile_row).
+              Example: [('MRGM_0050_contig_2', 88966, 'T', 2, 0, 0, 2, 0)]
     """
     # Unpack the single args_tuple argument (required by multiprocessing.Pool.imap
     # which can only pass one argument per worker call).
-    (contig_name, bam_path, fasta_path,
-     ignore_orphans, min_base_quality, min_mapping_quality,
-     ignore_overlaps) = args_tuple
+    (
+        contig_name,
+        bam_path,
+        fasta_path,
+        ignore_orphans,
+        min_base_quality,
+        min_mapping_quality,
+        ignore_overlaps,
+    ) = args_tuple
 
     # Build the samtools mpileup command.
     # Flags are chosen to exactly match the original pysam.pileup() call:
@@ -303,11 +358,16 @@ def process_contig_mpileup(args_tuple):
     #                       ignore_overlaps=False, i.e., when we WANT double-counting)
     #   -A              : include orphan reads (only when ignore_orphans=False)
     cmd = [
-        "samtools", "mpileup",
-        "--region", contig_name,
-        "--min-MQ", str(min_mapping_quality),
-        "--min-BQ", str(min_base_quality),
-        "--max-depth", "100000000",
+        "samtools",
+        "mpileup",
+        "--region",
+        contig_name,
+        "--min-MQ",
+        str(min_mapping_quality),
+        "--min-BQ",
+        str(min_base_quality),
+        "--max-depth",
+        "100000000",
         "--no-BAQ",
     ]
     if not ignore_overlaps:
@@ -326,8 +386,11 @@ def process_contig_mpileup(args_tuple):
         # bufsize=1 enables line-buffered mode so we get lines as soon as samtools
         # writes them rather than waiting for a full OS buffer to fill.
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
         # Each line from samtools mpileup has 6 tab-separated columns:
         #   [0] contig name
@@ -337,30 +400,32 @@ def process_contig_mpileup(args_tuple):
         #   [4] base calls string  (e.g. '..A,t' — see _parse_mpileup_bases)
         #   [5] base quality scores (Phred+33 ASCII, one char per read)
         for line in proc.stdout:
-            parts = line.rstrip('\n').split('\t')
+            parts = line.rstrip("\n").split("\t")
             if len(parts) < 6:
                 continue
             contig = parts[0]
-            pos = int(parts[1]) - 1  # Convert 1-based pos to 0-based to match pysam convention
+            pos = (
+                int(parts[1]) - 1
+            )  # Convert 1-based pos to 0-based to match pysam convention
             ref_base = parts[2].upper()
-            depth = int(parts[3])    # Raw read depth before any filtering
+            depth = int(parts[3])  # Raw read depth before any filtering
 
             # Skip positions with no coverage (samtools emits these when --no-output-del is absent)
             if depth == 0:
                 continue
 
-            bases_str = parts[4]   # Encoded base calls (see _parse_mpileup_bases docstring)
+            bases_str = parts[
+                4
+            ]  # Encoded base calls (see _parse_mpileup_bases docstring)
 
-            # Decode the mpileup base encoding into per-base counts.
-            # This is the Python replacement for the inner pysam per-read loop.
-            a, c, g, t, n = _parse_mpileup_bases(ref_base, bases_str)
-            total = a + c + g + t + n
-
-            # Skip positions where every read was a deletion or reference skip
-            # (total would be 0 even though depth > 0 in those edge cases).
-            if total == 0:
+            # Decode the mpileup base encoding into one profile row.  This is
+            # the Python replacement for the inner pysam per-read loop.  None
+            # means every read here was a deletion, reference skip or N call
+            # (depth > 0 but nothing to report), so the position is skipped.
+            row = build_profile_row(contig, pos, ref_base, bases_str)
+            if row is None:
                 continue
-            contig_data.append((contig, pos, ref_base, total, a, c, g, t, n))
+            contig_data.append(row)
 
         # Wait for the samtools process to finish and check its exit code.
         proc.wait()
@@ -459,9 +524,6 @@ def extract_contigID(gene_id):
     return contig
 
 
-
-
-
 def build_mag_gene_trees(genes_df, mag_mapping_dict, mags_to_include=None):
     """Pre-compute a {mag_id: {contig: IntervalTree}} dict at startup.
 
@@ -539,9 +601,7 @@ def build_mag_gene_trees(genes_df, mag_mapping_dict, mags_to_include=None):
         mag_trees[mag_id][contig].addi(row["start"], row["end"] + 1, row["gene_id"])
 
     elapsed = time.time() - start_time
-    logger.info(
-        f"Built gene trees for {len(mag_trees)} MAGs in {elapsed:.2f} seconds"
-    )
+    logger.info(f"Built gene trees for {len(mag_trees)} MAGs in {elapsed:.2f} seconds")
     return mag_trees
 
 
@@ -568,9 +628,6 @@ def lookup_gene(contig_trees, contig, position):
         if overlaps:
             return ",".join(interval.data for interval in overlaps)
     return None
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -744,9 +801,7 @@ def main():
             mag_name = extract_mag_id(contig, mag_mapping_dict)
             mag_contigs[mag_name].append(contig)
 
-    logger.info(
-        f"MAGs with at least one covered contig: {len(mag_contigs):,}"
-    )
+    logger.info(f"MAGs with at least one covered contig: {len(mag_contigs):,}")
 
     # Load all gene annotations once and build trees upfront (Change 3).
     # The genes_df is a large DataFrame (~2.1 M rows for the mouse gut database).
@@ -761,8 +816,8 @@ def main():
     mag_gene_trees = build_mag_gene_trees(
         genes_df, mag_mapping_dict, mags_to_include=set(mag_contigs.keys())
     )
-    del genes_df   # Free ~500 MB before the pool starts
-    gc.collect()   # Force immediate deallocation rather than waiting for GC
+    del genes_df  # Free ~500 MB before the pool starts
+    gc.collect()  # Force immediate deallocation rather than waiting for GC
 
     sampleID = args.sampleID if args.sampleID else Path(args.bam_path).stem
 
@@ -787,9 +842,15 @@ def main():
             # Pack all arguments into tuples because multiprocessing.Pool.imap
             # can only pass a single argument to each worker function.
             contig_args = [
-                (contig, args.bam_path, args.fasta_path,
-                 args.ignore_orphans, args.min_base_quality,
-                 args.min_mapping_quality, args.ignore_overlaps)
+                (
+                    contig,
+                    args.bam_path,
+                    args.fasta_path,
+                    args.ignore_orphans,
+                    args.min_base_quality,
+                    args.min_mapping_quality,
+                    args.ignore_overlaps,
+                )
                 for contig in contigs
             ]
 
@@ -806,8 +867,8 @@ def main():
             # in order — it lets workers return results as soon as they finish,
             # reducing idle time when contigs have unequal depth.
             has_data = False
-            with gzip.open(outPath, 'wt', newline='') as f:
-                writer = csv.writer(f, delimiter='\t')
+            with gzip.open(outPath, "wt", newline="") as f:
+                writer = csv.writer(f, delimiter="\t")
                 writer.writerow(PROFILE_HEADER)
 
                 for contig_data in pool.imap_unordered(

@@ -345,8 +345,11 @@ class TestProcessPositionsMagSample(TestPositionsQC):
             # Check breadth_genome: 4 positions with coverage / 1M genome = 0.000004
             self.assertAlmostEqual(result["breadth_genome"], 4 / 1000000)
 
-            # Check average_coverage (filtered): (10 + 20 + 40) / 3 = 23.33...
+            # Check average_coverage (covered-sites mean of the filtered rows)
+            # and the including-zeros mean over the 3 wanted positions: all
+            # three are covered, so both are (10 + 20 + 40) / 3 = 23.33...
             self.assertAlmostEqual(result["average_coverage"], 70.0 / 3)
+            self.assertAlmostEqual(result["average_coverage_including_zeros"], 70.0 / 3)
 
             # Check average_coverage_genome: 100 / 1M
             self.assertAlmostEqual(result["average_coverage_genome"], 100.0 / 1000000)
@@ -392,8 +395,12 @@ class TestProcessPositionsMagSample(TestPositionsQC):
             # Check breadth_genome (should still be calculated)
             self.assertAlmostEqual(result["breadth_genome"], 2.0 / 1000000)
 
-            # Check average_coverage: 30 / 1M
-            self.assertAlmostEqual(result["average_coverage"], 30.0 / 1000000)
+            # Check average_coverage_including_zeros: 30 / 1M; the covered-sites
+            # mean is 30 / 2 (decision 2026-10-15: two numbers, two jobs)
+            self.assertAlmostEqual(
+                result["average_coverage_including_zeros"], 30.0 / 1000000
+            )
+            self.assertAlmostEqual(result["average_coverage"], 15.0)
 
         finally:
             os.unlink(profile_file)

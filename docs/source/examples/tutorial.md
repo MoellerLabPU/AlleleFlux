@@ -521,9 +521,8 @@ parameters, so no treatment effect is present at the read level.
 | `contig` | string | Contig identifier |
 | `position` | int | 0-based genomic position |
 | `ref_base` | string | Reference base (A/C/G/T) |
-| `total_coverage` | int | Total read depth |
-| `A`, `C`, `G`, `T` | int | Per-base read counts |
-| `N` | int | Ambiguous base count |
+| `total_coverage` | int | Read depth, equal to `A + C + G + T` |
+| `A`, `C`, `G`, `T` | int | Per-base read counts (ambiguous `N` calls are not counted) |
 | `gene_id` | string | Overlapping gene ID (empty if intergenic) |
 
 ### Sample metadata

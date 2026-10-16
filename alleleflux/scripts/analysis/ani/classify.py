@@ -11,15 +11,16 @@ saying how many of that sample's reads reported A, C, G or T there.  Rows come
 straight from the A, C, G, T columns of the sample's profile file
 (``{sample}_{MAG}_profiled.tsv.gz``).  A real line from SLG1007's profile::
 
-    contig        position  ref  total_coverage  A  C  G  T  N
-    k141_102792   0         G    4               2  0  1  1  0
+    contig        position  ref  total_coverage  A  C  G  T
+    k141_102792   0         G    4               2  0  1  1
 
     its counts row:  [2, 0, 1, 1]   "2 reads say A, 0 say C, 1 says G, 1 says T"
 
 ``counts1`` and ``counts2`` are the SAME genome positions for two different
 samples, row-aligned by the engine: row i of both arrays is one (contig, position),
-seen through each sample's reads.  ``coverage`` is the row sum A + C + G + T (the
-profile's ``total_coverage`` also counts N calls, so it is NOT used).  ``model``
+seen through each sample's reads.  ``coverage`` is the row sum A + C + G + T,
+computed by the loader (the same number the profile's ``total_coverage``
+holds; summing here keeps the loader independent of that column).  ``model``
 is ``null_model.build_error_model``'s lookup (coverage -> minimum reads).
 ``min_freq`` is the population floor on allele frequency -- see
 ``presence_matrix`` for what it means and why it exists.

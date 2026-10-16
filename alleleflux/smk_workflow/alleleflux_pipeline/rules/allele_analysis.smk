@@ -47,6 +47,15 @@ rule allele_freq_cache:
             "{timepoint}",
             "{mag}_{timepoint}_allele_frequency.parquet",
         ),
+        # Written by the same command, next to the parquet: one row per sample,
+        # what the site-depth filter removed.  Declared so site_depth_filter_summary
+        # can depend on it.
+        sidecar=os.path.join(
+            OUTDIR,
+            "allele_freq_cache",
+            "{timepoint}",
+            "{mag}_{timepoint}_allele_frequency_site_depth_filter.tsv",
+        ),
     params:
         data_type=DATA_TYPE,
         # For longitudinal data the script filters the QC file's rows to this
@@ -57,6 +66,9 @@ rule allele_freq_cache:
             if DATA_TYPE == "longitudinal"
             else ""
         ),
+        # Per-site depth filter flags, shared with pairwise_ani and
+        # baseline_presence so every profile reader filters identically.
+        site_filter_args=SITE_DEPTH_FILTER_ARGS,
     threads: get_threads("allele_freq_cache")
     retries: get_retries("allele_freq_cache")
     resources:
@@ -70,6 +82,7 @@ rule allele_freq_cache:
             --qc_files {input.qc_files} \
             {params.timepoint_arg} \
             --data_type {params.data_type} \
+            {params.site_filter_args} \
             --output_path {output.cache} \
             --cpus {threads}
         """
@@ -148,4 +161,30 @@ rule allele_analysis:
             {params.permuted_metadata} \
             {params.disable_zero_diff_filtering} \
             {params.save_archival_changes}
+        """
+
+
+localrules:
+    site_depth_filter_summary,
+
+
+rule site_depth_filter_summary:
+    """Run-once rollup of every cache sidecar: one run-level table (one row per
+    sample x MAG x timepoint) and a per-MAG x timepoint rollup with the fraction
+    of covered positions the site-depth filter removed.  Reads a few small TSVs,
+    so it runs on the head node (localrules)."""
+    input:
+        # Every sidecar this run's cache jobs write (checkpoint-dependent, hence
+        # an input function); the rule waits for all of them.
+        lambda wildcards: generate_allele_freq_cache_sidecar_targets(),
+    output:
+        summary=os.path.join(OUTDIR, "site_depth_filter", "site_depth_filter_summary.tsv"),
+        by_mag=os.path.join(OUTDIR, "site_depth_filter", "site_depth_filter_summary_by_mag.tsv"),
+    params:
+        cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
+    shell:
+        """
+        alleleflux-site-filter-summary \
+            --cache_dir {params.cache_dir} \
+            --output {output.summary}
         """

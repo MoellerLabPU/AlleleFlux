@@ -109,12 +109,15 @@ def process_mag_files(args):
         - breadth: Calculated breadth of coverage (proportion of genome covered)
         - breadth_threshold_passed: Boolean indicating if breadth threshold was met
         - breadth_fail_reason: Explanation if threshold not met
-        - average_coverage: Average coverage depth across genome
+        - average_coverage: Mean depth over COVERED positions (MIDAS2's mean genome
+          coverage; the per-site depth filter's reference, computed once here)
+        - average_coverage_including_zeros: Summed depth / genome size (absent
+          positions as zero); the number the coverage threshold tests
         - coverage_threshold_passed: Boolean indicating if coverage threshold was met
         - coverage_fail_reason: Explanation if threshold not met
-        - median_coverage: Median of per-position total_coverage
+        - median_coverage: Median of per-position coverage (A+C+G+T)
         - median_coverage_including_zeros: Median coverage including zeros for absent positions
-        - coverage_std: Standard deviation of per-position total_coverage (population, ddof=0)
+        - coverage_std: Standard deviation of per-position coverage (population, ddof=0)
         - coverage_std_including_zeros: Population std over entire genome length (absent positions as zero)
         - length_weighted_coverage: Length-weighted mean: Σ(mean_cov_contig * contig_length)/Σ(contig_length)
 
@@ -148,8 +151,12 @@ def process_mag_files(args):
         "breadth": None,
         "breadth_threshold_passed": False,
         "breadth_fail_reason": "",
-        # Coverage metrics (grouped together)
+        # Coverage metrics (grouped together).  Two numbers, two jobs
+        # (2026-10-15): average_coverage = covered-sites mean, the site-depth
+        # filter's reference; average_coverage_including_zeros = genome-size
+        # mean, the QC threshold's number.
         "average_coverage": None,
+        "average_coverage_including_zeros": None,
         "coverage_threshold_passed": False,
         "coverage_fail_reason": "",
         # Additional coverage statistics
@@ -172,19 +179,25 @@ def process_mag_files(args):
         result["breadth_fail_reason"] = msg
         return result
 
-    # Load and validate profile (filter to MAG's contigs)
+    # Load and validate profile (filter to MAG's contigs).  total_coverage is
+    # A+C+G+T by construction (profile_mags.build_profile_row), the same number
+    # the site-depth filter later divides by, so it is read as is.
     try:
         df = load_and_validate_profile(
-                profile_fPath, mag_id, sample_id, contig_to_mag,
-                usecols=["contig", "total_coverage"],
-                mag_contigs=mag_to_contigs.get(mag_id),
-            )
+            profile_fPath,
+            mag_id,
+            sample_id,
+            contig_to_mag,
+            usecols=["contig", "total_coverage"],
+            mag_contigs=mag_to_contigs.get(mag_id),
+        )
     except ValueError as e:
         # Profile empty after filtering to MAG contigs
         result["breadth_fail_reason"] = str(e)
         return result
 
-    # Check for zero coverage values in the profile (should not exist)
+    # Check for zero coverage values in the profile (should not exist: the
+    # writer skips positions with no A/C/G/T read)
     zero_coverage_count = (df["total_coverage"] == 0).sum()
     if zero_coverage_count > 0:
         logger.warning(
@@ -209,11 +222,15 @@ def process_mag_files(args):
     # Only update with non-None values (filters out average_coverage_genome)
     result.update({k: v for k, v in coverage_metrics.items() if v is not None})
 
-    # Get average coverage for use in median/std calculations
-    avg_cov = result["average_coverage"]
+    # The including-zeros mean is the one the whole-genome std formula and the
+    # QC threshold are defined on (the covered-sites mean would pass any
+    # threshold for a genome with a few deep positions).
+    avg_cov_including_zeros = result["average_coverage_including_zeros"]
 
     # Calculate median and standard deviation metrics
-    median_std_metrics = calculate_median_and_std_metrics(df, denom, avg_cov)
+    median_std_metrics = calculate_median_and_std_metrics(
+        df, denom, avg_cov_including_zeros
+    )
     result.update(median_std_metrics)
 
     # Calculate length-weighted coverage
@@ -236,7 +253,7 @@ def process_mag_files(args):
 
     # Check coverage threshold (cascades from breadth)
     coverage_passed, coverage_fail_reason = check_coverage_threshold(
-        avg_cov,
+        avg_cov_including_zeros,
         avg_cov_genome=None,
         threshold=coverage_threshold,
         breadth_passed=breadth_passed,
@@ -613,14 +630,17 @@ def main():
     # at the sample level, giving perfect work-stealing across MAGs of
     # different sizes.
     combined_metadata = {}  # sample_id -> metadata row
-    mag_sample_ids = {}     # mag_id -> [sample_id, ...] (for post-pool grouping)
-    all_sample_tasks = []   # flat list fed to pool.imap_unordered
+    mag_sample_ids = {}  # mag_id -> [sample_id, ...] (for post-pool grouping)
+    all_sample_tasks = []  # flat list fed to pool.imap_unordered
 
     for metadata_file in metadata_files:
         mag_id = metadata_file.stem.split("_metadata")[0]
         metadata_dict, sample_tuples = load_mag_metadata_file(
-            metadata_file, mag_id,
-            args.breadth_threshold, args.coverage_threshold, args.data_type,
+            metadata_file,
+            mag_id,
+            args.breadth_threshold,
+            args.coverage_threshold,
+            args.data_type,
         )
         if not sample_tuples:
             raise ValueError(
@@ -641,6 +661,7 @@ def main():
     # Invert contig_to_mag once so load_and_validate_profile can do an O(1)
     # membership test per unique contig instead of an O(all_contigs) map per row.
     from collections import defaultdict
+
     mag_to_contigs_global = defaultdict(set)
     for contig, mid in contig_to_mag_global.items():
         mag_to_contigs_global[mid].add(contig)
@@ -664,12 +685,16 @@ def main():
         ),
     ) as pool:
         with logging_redirect_tqdm():
-            sample_results = list(tqdm(
-                pool.imap_unordered(process_mag_files, all_sample_tasks, chunksize=4),
-                total=len(all_sample_tasks),
-                desc="Processing samples",
-                unit="sample",
-            ))
+            sample_results = list(
+                tqdm(
+                    pool.imap_unordered(
+                        process_mag_files, all_sample_tasks, chunksize=4
+                    ),
+                    total=len(all_sample_tasks),
+                    desc="Processing samples",
+                    unit="sample",
+                )
+            )
 
     # ── Group results by MAG and run per-MAG aggregation ──
     # This is pure pandas on small DataFrames — fast in the main process.
@@ -683,7 +708,10 @@ def main():
 
     for mag_id in tqdm(mag_sample_ids, desc="Aggregating MAGs", unit="MAG"):
         group_df, group_time_df, overall_df = _aggregate_mag(
-            mag_id, results_by_mag[mag_id], args.output_dir, args.data_type,
+            mag_id,
+            results_by_mag[mag_id],
+            args.output_dir,
+            args.data_type,
         )
         if group_df is not None:
             all_group.append(group_df)

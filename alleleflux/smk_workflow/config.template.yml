@@ -180,6 +180,12 @@ quality_control:
   breadth_threshold: 0.1          # Minimum coverage breadth (fraction of genome covered)
   coverage_threshold: 1           # Minimum average coverage depth to pass QC
   disable_zero_diff_filtering: False  # Keep sites with zero difference between groups
+  site_depth_filter:              # Per-site depth filter (MIDAS2's rule), applied per sample before any analysis reads a profile
+    enabled: True                 # False = profiles are used as-is
+    site_depth: 0                 # Minimum depth at a position; 0 = no floor (MIDAS2 uses 5)
+    site_ratio: 3.0               # Drop a position whose depth exceeds this x the sample's mean coverage over covered positions (QC's average_coverage)
+    min_allele_reads: 0           # A base count must exceed this to count toward depth; 0 = every read counts (MIDAS2 uses 2)
+    keep_original_counts: True    # True = kept positions keep their original counts; False = MIDAS2 behaviour (counts <= min_allele_reads zeroed downstream)
 
 # Profiling Parameters
 # --------------------

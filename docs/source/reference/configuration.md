@@ -157,8 +157,15 @@ Parameters for filtering samples and positions.
 |-----------|---------|-------------|
 | `min_sample_num` | `4` | Minimum number of samples per group required for statistical tests. MAGs with fewer valid samples are marked as ineligible. |
 | `breadth_threshold` | `0.1` | Minimum breadth of coverage (fraction of genome with ≥1x coverage). Range: 0.0-1.0. |
-| `coverage_threshold` | `1.0` | Minimum average coverage depth required. Samples below this are excluded. |
+| `coverage_threshold` | `1.0` | Minimum `average_coverage_including_zeros` (summed depth / genome size, uncovered positions as zero) required. Samples below this are excluded. The covered-sites `average_coverage` is not a QC criterion. |
 | `disable_zero_diff_filtering` | `false` | If true, keep positions where allele frequencies do not change. By default, constant positions are filtered out. |
+| `site_depth_filter.enabled` | `true` | Per-site depth filter, applied to each sample's profile before the allele-frequency cache, pairwise ANI and baseline presence read it. MIDAS2's rule: a position is dropped for a sample when its depth is far above that sample's typical depth for the genome, the signature of reads from another organism piling onto a conserved stretch. |
+| `site_depth_filter.site_depth` | `0` | Minimum depth at a position; `0` = no floor. MIDAS2 uses 5. |
+| `site_depth_filter.site_ratio` | `3.0` | Drop a position whose depth exceeds this multiple of the sample's mean coverage over covered positions (QC's `average_coverage`). MIDAS2's default. |
+| `site_depth_filter.min_allele_reads` | `0` | A base count must exceed this to count toward the position's depth; `0` = every read counts. MIDAS2 uses 2. |
+| `site_depth_filter.keep_original_counts` | `true` | Kept positions keep their original counts. `false` = MIDAS2 behaviour: base counts not exceeding `min_allele_reads` are zeroed for everything downstream. |
+
+MIDAS2's own settings are `site_depth: 5`, `min_allele_reads: 2`, `keep_original_counts: false`. What the filter removed is reported per sample in the cache sidecars and summarised by `alleleflux-site-filter-summary` (see [Output Files](outputs.md)).
 
 **Example:**
 

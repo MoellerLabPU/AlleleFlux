@@ -58,6 +58,9 @@ rule baseline_presence:
         # default when the config does not say.  own_group needs a within-group
         # summary family (single_sample / lmm_across_time); the CLI refuses the rest.
         baseline_scope=config["analysis"].get("baseline_presence", {}).get("baseline_scope", "comparison"),
+        # Per-site depth filter flags, shared with allele_freq_cache and
+        # pairwise_ani so every profile reader filters identically.
+        site_filter_args=SITE_DEPTH_FILTER_ARGS,
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -89,5 +92,46 @@ rule baseline_presence:
             --fdr {params.fdr} \
             --min_base_quality {params.min_base_quality} \
             {params.turnover_arg} \
+            {params.site_filter_args} \
             --cpus {threads}
+        """
+
+
+def _rising_origin_inputs(wildcards):
+    """Every comparison's rising table, plus the classification when strain turnover runs.
+
+    Reads the same list generate_rising_origin_targets gates on, so the rule is
+    only ever scheduled with at least one rising table to read.
+    """
+    return generate_rising_table_targets() + generate_replacement_classification_targets()
+
+
+# Seconds of pandas over small tables: not worth a cluster job.
+localrules:
+    rising_origin,
+
+
+rule rising_origin:
+    """Standing vs de novo for the alleles that rose, over every comparison: one
+    tidy summary.  With strain turnover on, de novo in a replaced MAG becomes
+    new_strain (the run's classification table, its configured voter floor)."""
+    input:
+        _rising_origin_inputs,
+    output:
+        alleles=os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_alleles.tsv"),
+        summary=os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_summary.tsv"),
+    params:
+        rising_dir=os.path.join(OUTDIR, "baseline_presence"),
+        output_dir=os.path.join(OUTDIR, "baseline_presence", "rising_origin"),
+        classification_arg=(
+            f"--classification {get_replacement_classification_path()}"
+            if config["analysis"].get("use_strain_turnover", False)
+            else ""
+        ),
+    shell:
+        """
+        alleleflux-rising-origin \
+            --rising_dir {params.rising_dir} \
+            --output_dir {params.output_dir} \
+            {params.classification_arg}
         """

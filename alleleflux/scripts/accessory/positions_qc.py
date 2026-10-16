@@ -234,7 +234,9 @@ def process_positions_mag_sample(args):
         - breadth_genome: Breadth across entire genome (always genome denominator)
         - breadth_threshold_passed: Based on genome-wide breadth
         - breadth_fail_reason: Explanation if failed
-        - average_coverage: Average coverage for filtered positions
+        - average_coverage: mean depth over the COVERED filtered positions
+        - average_coverage_including_zeros: summed depth of the filtered positions
+          / denominator (depends on mode; absent positions as zero)
         - average_coverage_genome: Average coverage across entire genome
         - coverage_threshold_passed: Based on genome-wide coverage
         - coverage_fail_reason: Explanation if failed
@@ -260,8 +262,10 @@ def process_positions_mag_sample(args):
         "breadth_genome": None,
         "breadth_threshold_passed": False,
         "breadth_fail_reason": "",
-        # Coverage metrics (grouped together)
+        # Coverage metrics (grouped together); see calculate_coverage_metrics
+        # for the two averages (covered-sites mean vs including zeros)
         "average_coverage": None,
+        "average_coverage_including_zeros": None,
         "average_coverage_genome": None,
         "coverage_threshold_passed": False,
         "coverage_fail_reason": "",
@@ -344,9 +348,12 @@ def process_positions_mag_sample(args):
     )
     result.update(coverage_metrics)
 
-    # Calculate median and std metrics (for filtered positions)
-    avg_cov = result["average_coverage"]
-    median_std_metrics = calculate_median_and_std_metrics(filtered_df, denom, avg_cov)
+    # Calculate median and std metrics (for filtered positions).  The
+    # whole-series std needs the including-zeros mean over the same denominator.
+    avg_cov_including_zeros = result["average_coverage_including_zeros"]
+    median_std_metrics = calculate_median_and_std_metrics(
+        filtered_df, denom, avg_cov_including_zeros
+    )
     result.update(median_std_metrics)
 
     # Check genome-wide thresholds
@@ -365,7 +372,7 @@ def process_positions_mag_sample(args):
 
     # Check coverage threshold (always uses genome-wide metric when filtering)
     coverage_passed, coverage_fail_reason = check_coverage_threshold(
-        result["average_coverage"],
+        result["average_coverage_including_zeros"],
         result["average_coverage_genome"],
         coverage_threshold,
         breadth_passed,

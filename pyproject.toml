@@ -64,6 +64,7 @@ alleleflux-pairwise-ani = "alleleflux.scripts.analysis.ani.pairwise_ani:main"
 alleleflux-strain-turnover = "alleleflux.scripts.analysis.ani.strain_turnover:main"
 alleleflux-replacement-classification = "alleleflux.scripts.analysis.ani.replacement_classification:main"
 alleleflux-baseline-presence = "alleleflux.scripts.analysis.baseline_presence:main"
+alleleflux-rising-origin = "alleleflux.scripts.analysis.rising_origin:main"
 
 # Preprocessing scripts
 alleleflux-metadata = "alleleflux.scripts.preprocessing.mag_metadata:main"
@@ -94,6 +95,7 @@ alleleflux-add-bam-path = "alleleflux.scripts.accessory.add_bam_path_to_metadata
 alleleflux-coverage-allele-stats = "alleleflux.scripts.accessory.coverage_and_allele_stats:main"
 alleleflux-list-mags = "alleleflux.scripts.accessory.list_mags:main"
 alleleflux-positions-qc = "alleleflux.scripts.accessory.positions_qc:main"
+alleleflux-site-filter-summary = "alleleflux.scripts.accessory.site_depth_filter_summary:main"
 alleleflux-copy-profiles = "alleleflux.scripts.accessory.copy_mag_profiles:main"
 
 # Visualization scripts

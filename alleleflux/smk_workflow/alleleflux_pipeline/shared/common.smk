@@ -1163,6 +1163,58 @@ def presence_rule_params():
 PRESENCE_RULE = presence_rule_params()
 
 
+def site_depth_filter_params():
+    """``quality_control.site_depth_filter`` with the house defaults for every missing key.
+
+    The per-site depth filter (MIDAS2's rule, applied per sample before any
+    reader uses a profile): drop a position whose depth exceeds ``site_ratio``
+    times the sample's covered-sites mean coverage (QC's ``average_coverage``).
+    House defaults (2026-10-15): no floor, ratio 3.0, every read counts toward
+    depth, kept positions keep their original counts.  MIDAS2's own values are
+    ``site_depth: 5, min_allele_reads: 2, keep_original_counts: false``.
+
+    Example: with no block in the config ->
+    ``{"enabled": True, "site_depth": 0, "site_ratio": 3.0,
+    "min_allele_reads": 0, "keep_original_counts": True}``.
+    """
+    block = (config.get("quality_control", {}) or {}).get("site_depth_filter", {}) or {}
+    return {
+        "enabled": bool(block.get("enabled", True)),
+        "site_depth": int(block.get("site_depth", 0)),
+        "site_ratio": float(block.get("site_ratio", 3.0)),
+        "min_allele_reads": int(block.get("min_allele_reads", 0)),
+        "keep_original_counts": bool(block.get("keep_original_counts", True)),
+    }
+
+
+def site_depth_filter_cli_args():
+    """The filter flags, identical on every CLI that reads profiles.
+
+    allele_freq_cache, pairwise_ani and baseline_presence all take the flags
+    ``add_site_depth_filter_args`` defines; building the string here, once,
+    is what keeps the cache and the ANI/baseline tables filtered identically.
+
+    Example: defaults -> ``"--site_depth 0 --site_ratio 3.0 --min_allele_reads 0"``;
+    ``enabled: false`` adds ``--disable_site_depth_filter`` in front and
+    ``keep_original_counts: false`` adds ``--zero_low_counts`` at the end.
+    """
+    p = site_depth_filter_params()
+    parts = []
+    if not p["enabled"]:
+        parts.append("--disable_site_depth_filter")
+    parts.append(
+        f"--site_depth {p['site_depth']} --site_ratio {p['site_ratio']} "
+        f"--min_allele_reads {p['min_allele_reads']}"
+    )
+    if not p["keep_original_counts"]:
+        parts.append("--zero_low_counts")
+    return " ".join(parts)
+
+
+# Evaluated once at parse time; the three profile-reading rules reference it in params.
+SITE_DEPTH_FILTER_ARGS = site_depth_filter_cli_args()
+
+
 def get_strain_turnover_output_path(mag_wildcard="{mag}"):
     """Per-MAG strain-turnover table (the strain_turnover rule's primary output); OUTDIR, like ANI."""
     return os.path.join(OUTDIR, "strain_turnover", f"{mag_wildcard}_strain_turnover.tsv")

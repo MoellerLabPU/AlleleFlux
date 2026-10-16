@@ -16,8 +16,10 @@ import pandas as pd
 from intervaltree import IntervalTree
 
 from alleleflux.scripts.analysis.profile_mags import (
+    PROFILE_HEADER,
     _parse_mpileup_bases,
     build_mag_gene_trees,
+    build_profile_row,
     extract_contigID,
     lookup_gene,
     map_genes,
@@ -65,6 +67,7 @@ class TestMapGenes(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir)
 
     def test_valid_prodigal_fasta(self):
@@ -118,13 +121,18 @@ class TestLookupGene(unittest.TestCase):
     """Tests for the lookup_gene helper."""
 
     def setUp(self):
-        self.genes_df = pd.DataFrame({
-            "gene_id": ["gene_1", "gene_2"],
-            "contig": ["contig_1", "contig_1"],
-            "start": [100, 300], "end": [200, 400],
-        })
+        self.genes_df = pd.DataFrame(
+            {
+                "gene_id": ["gene_1", "gene_2"],
+                "contig": ["contig_1", "contig_1"],
+                "start": [100, 300],
+                "end": [200, 400],
+            }
+        )
         mag_mapping = {"contig_1": "MAG_A"}
-        self.trees = build_mag_gene_trees(self.genes_df, mag_mapping, mags_to_include=None)["MAG_A"]
+        self.trees = build_mag_gene_trees(
+            self.genes_df, mag_mapping, mags_to_include=None
+        )["MAG_A"]
 
     def test_hit(self):
         result = lookup_gene(self.trees, "contig_1", 150)
@@ -143,11 +151,14 @@ class TestBuildMagGeneTrees(unittest.TestCase):
     """Tests for build_mag_gene_trees (Change 3)."""
 
     def test_basic(self):
-        genes_df = pd.DataFrame({
-            "gene_id": ["g1", "g2", "g3"],
-            "contig": ["c1", "c2", "c3"],
-            "start": [100, 200, 300], "end": [200, 300, 400],
-        })
+        genes_df = pd.DataFrame(
+            {
+                "gene_id": ["g1", "g2", "g3"],
+                "contig": ["c1", "c2", "c3"],
+                "start": [100, 200, 300],
+                "end": [200, 300, 400],
+            }
+        )
         mapping = {"c1": "MAG_A", "c2": "MAG_A", "c3": "MAG_B"}
         trees = build_mag_gene_trees(genes_df, mapping, mags_to_include=None)
         self.assertIn("MAG_A", trees)
@@ -156,20 +167,27 @@ class TestBuildMagGeneTrees(unittest.TestCase):
         self.assertEqual(len(trees["MAG_B"]), 1)  # c3
 
     def test_unmapped_contigs_skipped(self):
-        genes_df = pd.DataFrame({
-            "gene_id": ["g1"], "contig": ["c_unknown"],
-            "start": [100], "end": [200],
-        })
+        genes_df = pd.DataFrame(
+            {
+                "gene_id": ["g1"],
+                "contig": ["c_unknown"],
+                "start": [100],
+                "end": [200],
+            }
+        )
         trees = build_mag_gene_trees(genes_df, {}, mags_to_include=None)
         self.assertEqual(len(trees), 0)
 
     def test_mags_to_include_filter(self):
         """Only MAGs in mags_to_include get trees; others are skipped."""
-        genes_df = pd.DataFrame({
-            "gene_id": ["g1", "g2", "g3"],
-            "contig": ["c1", "c2", "c3"],
-            "start": [100, 200, 300], "end": [200, 300, 400],
-        })
+        genes_df = pd.DataFrame(
+            {
+                "gene_id": ["g1", "g2", "g3"],
+                "contig": ["c1", "c2", "c3"],
+                "start": [100, 200, 300],
+                "end": [200, 300, 400],
+            }
+        )
         mapping = {"c1": "MAG_A", "c2": "MAG_A", "c3": "MAG_B"}
         trees = build_mag_gene_trees(genes_df, mapping, mags_to_include={"MAG_A"})
         self.assertIn("MAG_A", trees)
@@ -236,11 +254,6 @@ class TestParseMpileupBases(unittest.TestCase):
         self.assertEqual((a, c, g, t, n), (2, 0, 0, 0, 0))
 
 
-
-
-
-
-
 class TestIntegrationScenarios(unittest.TestCase):
     """Integration-style tests combining multiple functions."""
 
@@ -249,6 +262,7 @@ class TestIntegrationScenarios(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir)
 
     def test_full_pipeline_simple(self):
@@ -265,7 +279,9 @@ ATGAAA
         self.assertEqual(len(genes_df), 2)
 
         mag_mapping = {"contig_1_gene": "MAG_A", "contig_2": "MAG_A"}
-        mag_gene_trees = build_mag_gene_trees(genes_df, mag_mapping, mags_to_include=None)
+        mag_gene_trees = build_mag_gene_trees(
+            genes_df, mag_mapping, mags_to_include=None
+        )
         contig_trees = mag_gene_trees["MAG_A"]
 
         self.assertIn("contig_1_gene", contig_trees)
@@ -296,6 +312,43 @@ class TestDataFrameConsistency(unittest.TestCase):
             self.assertTrue(pd.api.types.is_integer_dtype(genes_df["end"]))
         finally:
             os.unlink(fasta_path)
+
+
+class TestProfileRowWithoutN(unittest.TestCase):
+    """Profiles carry nine columns: N calls are neither a column nor part of
+    total_coverage (decision 2026-10-15: coverage = A+C+G+T everywhere)."""
+
+    def test_header_has_no_n_column(self):
+        self.assertNotIn("N", PROFILE_HEADER)
+        self.assertEqual(
+            PROFILE_HEADER,
+            [
+                "contig",
+                "position",
+                "ref_base",
+                "total_coverage",
+                "A",
+                "C",
+                "G",
+                "T",
+                "gene_id",
+            ],
+        )
+
+    def test_total_coverage_excludes_ambiguous_calls(self):
+        # two reference matches and one N: total is 2, not 3, and no N field
+        row = build_profile_row("ctg1", 5, "A", "..N")
+        self.assertEqual(row, ("ctg1", 5, "A", 2, 2, 0, 0, 0))
+        # one field per header column except gene_id, which the writer appends
+        self.assertEqual(len(row) + 1, len(PROFILE_HEADER))
+
+    def test_all_n_position_is_skipped(self):
+        # a position where every read is an ambiguous call carries no base
+        # information; the writer never emits it (it used to, with total = N)
+        self.assertIsNone(build_profile_row("ctg1", 5, "A", "NNn"))
+
+    def test_deletions_only_position_is_skipped(self):
+        self.assertIsNone(build_profile_row("ctg1", 5, "A", "**"))
 
 
 if __name__ == "__main__":

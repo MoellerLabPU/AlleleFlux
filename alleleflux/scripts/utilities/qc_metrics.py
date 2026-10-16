@@ -239,12 +239,26 @@ def calculate_coverage_metrics(
     total_coverage_sum_genome: Optional[float] = None,
 ) -> Dict[str, Optional[float]]:
     """
-    Calculate average_coverage and optionally average_coverage_genome.
+    Calculate the two average-coverage numbers (and average_coverage_genome under a filter).
 
-    Average coverage is calculated as the sum of all coverage values divided by
-    the denominator. When using a position filter, two metrics are calculated:
-    - average_coverage: based on filtered positions (denominator depends on mode)
-    - average_coverage_genome: based on entire genome (always uses genome size)
+    Two numbers, two jobs (decision 2026-10-15, agreed with the collaborator):
+
+    - average_coverage: mean depth over the COVERED positions of ``df``
+      (sum of total_coverage / number of rows with total_coverage > 0).  This
+      is MIDAS2's "mean genome coverage" and the ONLY reference the per-site
+      depth filter divides by; it is computed once here and read from the QC
+      table by every consumer.  0.0 when no position is covered.
+    - average_coverage_including_zeros: sum of total_coverage / ``denom``, i.e.
+      the mean over every position of the genome (absent positions count as
+      zero).  This is the number the QC coverage threshold tests.
+
+    When using a position filter a third number is added:
+    - average_coverage_genome: genome-wide sum / genome size (always uses genome size)
+
+    Worked example: depths 10, 20, 30 at three positions of a 1 Mb genome ->
+    average_coverage = 60 / 3 = 20.0 (the sample sits at ~20x where it is
+    covered), average_coverage_including_zeros = 60 / 1,000,000 = 0.00006
+    (the genome is essentially absent from the sample).
 
     Parameters
     ----------
@@ -264,21 +278,32 @@ def calculate_coverage_metrics(
     -------
     dict
         Dictionary with keys:
-        - 'average_coverage': Average coverage for filtered positions
+        - 'average_coverage': mean over covered positions of ``df``
+        - 'average_coverage_including_zeros': sum(total_coverage) / denom
         - 'average_coverage_genome': Average coverage across entire genome
           (only when using_filter=True)
 
     Notes
     -----
-    - Average coverage = sum(total_coverage) / denominator
-    - Returns np.nan if denominator is 0
+    - average_coverage_including_zeros is np.nan if the denominator is 0;
+      average_coverage does not use the denominator and is 0.0 when no row
+      has coverage > 0
     - average_coverage_genome is None when not using a filter
     """
-    # Calculate average coverage for filtered positions
     total_coverage_sum = df["total_coverage"].sum()
-    avg_cov = total_coverage_sum / denom if denom > 0 else np.nan
+    # Covered-sites mean, as in MIDAS2: only rows with depth > 0 count.  The
+    # profiler never writes a zero-depth row, so n_covered is normally len(df);
+    # the guard keeps the mean well defined on a hand-made or empty frame.
+    n_covered = int((df["total_coverage"] > 0).sum())
+    avg_cov_covered = float(total_coverage_sum / n_covered) if n_covered > 0 else 0.0
+    # Genome-size mean: the number the QC threshold tests.
+    avg_cov_including_zeros = total_coverage_sum / denom if denom > 0 else np.nan
 
-    result = {"average_coverage": avg_cov, "average_coverage_genome": None}
+    result = {
+        "average_coverage": avg_cov_covered,
+        "average_coverage_including_zeros": avg_cov_including_zeros,
+        "average_coverage_genome": None,
+    }
 
     # Calculate genome-wide average coverage when using position filter
     if using_filter:
@@ -295,7 +320,7 @@ def calculate_coverage_metrics(
 
 
 def calculate_median_and_std_metrics(
-    df: pd.DataFrame, denom: int, avg_cov: float
+    df: pd.DataFrame, denom: int, avg_cov_including_zeros: float
 ) -> Dict[str, float]:
     """
     Calculate median and standard deviation metrics.
@@ -312,8 +337,11 @@ def calculate_median_and_std_metrics(
         Profile dataframe with 'total_coverage' column
     denom : int
         Total number of positions (for including zeros calculations)
-    avg_cov : float
-        Average coverage (pre-calculated, used for std calculation)
+    avg_cov_including_zeros : float
+        The INCLUDING-ZEROS average (sum of coverage / denom), pre-calculated.
+        It is the mean of the whole-genome series whose population std is
+        computed here, so the covered-sites ``average_coverage`` must not be
+        passed: E[X^2] - E[X]^2 only holds with the matching mean.
 
     Returns
     -------
@@ -367,9 +395,9 @@ def calculate_median_and_std_metrics(
 
     # Population std including zeros across entire genome length
     # Uses formula: Var(X) = E[X²] - E[X]²
-    if denom > 0 and np.isfinite(avg_cov):
+    if denom > 0 and np.isfinite(avg_cov_including_zeros):
         ex2 = float((df["total_coverage"] ** 2).sum()) / denom
-        var = max(ex2 - (avg_cov * avg_cov), 0.0)
+        var = max(ex2 - (avg_cov_including_zeros * avg_cov_including_zeros), 0.0)
         result["coverage_std_including_zeros"] = float(np.sqrt(var))
 
     return result
@@ -531,7 +559,7 @@ def check_breadth_threshold(
 
 
 def check_coverage_threshold(
-    avg_cov: float,
+    avg_cov_including_zeros: float,
     avg_cov_genome: Optional[float],
     threshold: float,
     breadth_passed: bool,
@@ -547,13 +575,14 @@ def check_coverage_threshold(
     2. If breadth check passed, then evaluate coverage threshold
 
     The coverage metric checked depends on whether a positions filter is active:
-    - No filter: checks avg_cov against threshold
+    - No filter: checks avg_cov_including_zeros against threshold
     - With filter: ALWAYS checks avg_cov_genome against threshold
 
     Parameters
     ----------
-    avg_cov : float
-        Average coverage value (filtered or full, depending on context)
+    avg_cov_including_zeros : float
+        The including-zeros average coverage (sum over the genome size), the
+        number the threshold is defined on
     avg_cov_genome : float or None
         Genome-wide average coverage (only available when using filter)
     threshold : float
@@ -591,9 +620,11 @@ def check_coverage_threshold(
         cov_to_check = avg_cov_genome
         metric_name = "Average coverage (genome)"
     else:
-        # No filter: check regular average coverage
-        cov_to_check = avg_cov
-        metric_name = "Average coverage"
+        # No filter: the genome-size mean (absent positions as zero).  The
+        # covered-sites average_coverage is NOT a QC criterion: a genome with
+        # a handful of deep positions would pass any threshold on it.
+        cov_to_check = avg_cov_including_zeros
+        metric_name = "Average coverage (including zeros)"
 
     # Breadth passed, now check coverage threshold
     if cov_to_check < threshold:
@@ -648,7 +679,7 @@ def aggregate_mag_stats(
     Metrics aggregated (when present in input):
     - subjects_per_group, replicates_per_group, paired_replicates_per_group
     - breadth, breadth_genome
-    - average_coverage, average_coverage_genome
+    - average_coverage, average_coverage_including_zeros, average_coverage_genome
     - median_coverage, median_coverage_including_zeros
     - length_weighted_coverage
     - coverage_std, coverage_std_including_zeros
@@ -686,6 +717,7 @@ def aggregate_mag_stats(
             "breadth_genome",
             # Coverage metrics (grouped together)
             "average_coverage",
+            "average_coverage_including_zeros",
             "average_coverage_genome",
             # Additional coverage statistics
             "median_coverage",

@@ -97,6 +97,13 @@ def get_final_pipeline_outputs(wildcards):
     if not config["analysis"].get("allele_analysis_only", False):
         final_targets.extend(generate_significant_sites_summary_targets())
 
+    # Run-once standing-vs-de-novo tally over every comparison's rising table
+    # (and the strain classification, when on): after the loop, like the rollup.
+    final_targets.extend(generate_rising_origin_targets())
+    # Run-once rollup of what the site-depth filter removed, over every cache
+    # sidecar: after the loop, like the rising-origin summary.
+    final_targets.extend(generate_site_depth_filter_summary_targets())
+
     # Pairwise conANI/popANI, strain turnover, replacement classification: one
     # target per TESTED MAG (union over every comparison and enabled test), so the
     # universe comes from the eligibility checkpoints and these belong here, after

@@ -1,11 +1,11 @@
 """Tests for profile discovery, the QC sample gate, and dense count arrays.
 
 Fixtures mirror the production schema exactly: profiles are written with the same
-header ``profile_mags.py`` emits (both the current one and the older one that still
-carries a ``mapq_scores`` column, which older profiles have), and
+nine-column header ``profile_mags.py`` emits, and
 QC fixtures use the real column names from ``quality_control.py`` -- including a
 numeric group label, to guard the "numeric labels silently become int64" trap.
 """
+
 import gzip
 import os
 import shutil
@@ -23,23 +23,22 @@ from alleleflux.scripts.analysis.ani.profile_io import (
     qc_passing_samples,
 )
 
-HEADER = "contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tN\tgene_id\n"
-HEADER_WITH_MAPQ = (
-    "contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tN\tmapq_scores\tgene_id\n"
-)
+# the nine-column format profile_mags.py writes (no N column since 2026-10-15)
+HEADER = "contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tgene_id\n"
 
 
 def _write_profile(path, rows, header=HEADER):
-    """rows: (contig, position, ref, A, C, G, T, N).
+    """rows: (contig, position, ref, A, C, G, T, n).
 
-    ``total_coverage`` is written as A+C+G+T+N, exactly as profile_mags.py does --
-    the loader must NOT use it.
+    ``n`` is kept in the row tuples for brevity of the call sites but is never
+    written: the format has no N column and ``total_coverage`` is A+C+G+T,
+    exactly as profile_mags.py writes it.
     """
     with_mapq = "mapq_scores" in header
     with gzip.open(path, "wt") as handle:
         handle.write(header)
         for contig, pos, ref, a, c, g, t, n in rows:
-            fields = [contig, pos, ref, a + c + g + t + n, a, c, g, t, n]
+            fields = [contig, pos, ref, a + c + g + t, a, c, g, t]
             if with_mapq:
                 fields.append("40,40")
             fields.append("")  # gene_id, empty for intergenic
@@ -89,18 +88,8 @@ class TestLoadProfile(unittest.TestCase):
         )
         row = table.iloc[0]
         self.assertEqual([int(row[b]) for b in "ACGT"], [10, 1, 2, 3])
-        # coverage is 10+1+2+3 = 16, NOT the file's total_coverage of 21 (5 Ns).
+        # coverage is 10+1+2+3 = 16
         self.assertEqual(int(row["coverage"]), 16)
-
-    def test_tolerates_the_older_header_with_mapq_scores(self):
-        """Profiles written before the samtools-mpileup optimisation carry an extra
-        mapq_scores column (older real files do); usecols must
-        shrug it off."""
-        path = os.path.join(self.tmp, "old.tsv.gz")
-        _write_profile(path, [("ctg1", 7, "G", 0, 0, 9, 1, 0)], header=HEADER_WITH_MAPQ)
-        table = load_profile(path)
-        self.assertEqual(int(table.loc[0, "G"]), 9)
-        self.assertEqual(int(table.loc[0, "coverage"]), 10)
 
     def test_gene_id_opt_in(self):
         """gene_id rides along only on request: the ANI comparison never needs it,
@@ -126,7 +115,9 @@ class TestLoadProfile(unittest.TestCase):
         """A file without one of the count columns is not a profile."""
         path = os.path.join(self.tmp, "bad.tsv.gz")
         with gzip.open(path, "wt") as handle:
-            handle.write("contig\tposition\tref_base\ttotal_coverage\tC\tG\tT\tN\tgene_id\n")
+            handle.write(
+                "contig\tposition\tref_base\ttotal_coverage\tC\tG\tT\tN\tgene_id\n"
+            )
             handle.write("ctg1\t0\tA\t4\t4\t0\t0\t0\t\n")
         with self.assertRaises(ValueError):
             load_profile(path)
@@ -143,11 +134,15 @@ class TestQcPassingSamples(unittest.TestCase):
 
     def test_keeps_only_passing_samples(self):
         qc = os.path.join(self.tmp, f"{self.MAG}_QC.tsv")
-        _write_qc(qc, self.MAG, [
-            ("S1", "fat", "m1", "pre", 1, True),
-            ("S2", "control", "m2", "pre", 1, False),
-            ("S3", "fat", "m3", "end", 1, True),
-        ])
+        _write_qc(
+            qc,
+            self.MAG,
+            [
+                ("S1", "fat", "m1", "pre", 1, True),
+                ("S2", "control", "m2", "pre", 1, False),
+                ("S3", "fat", "m3", "end", 1, True),
+            ],
+        )
         got = qc_passing_samples([qc], self.MAG)
         self.assertEqual(sorted(got["sample_id"]), ["S1", "S3"])
 
@@ -165,10 +160,14 @@ class TestQcPassingSamples(unittest.TestCase):
         """DRIDO's groups are 20/40 and subject ids are numbers; if pandas sniffs
         them as int64 every downstream string comparison silently matches nothing."""
         qc = os.path.join(self.tmp, "numeric_QC.tsv")
-        _write_qc(qc, self.MAG, [
-            ("S1", 20, 533, 4, 1, True),
-            ("S2", 40, 545, 4, 1, True),
-        ])
+        _write_qc(
+            qc,
+            self.MAG,
+            [
+                ("S1", 20, 533, 4, 1, True),
+                ("S2", 40, 545, 4, 1, True),
+            ],
+        )
         got = qc_passing_samples([qc], self.MAG)
         self.assertEqual(sorted(got["group"]), ["20", "40"])
         self.assertEqual(sorted(got["subjectID"]), ["533", "545"])
@@ -204,12 +203,14 @@ class TestDenseContigCounts(unittest.TestCase):
 
     def test_places_rows_and_leaves_gaps_at_zero(self):
         """An absent position means zero coverage, not missing data."""
-        table = self._load([("ctg1", 0, "A", 4, 0, 0, 0, 0), ("ctg1", 3, "C", 0, 6, 0, 0, 0)])
+        table = self._load(
+            [("ctg1", 0, "A", 4, 0, 0, 0, 0), ("ctg1", 3, "C", 0, 6, 0, 0, 0)]
+        )
         dense = dense_contig_counts(table, {"ctg1": 5})
         self.assertEqual(dense["ctg1"].shape, (5, 4))
-        self.assertEqual(int(dense["ctg1"][0, 0]), 4)      # A at position 0
-        self.assertEqual(int(dense["ctg1"][3, 1]), 6)      # C at position 3
-        self.assertEqual(int(dense["ctg1"][1].sum()), 0)   # uncovered position
+        self.assertEqual(int(dense["ctg1"][0, 0]), 4)  # A at position 0
+        self.assertEqual(int(dense["ctg1"][3, 1]), 6)  # C at position 3
+        self.assertEqual(int(dense["ctg1"][1].sum()), 0)  # uncovered position
         self.assertEqual(dense["ctg1"].dtype, np.uint16)
 
     def test_every_mag_contig_gets_an_array_even_if_uncovered(self):
@@ -228,7 +229,9 @@ class TestDenseContigCounts(unittest.TestCase):
     def test_rejects_contigs_the_mag_does_not_own(self):
         """A profile row on a contig outside the MAG's mapping means the mapping and
         the profiles are out of sync -- fail loud, don't silently drop data."""
-        table = self._load([("ctg1", 0, "A", 4, 0, 0, 0, 0), ("ghost", 0, "A", 4, 0, 0, 0, 0)])
+        table = self._load(
+            [("ctg1", 0, "A", 4, 0, 0, 0, 0), ("ghost", 0, "A", 4, 0, 0, 0, 0)]
+        )
         with self.assertRaises(ValueError):
             dense_contig_counts(table, {"ctg1": 5})
 
@@ -254,18 +257,26 @@ class TestContigLengthsForMag(unittest.TestCase):
                 offset = 0
                 for contig, seq in records:
                     offset += len(contig) + 2  # ">" + name + newline
-                    handle.write(f"{contig}\t{len(seq)}\t{offset}\t{len(seq)}\t{len(seq) + 1}\n")
+                    handle.write(
+                        f"{contig}\t{len(seq)}\t{offset}\t{len(seq)}\t{len(seq) + 1}\n"
+                    )
                     offset += len(seq) + 1
         return path
 
     def test_reads_lengths_from_the_fai_index(self):
         """The .fai beside the FASTA is a 1.5 MB text file versus a 0.5 GB parse."""
-        fasta = self._fasta("ref.fa", [("c1", "ACGT"), ("c2", "ACGTAC"), ("other", "AC")], with_fai=True)
-        self.assertEqual(contig_lengths_for_mag(fasta, self.mapping, "MAG_1"), {"c1": 4, "c2": 6})
+        fasta = self._fasta(
+            "ref.fa", [("c1", "ACGT"), ("c2", "ACGTAC"), ("other", "AC")], with_fai=True
+        )
+        self.assertEqual(
+            contig_lengths_for_mag(fasta, self.mapping, "MAG_1"), {"c1": 4, "c2": 6}
+        )
 
     def test_falls_back_to_parsing_the_fasta(self):
         fasta = self._fasta("noindex.fa", [("c1", "ACGT"), ("c2", "ACGTAC")])
-        self.assertEqual(contig_lengths_for_mag(fasta, self.mapping, "MAG_1"), {"c1": 4, "c2": 6})
+        self.assertEqual(
+            contig_lengths_for_mag(fasta, self.mapping, "MAG_1"), {"c1": 4, "c2": 6}
+        )
 
     def test_raises_when_mag_absent_from_mapping(self):
         fasta = self._fasta("r2.fa", [("c1", "ACGT")])
@@ -281,3 +292,51 @@ class TestContigLengthsForMag(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoadProfileSiteFilter(unittest.TestCase):
+    """load_profile applies the per-site depth filter when given one."""
+
+    # four 10x rows, a 40x row and a 90x pile: profile mean (40 + 40 + 90) / 6 = 28.33
+    ROWS = [("ctg1", p, "A", 10, 0, 0, 0, 0) for p in range(1, 5)] + [
+        ("ctg1", 5, "A", 40, 0, 0, 0, 0),
+        ("ctg1", 6, "A", 90, 0, 0, 0, 0),
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.path = os.path.join(self.tmp, "pile.tsv.gz")
+        _write_profile(self.path, self.ROWS)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_none_means_unfiltered(self):
+        table = load_profile(self.path)
+        self.assertNotIn("site_depth_filter", table.attrs)
+        self.assertEqual(len(table), 6)
+
+    def test_filter_with_qc_mean_drops_the_pile(self):
+        from alleleflux.scripts.utilities.site_depth_filter import SiteDepthFilter
+
+        table = load_profile(self.path, site_filter=SiteDepthFilter(), mean_cov=24.0)
+        self.assertEqual(sorted(table["position"].tolist()), [1, 2, 3, 4, 5])
+        summary = table.attrs["site_depth_filter"]
+        self.assertEqual(summary["n_removed_high"], 1)
+        self.assertEqual(summary["mean_coverage"], 24.0)
+        self.assertEqual(summary["mean_source"], "qc")
+        # coverage column is still A+C+G+T of the kept rows
+        self.assertEqual(int(table.loc[table["position"] == 5, "coverage"].item()), 40)
+
+    def test_filter_without_a_mean_uses_the_profile_mean(self):
+        """No QC mean on hand (baseline presence): the covered-sites mean of this
+        very profile is the same number QC would have stored for it."""
+        from alleleflux.scripts.utilities.site_depth_filter import SiteDepthFilter
+
+        table = load_profile(self.path, site_filter=SiteDepthFilter())
+        summary = table.attrs["site_depth_filter"]
+        self.assertAlmostEqual(summary["mean_coverage"], 170 / 6)
+        self.assertEqual(summary["mean_source"], "profile")
+        self.assertEqual(
+            sorted(table["position"].tolist()), [1, 2, 3, 4, 5]
+        )  # 90 / 28.3 = 3.2

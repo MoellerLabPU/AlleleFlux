@@ -52,11 +52,13 @@ handles this single-file case; there is no need to union across combinations.
 
 import argparse
 import logging
+import re
 import sys
 import time
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -67,6 +69,10 @@ from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
     process_mag_files,
 )
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.site_depth_filter import (
+    add_site_depth_filter_args,
+    site_depth_filter_from_args,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +195,7 @@ def main():
         default=cpu_count(),
         help="Worker processes for parallel profile loading.",
     )
+    add_site_depth_filter_args(parser)
 
     args = parser.parse_args()
     start_time = time.time()
@@ -251,17 +258,22 @@ def main():
 
     writer = None
     total_rows = 0
+    filter_summaries = []
+    site_filter = site_depth_filter_from_args(args)
+    logger.info(f"site-depth filter: {site_filter}")
     try:
         with Pool(
             processes=n_proc,
-            initializer=init_worker,     # broadcasts metadata_dict + DATA_TYPE
-            initargs=(metadata_dict, args.data_type),
+            initializer=init_worker,  # broadcasts metadata_dict + DATA_TYPE + the site filter
+            initargs=(metadata_dict, args.data_type, site_filter),
         ) as pool:
             for df in pool.imap_unordered(process_mag_files, sample_file_tuples):
                 # None means the worker logged an error for that sample;
                 # skip it and continue with the rest.
                 if df is None:
                     continue
+                # One summary row per sample for the sidecar written below.
+                filter_summaries.append(df.attrs["site_depth_filter"])
 
                 # Convert to Arrow.  Categorical pandas columns map to Arrow
                 # dictionary type; pyarrow then writes them as dictionary
@@ -303,6 +315,36 @@ def main():
 
     logger.info(f"Wrote {total_rows:,} rows to {output_path}")
     tmp_path.rename(output_path)
+
+    # Sidecar next to the cache: what the site-depth filter removed, per
+    # sample.  The run-level table is built from every sidecar by
+    # alleleflux-site-filter-summary.
+    sidecar = output_path.with_name(
+        re.sub(r"\.parquet$", "", output_path.name) + "_site_depth_filter.tsv"
+    )
+    summary_df = pd.DataFrame(filter_summaries)
+    summary_df.insert(
+        0, "timepoint", tp_label if args.data_type == "longitudinal" else ""
+    )
+    summary_df = summary_df[
+        [
+            "sample_id",
+            "mag_id",
+            "timepoint",
+            "mean_coverage",
+            "mean_coverage_after_filter",
+            "n_sites_covered",
+            "n_removed_low",
+            "n_removed_high",
+            "n_kept",
+        ]
+    ]
+    summary_df.to_csv(sidecar, sep="\t", index=False)
+    logger.info(
+        f"site-depth filter: {summary_df['n_removed_high'].sum():,} high-depth and "
+        f"{summary_df['n_removed_low'].sum():,} low-depth sites removed over "
+        f"{len(summary_df)} samples -> {sidecar}"
+    )
 
     logger.info(f"Total time: {time.time() - start_time:.2f} seconds")
 
