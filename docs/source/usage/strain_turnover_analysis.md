@@ -132,9 +132,13 @@ the same answer under all three rules.
 
 One job per `{timepoints}-{groups}` comparison, after the statistics.  It reads
 the comparison's `p_value_summary` file for one test family, keeps the
-significant sites (`threshold_column` ≤ `threshold`), finds the allele(s) that
-carried the minimum p-value (at a biallelic site both alleles tie, and both are
-reported with `n_alleles_tied_at_min_p = 2`), then opens **every** sample's
+significant sites (`threshold_column` ≤ `threshold`), picks the candidate
+allele(s) at each site (at a site where two bases were tested, both: their
+frequencies are complementary, so the two tests are one test and which base
+rose is decided later from the frequency change; at a site with three or four
+tested bases, only those whose own p-value is at or below the comparison's
+significance line, reported with `n_candidate_alleles`), then opens **every**
+sample's
 profile for both groups and both timepoints and gives each (site, allele,
 sample) one of four statuses:
 
@@ -195,7 +199,7 @@ Its columns come in two kinds:
   can disagree on purpose: a `de_novo_candidate` site can have a few baseline
   reads of the allele sitting in samples under the detection bar.
 
-**Rising table**, `..._baseline_presence_rising.tsv`: Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`, `other_group`, `other_group_frequency_change`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles tie on the p-value and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
+**Rising table**, `..._baseline_presence_rising.tsv`: Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles tie on the p-value and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
 
 "Rose" means `frequency_change > 0`, computed the way the within-group test
 measures change: each mouse sampled at both timepoints, later minus earlier
@@ -204,6 +208,14 @@ frequency; the mean per replicate; the mean over replicates.  `n_replicates` and
 asked about its own group only; a between-group site about both groups, so an
 allele that rose in both gets one row per group.  Alleles with no mouse sampled
 at both timepoints have no change and no row; the run log counts them.
+
+**Across comparisons:** `alleleflux-rising-origin` tallies every rising
+table into one summary (see [Outputs](../reference/outputs.md)).  With strain
+turnover on, a de novo allele in a MAG whose strain was replaced in that
+comparison × group is relabelled `new_strain`: it most likely arrived with the
+new strain rather than by mutation.  The workflow runs it once, after the last
+baseline-presence job, with the run's classification table; by hand it takes
+one table per voter floor.
 
 ### Worked example (synthetic)
 
