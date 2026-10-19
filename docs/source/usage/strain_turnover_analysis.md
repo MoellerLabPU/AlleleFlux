@@ -147,7 +147,7 @@ sample) one of four statuses:
 | `present` | covered, the allele clears the bar and `min_freq` |
 | `below_detection` | covered, some reads of the allele but under the bar |
 | `absent` | covered, zero reads of the allele |
-| `not_covered` | fewer than `min_cov` reads, or the MAG has no profile for the sample |
+| `not_covered` | fewer than `min_cov` reads, or the site-depth filter removed the position for that sample; the cache cannot tell the two apart (a `filtered` verdict is planned). Samples that failed QC for the MAG have no rows at all |
 
 The presence rule is the same one pairwise ANI uses, so the two agree by
 construction; the workflow passes the same `min_cov`, `min_freq` and `fdr`.
@@ -246,10 +246,10 @@ which pools both groups' `end` samples, calls G standing.
 
 ```bash
 # One MAG's ANI table (QC files: one per timepoint combination)
-alleleflux-pairwise-ani --mag MAG_A --profiles_dir run/longitudinal/profiles \
+alleleflux-pairwise-ani --mag MAG_A --cache_dir run/longitudinal/allele_freq_cache \
   --qc_files run/longitudinal/QC/QC_pre_end/MAG_A_QC.tsv \
   --fasta ref.fa --mag_mapping mapping.tsv --output_dir run/longitudinal/pairwise_ani \
-  --pairs transitions --transitions pre:end --cpus 8
+  --pairs transitions --transitions pre:end
 
 # Its strain verdicts, then the all-MAG classification
 alleleflux-strain-turnover --mag MAG_A --pair_table run/longitudinal/pairwise_ani/MAG_A_pairwise_ani.tsv \
@@ -260,8 +260,8 @@ alleleflux-replacement-classification --turnover_dir run/longitudinal/strain_tur
 # Baseline presence for one comparison and one test
 alleleflux-baseline-presence --run_dir run/longitudinal --comparison pre_end-fat_control \
   --summary two_sample_paired --test_type two_sample_paired_tTest \
-  --profiles_dir run/longitudinal/profiles --metadata metadata.tsv \
-  --fasta ref.fa --mag_mapping mapping.tsv --output_dir run/longitudinal/baseline_presence \
+  --cache_dir run/longitudinal/allele_freq_cache --metadata metadata.tsv \
+  --output_dir run/longitudinal/baseline_presence \
   --turnover_dir run/longitudinal/strain_turnover --cpus 8
 ```
 

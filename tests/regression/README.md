@@ -12,6 +12,14 @@ tests catch broken functions; this regression test catches broken
 **outputs** — including silent numerical drift, dropped CLI flags, and
 mis-wired Snakemake rules.
 
+A second, independent workflow test lives in `visualization/`:
+`test_visualization_workflow_e2e.py` runs the real visualization Snakemake
+workflow (metadata prep → terminal nucleotide → tracking → plotting) on a
+synthetic allele-frequency cache in a temp folder and asserts the planted
+numbers in every table it writes, ~50 s. It carries the same `regression`
+marker, so it is skipped by the fast loop and runs with
+`pytest tests/regression/`.
+
 The test runs in two flavours — once for the **longitudinal** data type and
 once for the **single** data type — so both code paths get coverage.
 

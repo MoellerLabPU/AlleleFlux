@@ -67,7 +67,7 @@ analysis:
     fdr: 1.0e-6                    # Tolerated chance that sequencing error alone explains an allele (popANI only)
     pairs: "within_subject"        # "within_subject" = every same-mouse pair across timepoints;
                                    # "transitions" = only same-mouse pairs matching timepoints_combinations
-                                   #   (what strain-turnover consumes; DRiDO: 970 pairs instead of 2,570);
+                                   #   (what strain-turnover consumes; one real cohort: 970 pairs instead of 2,570);
                                    # "all" = every pair (needed for between-mouse strain-sharing analyses)
     store_snp_locations: "within_subject"   # "none", "within_subject", or "all" (WARNING: "all" was 7.7 GB for 90 samples in inStrain)
 
@@ -166,8 +166,8 @@ permutation:
   # additional pair). Each sheet is a copy of input.metadata_path with the `group`
   # column shuffled; all other columns unchanged:
   #
-  #   permuted_metadata_dir: "/scratch/me/drido/my_permuted_sheets"
-  #     # /scratch/me/drido/my_permuted_sheets/
+  #   permuted_metadata_dir: "/scratch/me/my_permuted_sheets"
+  #     # /scratch/me/my_permuted_sheets/
   #     #   permuted_metadata_treatment_control.tsv
   #     #   permuted_metadata_drug_control.tsv      # if you also compare drug vs control
   #
@@ -312,11 +312,11 @@ resources:
 #   pairwise_ani:                  # Rule: pairwise_ani
 #                                  # Holds dense per-contig count arrays for every sample that
 #                                  # takes part in a pair: genome_length x 4 x 2 bytes x n_samples
-#                                  # (~1 GB for a 3 Mb MAG x 43 samples; ~48 GB for a 4.3 Mb DRiDO
-#                                  # MAG x 1,403 within-subject samples) plus pandas frames while
-#                                  # loading. Loading dominates (~3.6 s per profile) and scales
-#                                  # with threads_per_job (--cpus); comparing is ~1 s per pair.
-#     threads_per_job: 8
+#                                  # (~1 GB for a 3 Mb MAG x 43 samples; ~48 GB for a 4.3 Mb
+#                                  # MAG x 1,403 within-subject samples) plus one streamed cache
+#                                  # batch. Counts come from the allele-frequency cache (~0.1 s per
+#                                  # sample); comparing is ~1 s per pair. Single-threaded: the rule
+#                                  # ignores threads_per_job.
 #     mem_per_job: "64G"
 #     mem_step: "48G"
 #     time: "02:00:00"

@@ -103,8 +103,10 @@ alleleflux-cache-allele-freq \
    allele frequencies (`A_frequency`, `T_frequency`, `G_frequency`, `C_frequency`).
 4. Concatenates all per-sample DataFrames and writes a single Parquet file.
 
-The resulting Parquet has one row per `(contig, position, nucleotide, sample)`, with
-metadata columns including `group`, `subjectID`, `replicate`, `time`.
+The resulting Parquet has one row per `(contig, position, sample)` with the four base
+counts, `total_coverage`, the derived `*_frequency` columns, `gene_id`, `ref_base` (the
+reference genome's base at that position, kept for the dN/dS sanity check) and the
+metadata columns `group`, `subjectID`, `replicate`, `time`.
 
 ### Why one QC file covers all groups
 

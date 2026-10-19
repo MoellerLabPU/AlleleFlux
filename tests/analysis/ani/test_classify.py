@@ -14,6 +14,7 @@ of OUR rule, used for brute-force agreement.  ``_instrain_classify`` is a port o
 inStrain's row-wise rule, used to prove we never call a SNP inStrain would not
 (we differ only by being more careful: ties and shared non-top alleles).
 """
+
 import unittest
 
 import numpy as np
@@ -30,11 +31,11 @@ from alleleflux.scripts.analysis.ani.null_model import build_error_model
 MODEL = build_error_model(min_base_quality=30, fdr=1e-6)
 MIN_FREQ = 0.05
 
-# Real rows from SLG1007 vs SLG1102, MAG SLG1007_DASTool_bins_35 (profile order A,C,G,T).
-REAL_FIXED_1 = [2, 0, 28, 0]   # k141_17312:13581, 30x, majority G
-REAL_FIXED_2 = [5, 0, 1, 0]    # same position,    6x, majority A
-REAL_MIXED_1 = [0, 9, 0, 10]   # k141_105179:250,  19x, C and T both real
-REAL_MIXED_2 = [0, 8, 0, 6]    # same position,    14x
+# Real rows from two samples (S1 vs S2) of one MAG in a real cohort (profile order A,C,G,T).
+REAL_FIXED_1 = [2, 0, 28, 0]  # k141_17312:13581, 30x, majority G
+REAL_FIXED_2 = [5, 0, 1, 0]  # same position,    6x, majority A
+REAL_MIXED_1 = [0, 9, 0, 10]  # k141_105179:250,  19x, C and T both real
+REAL_MIXED_2 = [0, 8, 0, 6]  # same position,    14x
 
 
 def _cov(rows):
@@ -48,6 +49,7 @@ def _classify(c1, c2):
 
 
 # --------------------------------------------------------------------------- oracles
+
 
 def _oracle_consensus(counts):
     top = max(counts)
@@ -110,6 +112,7 @@ def _random_pairs(seed=0):
 
 # ------------------------------------------------------------------------ primitives
 
+
 class TestPrimitives(unittest.TestCase):
     def test_base_order_is_the_profile_order(self):
         """No reordering anywhere: the set-based rule never depends on column order."""
@@ -127,7 +130,9 @@ class TestPrimitives(unittest.TestCase):
         argmax would pick one by column order; keeping both means a tie can never
         manufacture a consensus SNP against a sample carrying either base."""
         counts = np.array([[3, 0, 3, 0]])
-        np.testing.assert_array_equal(consensus_mask(counts), [[True, False, True, False]])
+        np.testing.assert_array_equal(
+            consensus_mask(counts), [[True, False, True, False]]
+        )
 
     def test_consensus_of_an_empty_row_is_nothing(self):
         counts = np.array([[0, 0, 0, 0]])
@@ -181,6 +186,7 @@ class TestPrimitives(unittest.TestCase):
 
 # ------------------------------------------------------------------------ classifier
 
+
 class TestClassifyPositions(unittest.TestCase):
     def test_identical_samples_produce_no_snps(self):
         con, pop = _classify([20, 0, 0, 0], [20, 0, 0, 0])
@@ -226,20 +232,28 @@ class TestClassifyPositions(unittest.TestCase):
         self.assertTrue(bool(con[0]))
         self.assertFalse(bool(pop[0]))
         # ...and the inStrain port really does disagree, so the test is not vacuous.
-        self.assertEqual(_instrain_classify([60, 30, 10, 0], 100, [0, 5, 40, 55], 100), (True, True))
+        self.assertEqual(
+            _instrain_classify([60, 30, 10, 0], 100, [0, 5, 40, 55], 100), (True, True)
+        )
 
     def test_rejects_misaligned_inputs(self):
         with self.assertRaises(ValueError):
             classify_positions(
-                np.array([[20, 0, 0, 0], [20, 0, 0, 0]]), np.array([20, 20]),
-                np.array([[20, 0, 0, 0]]), np.array([20]),
-                MODEL, MIN_FREQ,
+                np.array([[20, 0, 0, 0], [20, 0, 0, 0]]),
+                np.array([20, 20]),
+                np.array([[20, 0, 0, 0]]),
+                np.array([20]),
+                MODEL,
+                MIN_FREQ,
             )
         with self.assertRaises(ValueError):
             classify_positions(
-                np.array([[20, 0, 0]]), np.array([20]),
-                np.array([[20, 0, 0]]), np.array([20]),
-                MODEL, MIN_FREQ,
+                np.array([[20, 0, 0]]),
+                np.array([20]),
+                np.array([[20, 0, 0]]),
+                np.array([20]),
+                MODEL,
+                MIN_FREQ,
             )
 
     def test_brute_force_agreement_with_literal_oracle(self):
@@ -250,11 +264,21 @@ class TestClassifyPositions(unittest.TestCase):
         cov_left, cov_right = _cov(left), _cov(right)
         con, pop = classify_positions(left, cov_left, right, cov_right, MODEL, MIN_FREQ)
 
-        self.assertTrue(bool(np.all(~pop | con)), "population SNP without consensus SNP")
+        self.assertTrue(
+            bool(np.all(~pop | con)), "population SNP without consensus SNP"
+        )
         for i in range(len(left)):
-            exp_con, exp_pop = _oracle_classify(left[i], int(cov_left[i]), right[i], int(cov_right[i]))
-            self.assertEqual(bool(con[i]), exp_con, msg=f"consensus row {i}: {left[i]} vs {right[i]}")
-            self.assertEqual(bool(pop[i]), exp_pop, msg=f"population row {i}: {left[i]} vs {right[i]}")
+            exp_con, exp_pop = _oracle_classify(
+                left[i], int(cov_left[i]), right[i], int(cov_right[i])
+            )
+            self.assertEqual(
+                bool(con[i]), exp_con, msg=f"consensus row {i}: {left[i]} vs {right[i]}"
+            )
+            self.assertEqual(
+                bool(pop[i]),
+                exp_pop,
+                msg=f"population row {i}: {left[i]} vs {right[i]}",
+            )
 
     def test_never_less_conservative_than_instrain(self):
         """Wherever we differ from inStrain's rule we call FEWER SNPs, never more:
@@ -266,9 +290,17 @@ class TestClassifyPositions(unittest.TestCase):
 
         n_con_removed = n_pop_removed = 0
         for i in range(len(left)):
-            their_con, their_pop = _instrain_classify(left[i], int(cov_left[i]), right[i], int(cov_right[i]))
-            self.assertFalse(bool(con[i]) and not their_con, msg=f"row {i}: extra consensus SNP {left[i]} vs {right[i]}")
-            self.assertFalse(bool(pop[i]) and not their_pop, msg=f"row {i}: extra population SNP {left[i]} vs {right[i]}")
+            their_con, their_pop = _instrain_classify(
+                left[i], int(cov_left[i]), right[i], int(cov_right[i])
+            )
+            self.assertFalse(
+                bool(con[i]) and not their_con,
+                msg=f"row {i}: extra consensus SNP {left[i]} vs {right[i]}",
+            )
+            self.assertFalse(
+                bool(pop[i]) and not their_pop,
+                msg=f"row {i}: extra population SNP {left[i]} vs {right[i]}",
+            )
             n_con_removed += int(their_con and not con[i])
             n_pop_removed += int(their_pop and not pop[i])
         # Shallow uniform vectors tie often, so the batch must contain real divergences.

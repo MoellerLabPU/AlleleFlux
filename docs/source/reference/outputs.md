@@ -101,7 +101,7 @@ Written next to every allele-frequency cache file: what the per-site depth filte
 | `n_removed_high` | int | Positions dropped for depth above `site_ratio` × `mean_coverage` |
 | `n_kept` | int | Positions that entered the cache |
 
-The workflow's `site_depth_filter_summary` rule runs `alleleflux-site-filter-summary` once every cache job has finished and writes `site_depth_filter/site_depth_filter_summary.tsv` (every sidecar stacked into one run-level table) and `site_depth_filter/site_depth_filter_summary_by_mag.tsv` next to it, one row per MAG × timepoint with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high` (the share of covered positions the ceiling removed). The same filter, with the same settings, is applied inside `alleleflux-pairwise-ani` and `alleleflux-baseline-presence` when they read profiles; a position removed for a sample reads as not covered there.
+The workflow's `site_depth_filter_summary` rule runs `alleleflux-site-filter-summary` once every cache job has finished and writes `site_depth_filter/site_depth_filter_summary.tsv` (every sidecar stacked into one run-level table) and `site_depth_filter/site_depth_filter_summary_by_mag.tsv` next to it, one row per MAG × timepoint with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high` (the share of covered positions the ceiling removed). Pairwise ANI, baseline presence, dN/dS and the plotting tools read this cache rather than raw profiles, so a position removed for a sample is absent for that sample everywhere downstream.
 
 ## Statistical Test Results
 
@@ -338,7 +338,7 @@ checkable) and a True/False flag can hold only two. Keep
 
 **Path:** `baseline_presence/{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long), `..._summary.tsv`, `..._rising.tsv`
 
-Long table: one row per significant site × allele × sample, with `allele_reads`, `total_reads`, `detection_threshold_reads`, `allele_frequency`, `allele_status` (`present`, `below_detection`, `absent`, `not_covered`), `origin_in_own_mouse`, and optionally `strain_background`.
+Long table: one row per significant site × allele × sample, with `allele_reads`, `total_reads`, `detection_threshold_reads`, `allele_frequency`, `allele_status` (`present`, `below_detection`, `absent`, `not_covered`; `not_covered` covers both "too few reads" and "position removed for this sample by the site-depth filter", since neither leaves a cache row), `origin_in_own_mouse`, and optionally `strain_background`.
 
 Summary: one row per site × allele. Sample-count columns (`origin_any_mouse`, `n_{earlier}_samples_allele_present`, `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`, `n_mice_standing_variation`, `n_mice_de_novo_candidate`, ...) apply the presence rule; read-count columns (`total_reads_{tp}`, `allele_reads_{tp}`, `allele_frequency_{tp}`) are unfiltered sums over every sample at that timepoint. Timepoint names in column headers are the comparison's own labels.
 

@@ -31,8 +31,13 @@ rule baseline_presence:
             "p_value_summary_" + BASELINE_PRESENCE_FAMILY + "_{timepoints}-{groups}.tsv",
         ),
         turnover=_baseline_presence_turnover_inputs,
-        fasta=config["input"]["fasta_path"],
-        mag_mapping=config["input"]["mag_mapping_path"],
+        # The comparison's cache files (every QC-eligible MAG at both timepoints,
+        # a superset of the MAGs with candidates): declared so a missing or stale
+        # cache re-runs the cache job rather than failing inside this command.
+        # The CLI still resolves per-MAG files from the cache_dir param.
+        caches=lambda wildcards: allele_freq_cache_files_for_comparison(
+            wildcards.timepoints, wildcards.groups
+        ),
         metadata=config["input"]["metadata_path"],
     output:
         long=get_baseline_presence_stem() + ".tsv.gz",
@@ -46,7 +51,10 @@ rule baseline_presence:
         runtime=get_runtime("baseline_presence"),
     params:
         run_dir=OUTDIR,
-        profiles_dir=PROFILES_DIR,
+        # The allele-frequency cache: the single per-site source after QC
+        # (QC-passing samples only, site-filtered).  Baseline presence reads
+        # verdict counts from it, never from raw profiles.
+        cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
         output_dir=os.path.join(OUTDIR, "baseline_presence"),
         summary_family=BASELINE_PRESENCE_FAMILY,
         # the shared constant (common.smk), not a direct config read: params are
@@ -58,9 +66,6 @@ rule baseline_presence:
         # default when the config does not say.  own_group needs a within-group
         # summary family (single_sample / lmm_across_time); the CLI refuses the rest.
         baseline_scope=config["analysis"].get("baseline_presence", {}).get("baseline_scope", "comparison"),
-        # Per-site depth filter flags, shared with allele_freq_cache and
-        # pairwise_ani so every profile reader filters identically.
-        site_filter_args=SITE_DEPTH_FILTER_ARGS,
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -82,17 +87,14 @@ rule baseline_presence:
             --threshold_column {params.threshold_column} \
             --threshold {params.threshold} \
             --baseline_scope {params.baseline_scope} \
-            --profiles_dir {params.profiles_dir} \
+            --cache_dir {params.cache_dir} \
             --metadata {input.metadata} \
-            --fasta {input.fasta} \
-            --mag_mapping {input.mag_mapping} \
             --output_dir {params.output_dir} \
             --min_cov {params.min_cov} \
             --min_freq {params.min_freq} \
             --fdr {params.fdr} \
             --min_base_quality {params.min_base_quality} \
             {params.turnover_arg} \
-            {params.site_filter_args} \
             --cpus {threads}
         """
 

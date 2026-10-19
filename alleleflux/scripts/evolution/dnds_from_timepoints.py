@@ -41,7 +41,8 @@ Usage:
                                   --p_value_threshold 0.05 \
                                   --ancestral_sample_id pre_sample \
                                   --derived_sample_id post_sample \
-                                  --profile_dir /path/to/profiles \
+                                  --cache_dir /path/to/allele_freq_cache \
+                                  --ancestral_timepoint pre --derived_timepoint post \
                                   --prodigal_fasta genes.fasta \
                                   --outdir results/
 """
@@ -62,9 +63,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm import tqdm
 
-from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
-    PROFILE_READ_DTYPES,
-)
+from alleleflux.scripts.utilities.cache_io import load_cache_sites
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 # Set up logger for this script
@@ -1705,6 +1704,47 @@ def write_output_files(
         )
 
 
+# ref_base is the reference genome's base at the position (the cache carries it
+# for exactly this script): the Prodigal-vs-reference sanity check and the
+# major-allele tie-breaker below read it.
+COUNT_COLUMNS = [
+    "contig",
+    "position",
+    "ref_base",
+    "gene_id",
+    "total_coverage",
+    "A",
+    "C",
+    "G",
+    "T",
+]
+
+
+def load_sample_counts(cache_dir, mag_id, timepoint, sample_id):
+    """One sample's per-position counts of one MAG, from the allele-frequency cache.
+
+    The cache is the single per-site source after QC: site-filtered, QC-passing
+    samples only.  Returns the columns the ancestral reconstruction uses
+    (``COUNT_COLUMNS``), sorted by contig and position, or None when the sample
+    has no rows in that MAG's cache (it did not pass QC for the MAG).
+
+    Example: ``load_sample_counts(cache, "MAG_A", "pre", "s1_pre")`` -> a frame
+    with one row per covered position of MAG_A in sample s1_pre at "pre".
+    """
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        [timepoint],
+        sample_ids=[sample_id],
+        columns=["ref_base", "gene_id", "total_coverage", "A", "C", "G", "T"],
+    )
+    if rows.empty:
+        return None
+    return (
+        rows[COUNT_COLUMNS].sort_values(["contig", "position"]).reset_index(drop=True)
+    )
+
+
 def process_mag(mag_id, args, prodigal_records):
     """Process a single MAG and write output files."""
     # logger.info(f"--- Processing MAG: {mag_id} ---")
@@ -1731,28 +1771,27 @@ def process_mag(mag_id, args, prodigal_records):
         #     write_output_files(None, None, mag_args, None, None, None, None)
         return
 
-    # 2. Load profile data for this MAG
-    ancestral_profile_path = (
-        mag_args.profile_dir
-        / f"{mag_args.ancestral_sample_id}/{mag_args.ancestral_sample_id}_{mag_id}_profiled.tsv.gz"
+    # 2. The two samples' counts, from the cache (QC-passing, site-filtered).
+    ancestral_profile_df = load_sample_counts(
+        mag_args.cache_dir,
+        mag_id,
+        mag_args.ancestral_timepoint,
+        mag_args.ancestral_sample_id,
     )
-    derived_profile_path = (
-        mag_args.profile_dir
-        / f"{mag_args.derived_sample_id}/{mag_args.derived_sample_id}_{mag_id}_profiled.tsv.gz"
+    derived_profile_df = load_sample_counts(
+        mag_args.cache_dir,
+        mag_id,
+        mag_args.derived_timepoint,
+        mag_args.derived_sample_id,
     )
-
-    if not ancestral_profile_path.exists() or not derived_profile_path.exists():
+    if ancestral_profile_df is None or derived_profile_df is None:
         logger.warning(
-            f"Profile file(s) for MAG {mag_id} not found at {ancestral_profile_path} or {derived_profile_path}. Skipping."
+            f"MAG {mag_id}: no cache rows for sample(s) "
+            f"{mag_args.ancestral_sample_id if ancestral_profile_df is None else ''} "
+            f"{mag_args.derived_sample_id if derived_profile_df is None else ''} "
+            f"(did not pass QC for this MAG). Skipping."
         )
         return
-
-    ancestral_profile_df = pd.read_csv(
-        ancestral_profile_path, sep="\t", dtype=PROFILE_READ_DTYPES
-    )
-    derived_profile_df = pd.read_csv(
-        derived_profile_path, sep="\t", dtype=PROFILE_READ_DTYPES
-    )
 
     # 3. Reconstruct Ancestral Sequences
     logger.info(
@@ -1904,10 +1943,20 @@ def main():
         help="The sample ID for the DERIVED timepoint for comparison.",
     )
     parser.add_argument(
-        "--profile_dir",
+        "--cache_dir",
         required=True,
         type=Path,
-        help="Directory containing the profile files from profile_mags.py.",
+        help="The run's allele_freq_cache/ directory (the single per-site source after QC).",
+    )
+    parser.add_argument(
+        "--ancestral_timepoint",
+        required=True,
+        help="Timepoint label of the ancestral sample (names its cache file).",
+    )
+    parser.add_argument(
+        "--derived_timepoint",
+        required=True,
+        help="Timepoint label of the derived sample (names its cache file).",
     )
     parser.add_argument(
         "--prodigal_fasta",
@@ -1957,7 +2006,7 @@ def main():
     # Determine number of CPUs to use, ensuring it doesn't exceed the number of MAGs
     num_cpus = min(args.cpus, len(args.mag_ids))
     logger.info(f"Using {num_cpus} CPUs to process {len(args.mag_ids)} MAGs")
-    
+
     # Log which samples are being used as ancestral and derived
     logger.info(
         f"Sample configuration for dN/dS analysis: "

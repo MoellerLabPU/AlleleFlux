@@ -31,9 +31,10 @@ Four house differences from MIDAS2:
   with the floor off that would only nudge depth' by a few reads at the 3x
   boundary, so it is off by default and stays as a parameter.
 * The mean coverage is passed IN.  QC computes the covered-sites mean once per
-  sample x MAG and stores it as ``average_coverage``; every reader divides by
-  that stored number instead of recomputing it from whatever rows it happens
-  to have loaded.  ``mean_coverage()`` here is the function QC uses.
+  sample x MAG and stores it as ``average_coverage``; the cache writer (the
+  only reader of raw profiles after QC) divides by that stored number instead
+  of recomputing it from whatever rows it happens to have loaded.
+  ``mean_coverage()`` here is the function QC uses.
 * A mean of 0 (no covered site) makes the ratio test vacuous: there is no pile
   to measure against, so nothing is removed by the ceiling.  MIDAS2 never
   reaches this case because its floor already drops every row of such a

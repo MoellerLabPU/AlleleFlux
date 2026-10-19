@@ -3,7 +3,7 @@
 
 THE runnable entry point of the ani package (console script
 ``alleleflux-pairwise-ani`` -> ``main()``); the other four modules are libraries
-this file orchestrates: profile_io loads, null_model calibrates, engine compares,
+this file orchestrates: ani_io loads, null_model calibrates, engine compares,
 classify judges.
 
 Two samples are compared at every genome position where BOTH have at least
@@ -21,8 +21,10 @@ popANI answers "same strain?"; read either number alongside
 Sample selection reuses AlleleFlux's QC verdict; ``--min_cov`` (default 5, part of
 the metric definition; 1 disables the depth gate) is stamped into every output row.
 Only samples that take part in at least one pair are loaded and summarised (with
-``--pairs within_subject`` on DRiDO that skips ~38% of the roster); ``--cpus``
-parallelises the profile loading, which dominates runtime.
+``--pairs within_subject`` on a ~2,000-sample cohort that skipped ~38% of the roster).  Per-sample
+counts come from the run's allele-frequency CACHE (``--cache_dir``: QC-passing
+samples only, already site-depth-filtered), never from raw profiles, streamed
+one cache file (= one timepoint) at a time; the counts are the only thing held.
 
 Outputs, one set per MAG in ``--output_dir``:
 
@@ -31,18 +33,18 @@ Outputs, one set per MAG in ``--output_dir``:
     {mag}_pairwise_ani_snp_locations.tsv.gz per-position SNP rows for the pairs
                                             chosen by --store_snp_locations
 
-Worked example (real data, verified 2026-08-27)::
+Worked example (a real run, verified 2026-08-27; identifiers anonymised)::
 
     alleleflux-pairwise-ani \\
-        --mag SLG1007_DASTool_bins_35 \\
-        --profiles_dir .../AlleleFlux_mapq20/longitudinal/profiles \\
-        --qc_files .../QC_pre_end-fat_control/SLG1007_DASTool_bins_35_QC.tsv \\
-                   .../QC_pre_post-fat_control/SLG1007_DASTool_bins_35_QC.tsv \\
-        --fasta .../redo_representative_megamag.fa \\
-        --mag_mapping .../megamag_mapping.tsv \\
+        --mag MAG_A \\
+        --cache_dir .../run/longitudinal/allele_freq_cache \\
+        --qc_files .../run/longitudinal/QC/QC_pre_end/MAG_A_QC.tsv \\
+                   .../run/longitudinal/QC/QC_pre_post/MAG_A_QC.tsv \\
+        --fasta .../reference.fa \\
+        --mag_mapping .../mag_mapping.tsv \\
         --output_dir /tmp/ani_check
 
-    -> 43 QC-passing samples, 903 pairs; the SLG1007 vs SLG1102 row reads
+    -> 43 QC-passing samples, 903 pairs; the S1 vs S2 row reads
        compared 1,649,007 (54.8%), consensus 212, population 29,
        conANI 0.999871, popANI 0.9999824.
 
@@ -52,34 +54,27 @@ Method credit: Olm et al. 2021, Nat Biotechnol, doi:10.1038/s41587-020-00797-0.
 import argparse
 import itertools
 import logging
-import math
-import multiprocessing
 import os
 
 import pandas as pd
 
 from alleleflux.scripts.analysis.ani.engine import compare_all_pairs
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
-from alleleflux.scripts.analysis.ani.profile_io import (
+from alleleflux.scripts.analysis.ani.ani_io import (
     contig_lengths_for_mag,
-    dense_contig_counts,
-    load_profile,
-    profile_path,
+    dense_counts_from_cache,
     qc_passing_samples,
 )
+from alleleflux.scripts.utilities.cache_io import cache_path, cache_samples
 from alleleflux.scripts.utilities.logging_config import setup_logging
-from alleleflux.scripts.utilities.site_depth_filter import (
-    add_site_depth_filter_args,
-    site_depth_filter_from_args,
-)
 
 logger = logging.getLogger(__name__)
 
 # Per-sample summary table schema (fixed so empty outputs still carry a header).
-# breadth is kept for convenience but VERIFIED against QC's recorded value (guard
-# below); mean_coverage is deliberately absent -- QC's average_coverage (the
-# covered-sites mean over A+C+G+T, since 2026-10-15) is the one authoritative
-# copy, and a near-duplicate here is an inconsistency factory.
+# breadth is QC's recorded value (the unfiltered profile), copied for convenience;
+# n_positions and breadth_minCov come from the cache, i.e. after the site-depth
+# filter.  mean_coverage is deliberately absent -- QC's average_coverage is the
+# one authoritative copy, and a near-duplicate here is an inconsistency factory.
 SAMPLE_COLUMNS = [
     "MAG_ID",
     "sample_id",
@@ -131,7 +126,7 @@ def enumerate_pairs(
     ``all`` compares every unordered pair; ``within_subject`` keeps only pairs of
     samples from the same mouse; ``transitions`` keeps only same-mouse pairs whose
     two timepoints are one of the configured ``(earlier, later)`` transitions --
-    the comparisons the strain-turnover analysis actually consumes (on DRiDO:
+    the comparisons the strain-turnover analysis actually consumes (on one real cohort:
     970 pairs instead of within_subject's 2,570, because the extra 1,600 compare
     two LATER timepoints nothing downstream reads).  Every mode returns pairs as
     ``(sample1, sample2)`` with ``sample1 < sample2`` by id, sorted, so outputs
@@ -172,7 +167,7 @@ def enumerate_pairs(
     )
     # One sample per (mouse, timepoint).  A mouse sampled twice at the same
     # timepoint has no single "before" or "after" and is a roster error, so raise
-    # rather than silently pairing both (0 such cases in DRiDO's 2,250 samples).
+    # rather than silently pairing both (0 such cases in a 2,250-sample cohort).
     sample_at: dict[tuple[str, str], str] = {}
     for sample in sample_ids:
         key = (subject_of[sample], time_of[sample])
@@ -195,42 +190,55 @@ def enumerate_pairs(
     return sorted(pairs)
 
 
-def _load_one_sample(job: tuple) -> tuple[str, dict, dict]:
-    """Load one profile into dense arrays plus its summary stats.
+def locate_samples_in_cache(
+    cache_dir: str, mag_id: str, samples: pd.DataFrame
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Which cache file holds each QC-passing sample's counts.
 
-    Module-level (not a closure) so it pickles into ``multiprocessing.Pool``
-    workers.  ``job`` = (sample_id, profile_path, contig_lengths, min_cov,
-    genome_length, site_filter, mean_cov); ``mean_cov`` is QC's covered-sites
-    ``average_coverage`` for the sample, or None when the QC roster lacks the
-    column (the loader then uses the profile's own mean).  Returns
-    ``(sample_id, dense_by_contig, stats)`` where
-    ``stats`` holds ``n_positions``, ``breadth`` (>=1x) and ``breadth_minCov``.
+    The cache has one file per timepoint (``{cache_dir}/{tp}/{mag}_{tp}_...``),
+    each covering every sample that passed QC at that timepoint, so a sample's
+    file is found by listing each file's roster (one cheap column read per
+    file) rather than by trusting a ``time`` column -- single-timepoint data
+    has none.  Returns ``({timepoint: [sample_ids]}, skipped)`` where ``skipped``
+    are QC-passing samples with no cache at their timepoint: the MAG was not
+    QC-eligible in any comparison that includes it, so no cache job ever ran
+    there, and they cannot take part in any pair.  A sample absent from a cache
+    file that DOES exist for its timepoint means the cache was built from a
+    different QC table than the one given here, and that raises.
 
-    Example: a 6 bp contig covered at 20x everywhere except position 5 at 2x,
-    min_cov 5 -> n_positions 6, breadth 1.0, breadth_minCov 5/6.
+    Example: caches at pre and end, roster S1(pre), S2(pre), S3(end), S4(post)
+    with no post cache -> ``({"pre": ["S1", "S2"], "end": ["S3"]}, ["S4"])``.
     """
-    sample_id, path, contig_lengths, min_cov, genome_length, site_filter, mean_cov = job
-    profile = load_profile(path, site_filter=site_filter, mean_cov=mean_cov)
-    dense = dense_contig_counts(profile, contig_lengths)
-    # Stats while the frame is still in hand, so the parent never re-reads.
-    # Breadth (>=1x) is what QC measured on the UNFILTERED profile and is
-    # cross-checked against QC's number below, so count the rows the site-depth
-    # filter removed back in; breadth_minCov describes what can actually be
-    # compared, so it stays on the filtered rows.
-    removed = profile.attrs.get("site_depth_filter", {})
-    n_covered = (
-        len(profile)
-        + removed.get("n_removed_low", 0)
-        + removed.get("n_removed_high", 0)
-    )
-    coverage = profile["coverage"].to_numpy()
-    stats = {
-        "n_positions": n_covered,  # covered >=1x, before the site-depth filter
-        "breadth": n_covered / genome_length,  # fraction >=1x, as QC measured it
-        # Fraction deep enough to ever be compared (QC has no min_cov-aware breadth).
-        "breadth_minCov": int((coverage >= min_cov).sum()) / genome_length,
-    }
-    return sample_id, dense, stats
+    if len(samples) and not os.path.isdir(cache_dir):
+        raise FileNotFoundError(f"--cache_dir does not exist: {cache_dir}")
+    rosters = {}
+    for tp in sorted(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else []:
+        if os.path.exists(cache_path(cache_dir, mag_id, tp)):
+            rosters[tp] = set(cache_samples(cache_dir, mag_id, tp))
+    has_time = "time" in samples.columns
+    located: dict[str, list[str]] = {tp: [] for tp in rosters}
+    skipped, inconsistent = [], []
+    for row in samples.itertuples(index=False):
+        sid = str(row.sample_id)
+        hits = [tp for tp, roster in rosters.items() if sid in roster]
+        if len(hits) > 1:
+            raise ValueError(
+                f"MAG {mag_id}: sample {sid} appears in {len(hits)} cache files "
+                f"{hits}; a sample belongs to exactly one timepoint"
+            )
+        if hits:
+            located[hits[0]].append(sid)
+        elif has_time and str(row.time) not in rosters:
+            skipped.append(sid)  # no cache at this timepoint: MAG not eligible there
+        else:
+            inconsistent.append(sid)
+    if inconsistent:
+        raise ValueError(
+            f"MAG {mag_id}: QC-passing sample(s) {inconsistent} have no rows in the "
+            f"cache under {cache_dir}; the cache was built from a different QC table "
+            "than --qc_files"
+        )
+    return {tp: sorted(sids) for tp, sids in located.items() if sids}, skipped
 
 
 def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
@@ -250,8 +258,6 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     # MAY be empty (low-abundance MAG): everything below still runs and produces
     # header-only outputs, so a pipeline over all MAGs never crashes here.
     samples = qc_passing_samples(args.qc_files, args.mag)
-    site_filter = site_depth_filter_from_args(args)
-    logger.info(f"site-depth filter: {site_filter}")
 
     # ---- consistency guard: QC recorded the genome size IT used (same FASTA +
     # mapping, at QC time).  If it disagrees with the .fai-derived sum we are
@@ -266,13 +272,26 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
                 "references or MAG mappings."
             )
 
+    # ---- 2b. Where do their counts live?  One cache file per timepoint; a
+    # QC-passing sample whose timepoint has no cache (the MAG was not eligible
+    # in any comparison including that timepoint) cannot be compared -- say so
+    # and drop it BEFORE pairs are decided, so no pair ever points at it.
+    located, skipped = locate_samples_in_cache(args.cache_dir, args.mag, samples)
+    if skipped:
+        logger.warning(
+            f"MAG {args.mag}: {len(skipped)} QC-passing sample(s) have no cache at "
+            f"their timepoint and are left out of every pair: {skipped}"
+        )
+        samples = samples[~samples["sample_id"].astype(str).isin(skipped)]
+    sample_timepoint = {sid: tp for tp, sids in located.items() for sid in sids}
+
     # ---- 3. The error model: coverage -> minimum reads for a credible allele.
     model = build_error_model(min_base_quality=args.min_base_quality, fdr=args.fdr)
 
     # ---- 4. Decide the pairs FIRST, so only samples that take part in at least
-    # one pair are ever loaded.  On DRiDO with --pairs within_subject that skips
-    # ~38% of the QC-passing roster (samples whose mouse lacks the partner
-    # timepoint) -- each skipped load is ~3.6 s and ~34 MB.
+    # one pair are ever loaded.  On a real cohort with --pairs within_subject that
+    # skipped ~38% of the QC-passing roster (samples whose mouse lacks the partner
+    # timepoint) -- each skipped sample is ~34 MB of dense arrays never allocated.
     pairs = enumerate_pairs(samples, args.pairs, transitions=args.transitions)
     if args.store_snp_locations == "all":
         location_pairs = set(pairs)  # the 7.7 GB option: explicit only
@@ -298,83 +317,50 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
             f"under --pairs {args.pairs}; not loaded"
         )
 
-    # ---- 5. Load the paired samples' dense arrays, in parallel if asked.
-    # Memory: genome_length x 4 x 2 bytes per sample (34 MB for a 4.3 Mb MAG),
-    # ALL held at once -- mem_per_job is sized from that (see config template).
-    jobs = []
-    for row in roster.itertuples(index=False):
-        sample_id = str(row.sample_id)
-        path = profile_path(args.profiles_dir, sample_id, args.mag)
-        if not os.path.exists(path):
-            # A QC-passing sample MUST have a profile: QC read it to pass the
-            # sample.  Checked for EVERY sample before any loading starts, so an
-            # inconsistent tree fails in milliseconds, not after 10 minutes.
-            raise FileNotFoundError(
-                f"MAG {args.mag}: profile missing for QC-passing sample {sample_id}: {path}"
-            )
-        # QC's covered-sites mean for this sample feeds the site-depth filter;
-        # a roster without the column (older QC) lets the loader use the
-        # profile's own mean instead.
-        mean_cov = (
-            float(row.average_coverage)
-            if "average_coverage" in roster.columns and pd.notna(row.average_coverage)
-            else None
-        )
-        jobs.append(
-            (
-                sample_id,
-                path,
-                contig_lengths,
-                args.min_cov,
-                genome_length,
-                site_filter,
-                mean_cov,
+    # ---- 5. Load the paired samples' dense arrays from the cache, one file
+    # (timepoint) at a time, each streamed in batches and scattered as it comes.
+    # Serial on purpose: a cache read costs ~0.1 s per sample (measured against
+    # ~3.6 s per raw profile), and a process pool would have to pickle every
+    # worker's arrays back here, doubling peak memory for no real gain.  Memory
+    # is therefore the dense arrays themselves -- genome_length x 4 x 2 bytes per
+    # sample (34 MB for a 4.3 Mb MAG), ALL held at once -- plus one batch;
+    # mem_per_job is sized from that (see config template).
+    paired_ids = set(roster["sample_id"].astype(str))
+    by_sample: dict[str, tuple] = {}
+    n_files = 0
+    for tp, sids in sorted(located.items()):
+        wanted = [sid for sid in sids if sid in paired_ids]
+        if not wanted:
+            continue
+        n_files += 1
+        by_sample.update(
+            dense_counts_from_cache(
+                args.cache_dir, args.mag, tp, wanted, contig_lengths, args.min_cov
             )
         )
-
-    if args.cpus > 1 and len(jobs) > 1:
-        # Loading (gzip + parse + scatter) dominates runtime and is embarrassingly
-        # parallel.  PROCESSES, not threads: pandas' CSV parser holds the GIL for
-        # most of the work, so threads would serialise anyway (the same lesson
-        # allele_freq.py records for its parquet reads).  multiprocessing.Pool is
-        # this codebase's convention (profile_mags, coverage_and_allele_stats);
-        # .map() returns results in submission order, so the samples table comes
-        # out in exactly the layout a serial run produces.
-        with multiprocessing.Pool(processes=args.cpus) as pool:
-            loaded = pool.map(_load_one_sample, jobs)
-    else:
-        loaded = [_load_one_sample(job) for job in jobs]
     logger.info(
-        f"MAG {args.mag}: loaded {len(loaded)} profiles with {args.cpus} cpu(s)"
+        f"MAG {args.mag}: loaded {len(by_sample)} samples from {n_files} cache file(s)"
     )
 
+    # ---- 5b. Per-sample table: QC's breadth as recorded, the cache's counts.
     dense_by_sample: dict[str, dict] = {}
     sample_records = []
-    for row, (sample_id, dense, stats) in zip(roster.itertuples(index=False), loaded):
-        # ---- consistency guard #2: QC computed this SAME breadth from this SAME
-        # profile when the sample passed.  A mismatch means the profile file
-        # changed after QC ran (re-profiled tree, stale QC) -- refuse to mix eras.
-        qc_breadth = getattr(row, "breadth", None)
-        if qc_breadth is not None and not math.isclose(
-            stats["breadth"], float(qc_breadth), rel_tol=1e-6, abs_tol=1e-9
-        ):
-            raise ValueError(
-                f"MAG {args.mag}: sample {sample_id} breadth from its profile "
-                f"({stats['breadth']:.6g}) != QC's recorded breadth ({float(qc_breadth):.6g}). "
-                "The profile appears to have changed since QC ran."
-            )
+    for row in roster.itertuples(index=False):
+        sample_id = str(row.sample_id)
+        dense, stats = by_sample[sample_id]
         dense_by_sample[sample_id] = dense
         sample_records.append(
             {
                 "MAG_ID": args.mag,
                 "sample_id": sample_id,
-                # getattr default: 'time' is absent for single-timepoint data.
+                # getattr default: 'time' is absent for single-timepoint data,
+                # where the cache file's timepoint label is the only one there is.
                 "subjectID": str(getattr(row, "subjectID", "")),
                 "group": str(getattr(row, "group", "")),
-                "time": str(getattr(row, "time", "")),
+                "time": str(getattr(row, "time", sample_timepoint[sample_id])),
                 "replicate": str(getattr(row, "replicate", "")),
-                "n_positions": stats["n_positions"],
-                "breadth": stats["breadth"],  # verified against QC just above
+                "n_positions": stats["n_positions"],  # covered, after the site filter
+                "breadth": float(row.breadth),  # QC's recorded breadth (unfiltered)
                 "breadth_minCov": stats["breadth_minCov"],
             }
         )
@@ -387,9 +373,8 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     # ---- 6. The engine, single-threaded: one call over every pair.  Threads were
     # tried and dropped -- NumPy releases the GIL only in parts of this loop, the
     # gain was minor next to loading, and chunked results had to be re-sorted to
-    # stay reproducible.  --cpus therefore means exactly one thing: loader
-    # workers.  Empty `pairs` flows through here too and yields empty tables with
-    # full schemas -- one code path for every case.
+    # stay reproducible.  Empty `pairs` flows through here too and yields empty
+    # tables with full schemas -- one code path for every case.
     pair_table, snp_locations = compare_all_pairs(
         dense_by_sample,
         contig_lengths,
@@ -445,9 +430,12 @@ def main():
     )
     parser.add_argument("--mag", required=True, help="MAG identifier")
     parser.add_argument(
-        "--profiles_dir",
+        "--cache_dir",
         required=True,
-        help="Directory holding per-sample profile subdirectories",
+        help="The run's allele_freq_cache/ directory: per-sample counts are read "
+        "from the cache (QC-passing samples, site-depth-filtered), never from raw "
+        "profiles. A QC-passing sample missing from an existing cache file is fatal; "
+        "one whose timepoint has no cache file is skipped with a warning.",
     )
     parser.add_argument(
         "--qc_files",
@@ -519,18 +507,9 @@ def main():
         help="Which pairs also get per-position SNP rows ('all' was 7.7 GB "
         "for 90 samples in inStrain -- use deliberately)",
     )
-    parser.add_argument(
-        "--cpus",
-        type=int,
-        default=1,
-        help="Worker processes for loading profiles -- the runtime bottleneck "
-        "(~3.6 s per DRiDO profile). Comparison is single-threaded; outputs are "
-        "identical for any value",
-    )
-    add_site_depth_filter_args(parser)
     args = parser.parse_args()
     # Validate the transition specs here, at the door, so a typo fails before
-    # any profile is read; None stays None for the other modes.
+    # any cache is read; None stays None for the other modes.
     if args.pairs == "transitions" and not args.transitions:
         parser.error("--pairs transitions requires --transitions EARLIER:LATER [...]")
     args.transitions = parse_transitions(args.transitions) if args.transitions else None
@@ -538,7 +517,7 @@ def main():
     logger.info(
         f"pairwise-ani: mag={args.mag} min_cov={args.min_cov} min_freq={args.min_freq} "
         f"fdr={args.fdr:.0e} min_base_quality={args.min_base_quality} pairs={args.pairs} "
-        f"store_snp_locations={args.store_snp_locations} cpus={args.cpus} "
+        f"store_snp_locations={args.store_snp_locations} "
         f"transitions={args.transitions}"
     )
     raise SystemExit(round_up_the_sample_pairs(args))

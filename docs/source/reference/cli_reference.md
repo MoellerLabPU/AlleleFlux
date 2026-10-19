@@ -600,7 +600,7 @@ alleleflux-list-mags --input-dir DIR [--output-file FILE]
 
 ### Site-depth filter flags
 
-`alleleflux-cache-allele-freq`, `alleleflux-pairwise-ani` and `alleleflux-baseline-presence` all read profiles, and all take the same flags for the per-site depth filter; the workflow passes them to the three from the one `quality_control.site_depth_filter` config block so every reader filters identically.
+Only `alleleflux-cache-allele-freq` reads raw profiles after QC, so it alone takes the per-site depth filter flags; the workflow passes them from the `quality_control.site_depth_filter` config block. Every other per-site consumer (pairwise ANI, baseline presence, dN/dS, the plotting tools) reads the cache that command writes, so the filter is applied exactly once.
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -714,7 +714,8 @@ alleleflux-track-alleles --mag-id MAG --anchor-file FILE \
 |----------|-------------|
 | `--mag-id` | MAG identifier to process. |
 | `--anchor-file` | Path to terminal nucleotides file (from `alleleflux-terminal-nucleotide`). |
-| `--metadata` | Enhanced metadata file with `sample_profile_dir` column. |
+| `--cache-dir` | The run's `allele_freq_cache/` directory (per-sample counts are read from the cache, never from raw profiles). |
+| `--metadata` | Metadata file with `sample_id`, `group`, `time`, `subjectID`. |
 | `--output-dir` | Output directory. |
 
 #### Optional Arguments
@@ -772,7 +773,7 @@ Find dominant terminal alleles at significant genomic sites.
 
 ```bash
 alleleflux-terminal-nucleotide --significant-sites SITES \
-  --profile-dir DIR --metadata META --group GROUP \
+  --cache_dir DIR --metadata META --group GROUP \
   --timepoint TP --output DIR [options]
 ```
 
@@ -781,7 +782,7 @@ alleleflux-terminal-nucleotide --significant-sites SITES \
 | Argument | Description |
 |----------|-------------|
 | `--significant-sites` | Path to significant sites table (from p-value summary). |
-| `--profile-dir` | Directory containing sample profile subdirectories. |
+| `--cache_dir` | The run's `allele_freq_cache/` directory (per-sample counts at the significant sites are read from the cache, never from raw profiles). |
 | `--metadata` | Sample metadata file. |
 | `--group` | Target group name for terminal nucleotide calculation. |
 | `--timepoint` | Target timepoint (typically endpoint). |
@@ -833,7 +834,7 @@ See the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_a
 ### `alleleflux-pairwise-ani` — conANI / popANI between sample pairs of one MAG
 
 ```bash
-alleleflux-pairwise-ani --mag MAG --profiles_dir DIR --qc_files QC [QC ...] \
+alleleflux-pairwise-ani --mag MAG --cache_dir DIR --qc_files QC [QC ...] \
   --fasta FASTA --mag_mapping MAPPING --output_dir DIR [options]
 ```
 
@@ -842,7 +843,7 @@ alleleflux-pairwise-ani --mag MAG --profiles_dir DIR --qc_files QC [QC ...] \
 | Argument | Description |
 |----------|-------------|
 | `--mag` | MAG identifier. |
-| `--profiles_dir` | Directory holding per-sample profile subdirectories. |
+| `--cache_dir` | The run's `allele_freq_cache/` directory. Per-sample counts are read from the cache (QC-passing samples, site-depth-filtered), never from raw profiles. A QC-passing sample missing from an existing cache file stops the run; one whose timepoint has no cache file is skipped with a warning. |
 | `--qc_files` | Per-MAG QC TSV(s), one per timepoint combination; samples that passed anywhere are compared. |
 | `--fasta` | Reference FASTA. |
 | `--mag_mapping` | MAG-to-contig mapping TSV (`mag_id`, `contig_id`). |
@@ -859,8 +860,6 @@ alleleflux-pairwise-ani --mag MAG --profiles_dir DIR --qc_files QC [QC ...] \
 | `--pairs` | `within_subject` | `all`, `within_subject` (every same-mouse pair) or `transitions` (same-mouse pairs matching `--transitions`). |
 | `--transitions` | — | `EARLIER:LATER` pairs for `--pairs transitions`, e.g. `pre:end`. |
 | `--store_snp_locations` | `within_subject` | Which pairs also get per-position SNP rows: `none`, `within_subject`, `all`. |
-| `--disable_site_depth_filter`, `--site_depth`, `--site_ratio`, `--min_allele_reads`, `--zero_low_counts` | see below | The per-site depth filter, applied to each profile as it is loaded (see [Site-depth filter flags](#site-depth-filter-flags)). |
-| `--cpus` | 1 | Workers for loading profiles; results are identical for any value. |
 
 #### Output
 
@@ -941,8 +940,7 @@ Outputs `rising_origin_alleles.tsv` and `rising_origin_summary.tsv`; see [Output
 
 ```bash
 alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
-  --profiles_dir DIR --metadata TSV --fasta FASTA --mag_mapping MAPPING \
-  --output_dir DIR [options]
+  --cache_dir DIR --metadata TSV --output_dir DIR [options]
 ```
 
 #### Required Arguments
@@ -952,10 +950,8 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 | `--run_dir` | Run root holding `p_value_summary/` and `significance_tests/`. |
 | `--comparison` | Comparison label, e.g. `pre_end-fat_control`. |
 | `--test_type` | Row filter within the summary, spelled exactly as the file does (`two_sample_paired_tTest`, `LMM_abs`, ...). |
-| `--profiles_dir` | Profiles root: `{sample}/{sample}_{mag}_profiled.tsv.gz`. |
+| `--cache_dir` | The run's `allele_freq_cache/` directory. Verdicts are read from the cache (QC-passing samples only, site-filtered), never from raw profiles; a sample with no rows in a MAG's cache did not pass QC for that MAG and gets no rows. |
 | `--metadata` | Sample metadata TSV (`sample_id`, `subjectID`, `group`, `time`[, `replicate`]). |
-| `--fasta` | Reference FASTA (its `.fai` gives contig lengths). |
-| `--mag_mapping` | MAG-to-contig mapping TSV. |
 | `--output_dir` | Output directory. |
 
 #### Optional Arguments

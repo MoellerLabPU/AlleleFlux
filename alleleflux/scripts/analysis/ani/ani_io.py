@@ -1,82 +1,55 @@
-"""Loading AlleleFlux profiles for the pairwise-ANI comparison.
+"""Inputs for the ANI feature: the QC roster, contig lengths, dense count arrays from the cache.
 
-Three jobs, in the order the CLI uses them:
-
-1. **Which samples?**  ``qc_passing_samples`` reuses AlleleFlux's own QC verdict
-   (``coverage_threshold_passed`` in the per-MAG ``*_QC.tsv``) rather than inventing
-   a new sample filter, unioning across the per-timepoint QC files.
-2. **Where is each profile?**  ``profile_path`` mirrors the layout the profiling
-   rule writes: ``{profiles_dir}/{sample}/{sample}_{MAG}_profiled.tsv.gz``.
-3. **Into what shape?**  ``load_profile`` + ``dense_contig_counts`` turn the sparse
-   profile rows into one dense ``(contig_length, 4)`` array per contig, the shape
-   ``classify.classify_positions`` consumes; ``contig_lengths_for_mag`` supplies the
-   array sizes from the reference (``.fai`` preferred).
+Renamed from profile_io.py on 2026-10-17 when the last profile reader left; the
+name now says what it reads.
 
 The inputs, concretely
 ----------------------
-A profile file has one row per COVERED genome position (0-based) of one sample x
-one MAG.  A real line from SLG1007's profile, and where its numbers land::
+Per-site counts come from the allele-frequency cache (``alleleflux-cache-allele-freq``):
+one Parquet file per MAG and timepoint holding every QC-passing sample's rows
+after the site-depth filter.  One cache row, and where its numbers land::
 
-    contig        position  ref  total_coverage  A  C  G  T
-    k141_102792   0         G    4               2  0  1  1
+    contig        position  sample_id  A  C  G  T
+    k141_102792   0         S1         2  0  1  1
 
     dense["k141_102792"][0] == [2, 0, 1, 1]      (uint16, order A,C,G,T)
-    coverage there          == 4                 (A+C+G+T, computed here; the
-                                                  file's total_coverage holds the
-                                                  same sum and is left unread so
-                                                  the loader depends on nothing
-                                                  but the four base columns)
 
-Two file-format facts drive everything here.  Profiles contain **only covered
-positions** -- an absent row means zero coverage, not missing data -- so the dense
-arrays start at zero and rows are scattered into them.  And positions are
-**0-based** (``profile_mags.py`` converts from mpileup's 1-based), so a position is
-a direct array index.  Base columns stay in the file's own ``A, C, G, T`` order:
-the set-based classifier never depends on column order, so nothing is reordered
-anywhere in this feature.
+Two facts drive everything here.  The cache holds **only covered positions** --
+an absent row means zero coverage, not missing data -- so the dense arrays start
+at zero and rows are scattered into them.  And positions are **0-based**, so a
+position is a direct array index.  Base columns stay in the cache's own
+``A, C, G, T`` order: the set-based classifier never depends on column order.
+
+Raw profile files are not read here (nor anywhere after QC except the cache
+writer): every ANI number rests on the same rows the statistics saw.
 
 Library module: imported by the rest of the ani package and by tests; never run
 directly, hence no ``if __name__ == "__main__"`` block.  The one runnable entry
 point of this feature is the ``alleleflux-pairwise-ani`` command (pairwise_ani.py).
-
-``usecols`` reads only the columns named above, so extra columns in a profile
-are ignored and a missing one raises.
 """
 
 import logging
-import os
 
 import numpy as np
 import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
-from alleleflux.scripts.utilities.site_depth_filter import (
-    SiteDepthFilter,
-    apply_site_depth_filter,
-    mean_coverage,
-)
+from alleleflux.scripts.utilities.cache_io import cache_samples, iter_cache_batches
 from alleleflux.scripts.utilities.utilities import build_contig_length_index
 
 logger = logging.getLogger(__name__)
 
-# Read only what the comparison needs: ref_base, total_coverage and gene_id are
-# unused.  usecols makes the loader indifferent to any extra column -- and
-# raises if a needed column is absent.
-_PROFILE_USECOLS = ["contig", "position", *BASES]
-_PROFILE_DTYPES = {
-    "contig": str,
-    "position": "int64",
-    **{base: "int32" for base in BASES},
-}
 
 # Metadata carried through to the output tables.  Everything is read as str:
-# DRIDO's group labels are 20/40 and subject ids are plain numbers, and letting
+# group labels can be numbers (20/40) and subject ids plain integers, and letting
 # pandas sniff them as int64 makes every later string comparison match nothing.
 _QC_META_COLUMNS = ["sample_id", "subjectID", "group", "time", "replicate"]
-# genome_size and breadth ride along (numeric, NOT str) purely so the CLI can
-# cross-check its own reference-derived genome length and profile-derived breadth
-# against the values QC recorded -- catching "QC ran against a different
-# FASTA/mapping" or "profile changed since QC" drift loudly instead of silently.
+# genome_size rides along (numeric, NOT str) so the CLI can cross-check its own
+# reference-derived genome length against the value QC recorded -- catching "QC
+# ran against a different FASTA/mapping" loudly instead of silently.  breadth is
+# copied as recorded into the per-sample table (the cache is site-filtered, so
+# QC's unfiltered breadth cannot be re-derived from it).  average_coverage is
+# NOT needed here: the cache this CLI reads was already filtered against it.
 _QC_KEEP_COLUMNS = _QC_META_COLUMNS + ["genome_size", "breadth"]
 _QC_DTYPES = {column: str for column in _QC_META_COLUMNS}
 
@@ -86,19 +59,6 @@ _QC_DTYPES = {column: str for column in _QC_META_COLUMNS}
 # a verdict; it only nudges a frequency by <0.1% at absurd depth.
 _DENSE_DTYPE = np.uint16
 _DENSE_MAX = np.iinfo(_DENSE_DTYPE).max
-
-
-def profile_path(profiles_dir: str, sample_id: str, mag_id: str) -> str:
-    """Path to one sample's profile for one MAG.
-
-    Mirrors the profiling rule's output layout -- change them together.
-
-    Example: ``profile_path("/profiles", "SLG1007", "bins_35")`` ->
-    ``/profiles/SLG1007/SLG1007_bins_35_profiled.tsv.gz``.
-    """
-    return os.path.join(
-        profiles_dir, sample_id, f"{sample_id}_{mag_id}_profiled.tsv.gz"
-    )
 
 
 def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
@@ -258,137 +218,43 @@ def contig_lengths_for_mag(
     return lengths
 
 
-def load_profile(
-    path: str,
-    include_gene_id: bool = False,
-    site_filter: SiteDepthFilter | None = None,
-    mean_cov: float | None = None,
-) -> pd.DataFrame:
-    """Read one profile file into ``contig, position, A, C, G, T, coverage``.
+def scatter_rows(
+    dense: dict, rows: pd.DataFrame, contig_lengths: dict[str, int]
+) -> None:
+    """Write ``rows`` (contig, position, A, C, G, T) into the dense arrays, in place.
 
-    ``site_filter`` applies the per-site depth rule to this sample's rows before
-    anything downstream (pairwise ANI, strain turnover, baseline presence) sees
-    them; ``None`` = no filtering, which keeps every existing library caller
-    byte-identical.  ``mean_cov`` is the sample's covered-sites mean from QC
-    (``average_coverage``); when the caller has no QC row on hand (baseline
-    presence works from the metadata, not QC) it is computed from this very
-    profile, which for a per-MAG profile is the same number QC stored.  The
-    summary lands in ``table.attrs["site_depth_filter"]`` with a
-    ``mean_source`` of ``"qc"`` or ``"profile"``.
+    ``dense`` is ``{contig -> (length, 4) uint16 zeros}`` for EVERY contig of the
+    MAG (``dense_counts_from_cache`` allocates it); positions absent from ``rows``
+    stay zero, which is exactly what absence means.  Called once per cache batch,
+    so a sample's rows may arrive in pieces.  A contig outside ``contig_lengths``
+    (cache and MAG mapping out of sync) or a position beyond its contig's length
+    (cache and reference out of sync) raises: contract violations, not data to drop.
 
-    ``coverage`` is computed here as A + C + G + T, the inStrain-style
-    coverage.  The profile's ``total_coverage`` holds the same sum (see
-    profile_mags.build_profile_row) and is left unread.
-
-    Parameters
-    ----------
-    path : str
-        A ``{sample}_{MAG}_profiled.tsv.gz`` file (see the module docstring for
-        the row format).
-    include_gene_id : bool
-        Also return the profile's ``gene_id`` column (str, "" where blank).
-        Off for the ANI comparison; on for candidate annotation downstream.
-
-    Raises
-    ------
-    ValueError
-        If a required column is absent (pandas raises on ``usecols``) or the same
-        ``(contig, position)`` appears twice -- both mean a corrupt profile.
+    Example: rows (c1, 0, A=4) and (c1, 3, C=6) into a 5-long c1 array ->
+    ``dense["c1"][0] == [4, 0, 0, 0]``, ``dense["c1"][3] == [0, 6, 0, 0]``, the
+    other three positions all zero.
     """
-    # usecols prunes the unused columns (ref_base, total_coverage, gene_id) and
-    # raises ValueError if a required column is missing (the fail-loud we want).
-    # gene_id is read only on request: the ANI comparison never needs it, the
-    # strain-turnover tools do (for candidate annotation).
-    usecols = _PROFILE_USECOLS + (["gene_id"] if include_gene_id else [])
-    dtypes = {**_PROFILE_DTYPES, **({"gene_id": str} if include_gene_id else {})}
-    table = pd.read_csv(path, sep="\t", usecols=usecols, dtype=dtypes)
-
-    # Two rows for one (contig, position) would double-count reads downstream --
-    # that is a corrupt profile to report, not something to dedupe quietly.
-    if table.duplicated(subset=["contig", "position"]).any():
-        offenders = table[table.duplicated(subset=["contig", "position"], keep=False)]
-        raise ValueError(
-            f"Duplicate (contig, position) rows in {path}:\n"
-            f"{offenders.head(10).to_string(index=False)}"
-        )
-
-    # Fix the column order regardless of file layout, then .copy() so the coverage
-    # assignment below writes to a real frame, not a view (SettingWithCopyWarning).
-    kept = ["contig", "position", *BASES] + (["gene_id"] if include_gene_id else [])
-    table = table[kept].copy()
-    # A + C + G + T (module docstring).
-    table["coverage"] = table[list(BASES)].sum(axis=1).astype("int32")
-    if include_gene_id:
-        # Blank gene_id (intergenic positions) reads as NaN; normalise to "".
-        table["gene_id"] = table["gene_id"].fillna("")
-        # gene_id goes LAST so the ANI columns sit at the same offsets whether or
-        # not the optional column was requested.
-        table = table[["contig", "position", *BASES, "coverage", "gene_id"]]
-    if site_filter is not None:
-        # Same rule, same place in the flow, as the cache worker: drop the rows
-        # the filter would drop for this sample before anyone sees them.
-        source = "qc" if mean_cov is not None else "profile"
-        if mean_cov is None:
-            mean_cov = mean_coverage(table)
-        table, summary = apply_site_depth_filter(table, site_filter, mean_cov)
-        # coverage follows the (possibly zeroed) counts, as MIDAS2's depth does
-        table["coverage"] = table[list(BASES)].sum(axis=1).astype("int32")
-        summary["mean_source"] = source
-        table.attrs["site_depth_filter"] = summary
-    return table
-
-
-def dense_contig_counts(
-    profile_df: pd.DataFrame, contig_lengths: dict[str, int]
-) -> dict[str, np.ndarray]:
-    """Scatter one sample's profile rows into dense ``(contig_length, 4)`` arrays.
-
-    Positions absent from the profile stay zero, which is exactly what absence
-    means.  EVERY contig in ``contig_lengths`` gets an array -- even one this
-    sample never covered -- so all samples share one position index per contig and
-    the engine can compare arrays blindly.
-
-    Parameters
-    ----------
-    profile_df : pandas.DataFrame
-        Output of ``load_profile`` (0-based positions, counts in A,C,G,T order).
-    contig_lengths : dict
-        ``contig -> length`` for this MAG, from ``contig_lengths_for_mag``.
-
-    Raises
-    ------
-    ValueError
-        If the profile names a contig outside ``contig_lengths`` (profile and MAG
-        mapping out of sync) or a position beyond its contig's length (profile and
-        reference out of sync).  Both are contract violations, not data to drop.
-    """
-    # Pre-allocate EVERY contig at zero: zero is the true value for uncovered
-    # positions, and identical shapes across samples let the engine compare blindly.
-    dense = {
-        contig: np.zeros((length, len(BASES)), dtype=_DENSE_DTYPE)
-        for contig, length in contig_lengths.items()
-    }
 
     # sort=False: iterate contigs in file order, no pointless re-sort.
     # observed=True: if a caller ever hands us categorical contigs, don't explode
     # into every unobserved category (the regional_contrast bug of 2026-07).
-    for contig, rows in profile_df.groupby("contig", sort=False, observed=True):
+    for contig, sub in rows.groupby("contig", sort=False, observed=True):
         if contig not in dense:
             raise ValueError(
-                f"Profile contains contig {contig!r} that is not in this MAG's "
-                f"mapping ({len(contig_lengths)} contigs). Profile and mapping disagree."
+                f"Cache contains contig {contig!r} that is not in this MAG's "
+                f"mapping ({len(contig_lengths)} contigs). Cache and mapping disagree."
             )
         length = contig_lengths[contig]
         # 0-based positions ARE array indices; bounds-check before scattering
         # (initial= keeps max/min safe even on an empty slice).
-        positions = rows["position"].to_numpy()
+        positions = sub["position"].to_numpy()
         if positions.max(initial=-1) >= length or positions.min(initial=0) < 0:
             raise ValueError(
-                f"Profile positions for contig {contig} fall outside its length "
+                f"Cache positions for contig {contig} fall outside its length "
                 f"{length}: min={positions.min()}, max={positions.max()}. "
-                "Profile and reference FASTA disagree."
+                "Cache and reference FASTA disagree."
             )
-        counts = rows[list(BASES)].to_numpy()
+        counts = sub[list(BASES)].to_numpy()
         # Saturate instead of overflowing on the way down to uint16 (see the
         # _DENSE_DTYPE note at the top of the module).
         np.clip(counts, 0, _DENSE_MAX, out=counts)
@@ -396,4 +262,63 @@ def dense_contig_counts(
         # loop over ~3M rows.
         dense[contig][positions] = counts.astype(_DENSE_DTYPE)
 
-    return dense
+
+def dense_counts_from_cache(
+    cache_dir: str,
+    mag_id: str,
+    timepoint: str,
+    sample_ids: list[str],
+    contig_lengths: dict[str, int],
+    min_cov: int,
+) -> dict[str, tuple[dict[str, np.ndarray], dict]]:
+    """Dense ``(contig_length, 4)`` arrays per sample, from one timepoint's cache file.
+
+    The cache is the single per-site source after QC (QC-passing samples only,
+    site-filtered).  The file is streamed in batches and each batch's rows are
+    scattered into the owning sample's arrays as they come, so memory is the
+    dense arrays themselves (genome_length x 4 x 2 bytes per sample) plus one
+    batch, never the whole file.  Every requested sample must have rows in the
+    cache; a requested sample with none means the cache was built from a
+    different QC table than the roster came from, and that raises.
+
+    Returns ``{sample_id: (dense_by_contig, stats)}`` with ``stats`` =
+    ``{"n_positions": rows in the cache (covered after the site filter),
+    "breadth_minCov": fraction of the genome with >= min_cov reads}``.
+
+    Example: a 6 bp contig, S2 covered 20x at five positions and 2x at one,
+    min_cov 5 -> n_positions 6, breadth_minCov 5/6.
+    """
+    wanted = [str(s) for s in sample_ids]
+    genome_length = int(sum(contig_lengths.values()))
+    dense = {
+        sid: {
+            c: np.zeros((n, len(BASES)), dtype=_DENSE_DTYPE)
+            for c, n in contig_lengths.items()
+        }
+        for sid in wanted
+    }
+    n_positions = {sid: 0 for sid in wanted}
+    n_deep = {sid: 0 for sid in wanted}
+    for batch in iter_cache_batches(
+        cache_dir, mag_id, timepoint, sample_ids=wanted, columns=list(BASES)
+    ):
+        for sid, rows in batch.groupby("sample_id", sort=False):
+            scatter_rows(dense[sid], rows, contig_lengths)
+            n_positions[sid] += len(rows)
+            n_deep[sid] += int((rows[list(BASES)].sum(axis=1) >= min_cov).sum())
+    missing = [sid for sid in wanted if n_positions[sid] == 0]
+    if missing:
+        raise ValueError(
+            f"MAG {mag_id} at {timepoint}: QC-passing sample(s) {missing} have no rows in "
+            f"the cache; the cache was built from a different QC table than --qc_files"
+        )
+    return {
+        sid: (
+            dense[sid],
+            {
+                "n_positions": n_positions[sid],
+                "breadth_minCov": n_deep[sid] / genome_length,
+            },
+        )
+        for sid in wanted
+    }

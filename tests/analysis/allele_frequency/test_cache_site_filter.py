@@ -149,5 +149,10 @@ class TestCacheCliSidecar:
             "n_kept",
         ]
         assert side.iloc[0]["n_kept"] == 5 and side.iloc[0]["timepoint"] == "t0"
+        # The reference the sample was judged against is the QC table's
+        # average_coverage (24.0 above), passed through untouched: QC row ->
+        # build_metadata_from_qc -> init_worker -> apply_site_depth_filter.
+        assert side.iloc[0]["sample_id"] == "s1"
+        assert side.iloc[0]["mean_coverage"] == 24.0
         assert side.iloc[0]["mean_coverage_after_filter"] == pytest.approx(80 / 5)
         assert len(pd.read_parquet(out)) == 5

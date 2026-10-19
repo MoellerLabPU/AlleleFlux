@@ -1,9 +1,7 @@
 """Unit tests for the site-depth-filter config helpers in ``common.smk``.
 
-The three rules that read profiles (allele_freq_cache, pairwise_ani,
-baseline_presence) must pass the SAME filter flags, built from one config
-block, so the cache, the ANI tables and the baseline-presence tables can never
-be filtered differently.  The two helpers are sliced out of the ``.smk`` source
+The cache rule (the only reader of raw profiles after QC) gets its filter flags
+built from one config block; the two helpers below are that block's readers.  The two helpers are sliced out of the ``.smk`` source
 by indentation and exec'd with a stub ``config``, as in
 ``test_rising_origin_targets.py``.
 """

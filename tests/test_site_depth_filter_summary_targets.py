@@ -20,7 +20,10 @@ DYNAMIC_TARGETS_SMK = (
     / "dynamic_targets.smk"
 )
 FUNCS = (
+    "_cache_universe",
     "generate_allele_freq_cache_sidecar_targets",
+    "allele_freq_cache_files_for_mag",
+    "allele_freq_cache_files_for_comparison",
     "generate_site_depth_filter_summary_targets",
 )
 
@@ -69,11 +72,11 @@ class TestSidecarTargets:
         fns = _load(
             out,
             {
-                ("pre_end", "fat_control"): ["MAG_A", "MAG_B"],
-                ("pre_post", "fat_control"): ["MAG_A"],
+                ("pre_end", "g1_g2"): ["MAG_A", "MAG_B"],
+                ("pre_post", "g1_g2"): ["MAG_A"],
             },
             ["pre_end", "pre_post"],
-            ["fat_control"],
+            ["g1_g2"],
         )
         got = fns["generate_allele_freq_cache_sidecar_targets"]()
         expect = sorted(
@@ -92,6 +95,52 @@ class TestSidecarTargets:
             ]
         )
         assert got == expect  # de-duplicated: MAG_A at pre appears once
+
+    def test_per_mag_and_per_comparison_slices_of_the_same_universe(self, tmp_path):
+        """ANI wants one MAG across every comparison; baseline presence / dN/dS
+        want one comparison across every MAG.  Both come from _cache_universe."""
+        out = str(tmp_path)
+        fns = _load(
+            out,
+            {
+                ("pre_end", "g1_g2"): ["MAG_A", "MAG_B"],
+                ("pre_post", "g1_g2"): ["MAG_A"],
+            },
+            ["pre_end", "pre_post"],
+            ["g1_g2"],
+        )
+
+        def cache(mag, tp):
+            return os.path.join(
+                out, "allele_freq_cache", tp, f"{mag}_{tp}_allele_frequency.parquet"
+            )
+
+        # MAG_A is eligible in both comparisons -> pre, end AND post; MAG_B only in pre_end
+        assert fns["allele_freq_cache_files_for_mag"]("MAG_A") == sorted(
+            [cache("MAG_A", "pre"), cache("MAG_A", "end"), cache("MAG_A", "post")]
+        )
+        assert fns["allele_freq_cache_files_for_mag"]("MAG_B") == sorted(
+            [cache("MAG_B", "pre"), cache("MAG_B", "end")]
+        )
+        assert (
+            fns["allele_freq_cache_files_for_mag"]("MAG_Z") == []
+        )  # not eligible anywhere
+        # pre_post has only MAG_A, at its own two timepoints (never 'end')
+        assert fns["allele_freq_cache_files_for_comparison"](
+            "pre_post", "g1_g2"
+        ) == sorted([cache("MAG_A", "pre"), cache("MAG_A", "post")])
+        assert fns["allele_freq_cache_files_for_comparison"](
+            "pre_end", "g1_g2"
+        ) == sorted([cache(m, tp) for m in ("MAG_A", "MAG_B") for tp in ("pre", "end")])
+        # the three slices cover exactly the same (mag, timepoint) pairs
+        universe = {(m, tp) for _, _, m, tp in fns["_cache_universe"]()}
+        assert universe == {
+            ("MAG_A", "pre"),
+            ("MAG_A", "end"),
+            ("MAG_A", "post"),
+            ("MAG_B", "pre"),
+            ("MAG_B", "end"),
+        }
 
     def test_single_data_uses_the_label_as_the_timepoint(self, tmp_path):
         fns = _load(
@@ -116,9 +165,9 @@ class TestSummaryTarget:
     def test_requested_when_a_sidecar_exists(self, tmp_path):
         fns = _load(
             str(tmp_path),
-            {("pre_end", "fat_control"): ["MAG_A"]},
+            {("pre_end", "g1_g2"): ["MAG_A"]},
             ["pre_end"],
-            ["fat_control"],
+            ["g1_g2"],
         )
         assert fns["generate_site_depth_filter_summary_targets"]() == [
             os.path.join(
@@ -127,5 +176,5 @@ class TestSummaryTarget:
         ]
 
     def test_not_requested_without_any_cache(self, tmp_path):
-        fns = _load(str(tmp_path), {}, ["pre_end"], ["fat_control"])
+        fns = _load(str(tmp_path), {}, ["pre_end"], ["g1_g2"])
         assert fns["generate_site_depth_filter_summary_targets"]() == []

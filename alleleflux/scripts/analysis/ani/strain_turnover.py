@@ -1,8 +1,8 @@
 """Per-mouse strain-background calls from the pairwise ANI table.
 
 The pairwise ANI CLI answers "how similar are these two samples of a MAG?".
-This module turns that into the question the DRiDO analysis actually asks:
-"between the baseline (5mo) sample and a later sample of the SAME mouse, did the
+This module turns that into the question the longitudinal analysis actually asks:
+"between the baseline sample and a later sample of the SAME mouse, did the
 MAG's population stay the same strain?"  Two metrics answer it on EQUAL footing,
 each with its own column -- neither ranks above the other:
 
@@ -236,7 +236,7 @@ def build_rollup(turnover: pd.DataFrame, mag_id: str) -> pd.DataFrame:
     so they sum to ``n_pairs``) and the median genome overlap over ALL the
     group's pairs, scanned or not.
 
-    Example: group fat with mice {stable, stable, strain_replacement,
+    Example: group g1 with mice {stable, stable, strain_replacement,
     undetermined} at overlaps {0.83, 1.0, 1.0, 0.02} -> n_pairs 4, n_stable 2,
     n_strain_replacement 1, n_undetermined 1, median 0.915.
     """
@@ -279,7 +279,7 @@ def chase_the_strains(args: argparse.Namespace) -> int:
     os.makedirs(args.output_dir, exist_ok=True)
     mag = args.mag
 
-    # ---- 1. The pair table this MAG's ANI run produced (ids as str: DRiDO groups are numeric).
+    # ---- 1. The pair table this MAG's ANI run produced (ids as str: group labels can be numeric).
     str_cols = {
         c: str
         for c in (

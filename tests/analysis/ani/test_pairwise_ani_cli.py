@@ -6,7 +6,6 @@ built on disk exactly in the production formats, the command runs, and the outpu
 files are read back and checked.
 """
 
-import gzip
 import os
 import shutil
 import subprocess
@@ -15,20 +14,71 @@ import unittest
 
 import pandas as pd
 
-PROFILE_HEADER = "contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tN\tgene_id\n"
+SAMPLE_TIME = {"S1": "pre", "S2": "pre", "S3": "end"}
 
 
 def _write_profile(directory, sample, mag, rows):
-    """rows: (contig, position, ref, A, C, G, T) -- N fixed at 0 for simplicity."""
-    sample_dir = os.path.join(directory, sample)
-    os.makedirs(sample_dir, exist_ok=True)
-    path = os.path.join(sample_dir, f"{sample}_{mag}_profiled.tsv.gz")
-    with gzip.open(path, "wt") as handle:
-        handle.write(PROFILE_HEADER)
-        for contig, pos, ref, a, c, g, t in rows:
-            handle.write(
-                f"{contig}\t{pos}\t{ref}\t{a + c + g + t}\t{a}\t{c}\t{g}\t{t}\t0\t\n"
+    """rows: (contig, position, ref, A, C, G, T).
+
+    Writes the sample's rows into the run's allele-frequency CACHE (the single
+    per-site source after QC) under ``{run}/allele_freq_cache/{tp}/``; ``directory``
+    is the run's ``profiles`` folder as before, the timepoint comes from
+    ``SAMPLE_TIME``, and a second call for the same sample replaces its rows.
+    """
+    from alleleflux.scripts.utilities.cache_io import cache_path
+
+    run = os.path.dirname(directory.rstrip("/"))
+    tp = SAMPLE_TIME[sample]
+    path = cache_path(os.path.join(run, "allele_freq_cache"), mag, tp)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    recs = []
+    for contig, pos, ref, a, c, g, t in rows:
+        tot = a + c + g + t
+        recs.append(
+            dict(
+                contig=contig,
+                position=pos,
+                gene_id="",
+                total_coverage=tot,
+                A=a,
+                C=c,
+                G=g,
+                T=t,
+                sample_id=sample,
+                group="x",
+                subjectID=sample,
+                replicate=sample,
+                A_frequency=a / tot,
+                T_frequency=t / tot,
+                G_frequency=g / tot,
+                C_frequency=c / tot,
+                time=tp,
             )
+        )
+    new = pd.DataFrame(recs)
+    if os.path.exists(path):
+        old = pd.read_parquet(path)
+        for col in ("sample_id", "group", "subjectID", "replicate"):
+            old[col] = old[col].astype(str)
+        new = pd.concat([old[old["sample_id"] != sample], new], ignore_index=True)
+    for col in ("sample_id", "group", "subjectID", "replicate"):
+        new[col] = new[col].astype("category")
+    new.to_parquet(path, index=False)
+
+
+def _drop_from_cache(directory, sample, mag):
+    """Remove one sample's rows from the cache (as if it had failed QC for this MAG)."""
+    run = os.path.dirname(directory.rstrip("/"))
+    tp = SAMPLE_TIME[sample]
+    path = os.path.join(
+        run, "allele_freq_cache", tp, f"{mag}_{tp}_allele_frequency.parquet"
+    )
+    df = pd.read_parquet(path)
+    df["sample_id"] = df["sample_id"].astype(str)
+    df = df[df["sample_id"] != sample]
+    for col in ("sample_id", "group", "subjectID", "replicate"):
+        df[col] = df[col].astype("category")
+    df.to_parquet(path, index=False)
 
 
 class TestPairwiseAniCLI(unittest.TestCase):
@@ -61,12 +111,16 @@ class TestPairwiseAniCLI(unittest.TestCase):
                 "sample_id": ["S1", "S2", "S3"],
                 "MAG_ID": [self.MAG] * 3,
                 "file_path": ["x"] * 3,
-                "group": ["fat", "control", "fat"],
+                "group": ["treatment", "control", "treatment"],
                 "subjectID": ["m1", "m2", "m1"],
                 "replicate": [1, 1, 1],
                 "time": ["pre", "pre", "end"],
                 "genome_size": [6, 6, 6],  # matches the reference: the happy path
                 "breadth": [1.0, 1.0, 1.0],  # matches the profiles: the happy path
+                # the covered-sites mean the site-depth filter divides by, and the
+                # column that marks a QC table new enough for that meaning
+                "average_coverage": [20.0, 20.0, 20.0],
+                "average_coverage_including_zeros": [20.0, 20.0, 20.0],
                 "coverage_threshold_passed": [True, True, True],
             }
         ).to_csv(self.qc, sep="\t", index=False)
@@ -90,8 +144,8 @@ class TestPairwiseAniCLI(unittest.TestCase):
             "alleleflux-pairwise-ani",
             "--mag",
             self.MAG,
-            "--profiles_dir",
-            self.profiles,
+            "--cache_dir",
+            os.path.join(self.tmp, "allele_freq_cache"),
             "--qc_files",
             self.qc,
             "--fasta",
@@ -112,25 +166,25 @@ class TestPairwiseAniCLI(unittest.TestCase):
     def _read(self, suffix):
         return pd.read_csv(os.path.join(self.out, f"{self.MAG}{suffix}"), sep="\t")
 
-    def test_site_depth_filter_removes_a_pile_from_the_comparison(self):
-        """S1 gets a 200-read pile at position 2 (20x elsewhere): S1's mean is (100 + 200) / 6
-        = 50 and 200 / 50 = 4 > 3, so that position is dropped for S1 and every pair with
-        S1 compares 5 of 6 positions; with the filter off all 6 are compared."""
-        s1 = [
-            ("c1", p, "A", 20, 0, 0, 0) if p != 2 else ("c1", 2, "A", 200, 0, 0, 0)
-            for p in range(6)
-        ]
+    def test_position_absent_from_a_samples_cache_is_not_compared(self):
+        """The cache is already site-filtered: a position the filter removed for S1 has no
+        row in S1's cache, so every pair with S1 compares 5 of 6 positions."""
+        s1 = [("c1", p, "A", 20, 0, 0, 0) for p in range(6) if p != 2]
         _write_profile(self.profiles, "S1", self.MAG, s1)
         done = self._run()
         self.assertEqual(done.returncode, 0, done.stderr)
-        on = self._read("_pairwise_ani.tsv")
-        pair = on[(on.sample1 == "S1") & (on.sample2 == "S2")].iloc[0]
+        table = self._read("_pairwise_ani.tsv")
+        pair = table[(table.sample1 == "S1") & (table.sample2 == "S2")].iloc[0]
         self.assertEqual(int(pair["compared_bases_count"]), 5)
-        done = self._run("--disable_site_depth_filter")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        off = self._read("_pairwise_ani.tsv")
-        pair = off[(off.sample1 == "S1") & (off.sample2 == "S2")].iloc[0]
-        self.assertEqual(int(pair["compared_bases_count"]), 6)
+        samples = self._read("_pairwise_ani_samples.tsv").set_index("sample_id")
+        self.assertEqual(int(samples.loc["S1", "n_positions"]), 5)
+        self.assertEqual(
+            float(samples.loc["S1", "breadth"]), 1.0
+        )  # QC's recorded breadth, as is
+
+    def test_site_filter_flags_are_gone(self):
+        done = self._run("--site_depth", "5")
+        self.assertEqual(done.returncode, 2)
 
     def test_writes_expected_pair_table(self):
         completed = self._run()
@@ -233,8 +287,8 @@ class TestPairwiseAniCLI(unittest.TestCase):
             "alleleflux-pairwise-ani",
             "--mag",
             self.MAG,
-            "--profiles_dir",
-            self.profiles,
+            "--cache_dir",
+            os.path.join(self.tmp, "allele_freq_cache"),
             "--qc_files",
             self.qc,
             "--fasta",
@@ -262,30 +316,9 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertIn("replicate_2", table.columns)
         self.assertFalse(table["replicate_1"].isna().any())
 
-    def test_parallel_run_matches_serial_exactly(self):
-        """--cpus 2 exercises the process pool AND the chunked thread path; the
-        tables must be identical to the serial run, row order included."""
-        # store_snp_locations all -> the locations file has rows (2 fixed
-        # differences), so its row ORDER is under test too.
-        self.assertEqual(self._run("--store_snp_locations", "all").returncode, 0)
-        serial = self._read("_pairwise_ani.tsv")
-        serial_samples = self._read("_pairwise_ani_samples.tsv")
-        serial_locations = self._read("_pairwise_ani_snp_locations.tsv.gz")
-        self.assertEqual(
-            self._run("--store_snp_locations", "all", "--cpus", "2").returncode, 0
-        )
-        pd.testing.assert_frame_equal(serial, self._read("_pairwise_ani.tsv"))
-        pd.testing.assert_frame_equal(
-            serial_samples, self._read("_pairwise_ani_samples.tsv")
-        )
-        pd.testing.assert_frame_equal(
-            serial_locations, self._read("_pairwise_ani_snp_locations.tsv.gz")
-        )
-        self.assertEqual(len(serial_locations), 2)
-
     def test_only_paired_samples_are_loaded_and_summarised(self):
         """within_subject: S2 (mouse m2, no partner) takes part in no pair, so it
-        is never loaded -- at DRiDO scale that is ~38% of the roster."""
+        is never loaded -- in a real cohort that can be ~38% of the roster."""
         self.assertEqual(self._run("--pairs", "within_subject").returncode, 0)
         samples = self._read("_pairwise_ani_samples.tsv")
         self.assertEqual(sorted(samples["sample_id"]), ["S1", "S3"])
@@ -323,14 +356,47 @@ class TestPairwiseAniCLI(unittest.TestCase):
         completed = self._run("--pairs", "transitions", "--transitions", "pre:pre")
         self.assertNotEqual(completed.returncode, 0)
 
-    def test_qc_breadth_mismatch_is_fatal(self):
-        """QC recorded a breadth the profile no longer produces -> stale tree."""
+    def test_samples_table_copies_qc_breadth_as_recorded(self):
+        """breadth is QC's number for the unfiltered profile, copied verbatim; the
+        cache cannot re-derive it (filtered rows are gone), so no cross-check."""
         qc = pd.read_csv(self.qc, sep="\t")
-        qc["breadth"] = 0.5
+        qc.loc[qc["sample_id"] == "S2", "breadth"] = 0.5
         qc.to_csv(self.qc, sep="\t", index=False)
         completed = self._run()
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("breadth", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        samples = self._read("_pairwise_ani_samples.tsv").set_index("sample_id")
+        self.assertAlmostEqual(samples.loc["S2", "breadth"], 0.5)
+        self.assertEqual(int(samples.loc["S2", "n_positions"]), 6)
+        self.assertAlmostEqual(samples.loc["S3", "breadth_minCov"], 5 / 6)
+
+    def test_passing_sample_with_no_cache_at_its_timepoint_is_skipped(self):
+        """S4 passed QC at 'post' but the MAG has no post cache (not eligible in any
+        comparison including post): warn, leave S4 out of every pair, carry on."""
+        qc = pd.read_csv(self.qc, sep="\t")
+        extra = qc[qc["sample_id"] == "S3"].copy()
+        extra["sample_id"], extra["subjectID"], extra["time"] = "S4", "m3", "post"
+        pd.concat([qc, extra]).to_csv(self.qc, sep="\t", index=False)
+        completed = self._run()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("S4", completed.stderr)
+        table = self._read("_pairwise_ani.tsv")
+        self.assertEqual(len(table), 3)
+        self.assertNotIn("S4", set(table.sample1) | set(table.sample2))
+        self.assertNotIn("S4", set(self._read("_pairwise_ani_samples.tsv").sample_id))
+
+    def test_single_timepoint_roster_without_time_column(self):
+        """Single-timepoint data: QC has no 'time' column and the cache lives under
+        the run's one label; samples are found by the cache's own roster."""
+        qc = pd.read_csv(self.qc, sep="\t").drop(columns=["time"])
+        qc = qc[qc["sample_id"].isin(["S1", "S2"])]
+        qc.to_csv(self.qc, sep="\t", index=False)
+        completed = self._run()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        table = self._read("_pairwise_ani.tsv")
+        self.assertEqual(len(table), 1)
+        self.assertEqual(int(table.iloc[0]["population_SNPs"]), 1)
+        samples = self._read("_pairwise_ani_samples.tsv")
+        self.assertEqual(sorted(samples["time"].astype(str)), ["pre", "pre"])
 
     def test_qc_genome_size_mismatch_is_fatal(self):
         """QC recorded a different genome size than the reference provides -> the
@@ -342,10 +408,13 @@ class TestPairwiseAniCLI(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("genome_size", completed.stderr)
 
-    def test_missing_profile_for_passing_sample_is_fatal(self):
-        os.remove(os.path.join(self.profiles, "S2", f"S2_{self.MAG}_profiled.tsv.gz"))
+    def test_passing_sample_absent_from_the_cache_is_fatal(self):
+        """QC says S2 passed but the cache has no rows for it: the cache was built from a
+        different QC than the one given here, so stop rather than compare the rest."""
+        _drop_from_cache(self.profiles, "S2", self.MAG)
         completed = self._run()
         self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("S2", completed.stderr)
 
 
 if __name__ == "__main__":

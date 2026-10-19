@@ -19,7 +19,13 @@ to call the allele present.  Each sample gets one of four verdicts::
     present          covered, allele clears the bar and min_freq
     below_detection  covered, 1+ reads of the allele but under the bar / min_freq
     absent           covered, zero reads of the allele
-    not_covered      fewer than min_cov reads: no verdict, out of every denominator
+    not_covered      fewer than min_cov usable reads: no verdict, out of every
+                     denominator.  TWO causes share this word: the sample had
+                     too few reads there, OR the site-depth filter removed the
+                     position for that sample (reads existed but were judged a
+                     pile and never entered the cache).  A separate "filtered"
+                     verdict is queued (Phase 2 plan); until then the cache
+                     sidecar's n_removed_* columns say how much is filter-driven.
 
 Three outputs per (comparison, test):
 
@@ -91,16 +97,7 @@ import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
-from alleleflux.scripts.utilities.site_depth_filter import (
-    add_site_depth_filter_args,
-    site_depth_filter_from_args,
-)
-from alleleflux.scripts.analysis.ani.profile_io import (
-    contig_lengths_for_mag,
-    dense_contig_counts,
-    load_profile,
-    profile_path,
-)
+from alleleflux.scripts.utilities.cache_io import cache_samples, load_cache_sites
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -109,6 +106,8 @@ logger = logging.getLogger(__name__)
 EVIDENCE_PRESENT = "present"
 EVIDENCE_BELOW_DETECTION = "below_detection"
 EVIDENCE_ABSENT = "absent"
+# not_covered has a dual meaning: too few reads, OR the site-depth filter
+# removed the position for that sample (no cache row either way).
 EVIDENCE_NOT_COVERED = "not_covered"
 
 
@@ -951,71 +950,115 @@ def summarise_rising(
     return pd.DataFrame(rows, columns=rising_columns(tps))
 
 
-def _assess_one_sample(job: tuple) -> pd.DataFrame:
-    """Worker: one (MAG, sample) -> verdict rows for every candidate (site, allele) of that MAG.
+VERDICT_COLUMNS = [
+    "allele_reads",
+    "total_reads",
+    "detection_threshold_reads",
+    "allele_frequency",
+    "allele_status",
+    "allele_present",
+]
 
-    ``job`` = (mag_id, sample_id, profile_path, contig_lengths, candidates,
-    model, min_freq, min_cov, site_filter) where ``candidates`` has ``contig,
-    position, allele``.  Loads the profile once and assesses every site on every contig.
+
+def assess_rows(
+    rows: pd.DataFrame, allele: str, model, min_freq: float, min_cov: int
+) -> pd.DataFrame:
+    """The presence rule on cache rows: one row per (sample, site), columns A, C, G, T.
+
+    The same arithmetic as ``assess_allele`` (which works on one sample's dense
+    contig array), applied to a flat frame so one call covers every sample of a
+    MAG: ``min_cov`` reads before any verdict, then the null-model bar
+    ``model[coverage]`` AND ``min_freq`` of the reads for "present"; zero reads
+    of the allele at a covered position is "absent", anything in between is
+    "below_detection".  Returns ``VERDICT_COLUMNS`` indexed like ``rows``.
+
+    Example (bar 3 at 30x, min_cov 5): rows [25,0,5,0] G -> 5 reads, present;
+    [29,0,1,0] -> below_detection; [30,0,0,0] -> absent; [2,0,0,0] -> not_covered.
+    """
+    counts = rows[list(BASES)].to_numpy(dtype=np.int64)
+    coverage = counts.sum(axis=1)
+    reads = counts[:, BASES.index(allele)]
+    covered = coverage >= min_cov
+    threshold = model[np.clip(coverage, 0, len(model) - 1)].astype(np.int64)
+    freq = np.divide(
+        reads, coverage, out=np.full(len(reads), np.nan), where=coverage > 0
+    )
+    present = covered & (reads >= threshold) & (freq >= min_freq)
+    status = np.select(
+        [~covered, present, reads == 0],
+        [EVIDENCE_NOT_COVERED, EVIDENCE_PRESENT, EVIDENCE_ABSENT],
+        default=EVIDENCE_BELOW_DETECTION,
+    ).astype(object)
+    return pd.DataFrame(
+        {
+            "allele_reads": reads,
+            "total_reads": coverage,
+            "detection_threshold_reads": threshold,
+            "allele_frequency": np.where(covered, freq, np.nan),
+            "allele_status": status,
+            "allele_present": present,
+        },
+        index=rows.index,
+    )
+
+
+def _assess_one_mag(job: tuple) -> pd.DataFrame:
+    """Worker: one MAG -> verdict rows for every candidate (site, allele) in every cached sample.
+
+    ``job`` = (mag_id, cache_dir, timepoints, sample_ids, candidates, model,
+    min_freq, min_cov) where ``candidates`` has ``contig, position, allele``.
+    Reads the MAG's cache files once, at the candidate sites only.  Which samples
+    get rows is decided by the cache (spec 2.1): a sample with rows in the MAG's
+    cache passed QC for it and is assessed at every candidate site, with zero
+    reads (not_covered) where the cache has no row for that position; a sample
+    with no rows at all did not pass QC for this MAG and gets no rows.
     Module-level so it pickles into ``multiprocessing.Pool``.
     """
-    (
-        mag_id,
-        sample_id,
-        path,
-        contig_lengths,
-        candidates,
-        model,
-        min_freq,
-        min_cov,
-        site_filter,
-    ) = job
-    # The site-depth filter runs on the profile first; a removed site reads as
-    # not_covered for this sample.  No QC row is on hand here (samples come from
-    # the metadata), so the loader takes the mean from the profile itself.
-    dense = dense_contig_counts(
-        load_profile(path, site_filter=site_filter), contig_lengths
+    mag_id, cache_dir, timepoints, sample_ids, candidates, model, min_freq, min_cov = (
+        job
     )
+    cand = candidates[["contig", "position", "allele"]].drop_duplicates()
+    wanted = set(map(str, sample_ids))
+    roster = sorted(
+        {s for tp in timepoints for s in cache_samples(cache_dir, mag_id, tp)} & wanted
+    )
+    columns = ["mag_id", "sample_id", "contig", "position", "allele"] + VERDICT_COLUMNS
+    if not roster or cand.empty:
+        return pd.DataFrame(columns=columns)
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        timepoints,
+        sites=cand,
+        sample_ids=roster,
+        columns=list(BASES),
+    )
+    # The full (sample x site x allele) grid, zero-filled where the cache has no
+    # row.  A missing row has two possible causes the cache cannot tell apart:
+    # the sample had no read there, or the site-depth filter removed the
+    # position for that sample (a pile).  Both read as not_covered; a distinct
+    # "filtered" verdict is queued in the Phase 2 plan.
+    grid = cand.merge(pd.DataFrame({"sample_id": roster}), how="cross")
+    counts = rows[["contig", "position", "sample_id", *BASES]]
+    grid = grid.merge(counts, on=["contig", "position", "sample_id"], how="left")
+    grid[list(BASES)] = grid[list(BASES)].fillna(0).astype(np.int64)
     frames = []
-    for (contig, allele), sub in candidates.groupby(["contig", "allele"], sort=True):
-        positions = sub["position"].to_numpy(dtype=np.int64)
-        got = assess_allele(
-            dense[contig], positions, BASES.index(allele), model, min_freq, min_cov
-        )
+    for allele, sub in grid.groupby("allele", sort=True):
+        got = assess_rows(sub, allele, model, min_freq, min_cov)
         frames.append(
-            pd.DataFrame(
-                {
-                    "mag_id": mag_id,
-                    "sample_id": sample_id,
-                    "contig": contig,
-                    "position": positions,
-                    "allele": allele,
-                    **got,
-                }
+            pd.concat(
+                [
+                    sub[["sample_id", "contig", "position"]].assign(
+                        mag_id=mag_id, allele=allele
+                    ),
+                    got,
+                ],
+                axis=1,
             )
         )
-    return (
-        pd.concat(frames, ignore_index=True)
-        if frames
-        else pd.DataFrame(
-            columns=[
-                "mag_id",
-                "sample_id",
-                "contig",
-                "position",
-                "allele",
-                "allele_reads",
-                "total_reads",
-                "detection_threshold_reads",
-                "allele_frequency",
-                "allele_status",
-                "allele_present",
-            ]
-        )
-    )
+    return pd.concat(frames, ignore_index=True)[columns]
 
 
-# --baseline_scope values; the first is the default (see the module docstring).
 BASELINE_SCOPES = ("comparison", "own_group")
 
 
@@ -1142,53 +1185,28 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         f"{n_cand:,} (site, allele) candidates across {len(candidates_by_mag)} MAGs"
     )
 
-    # ---- 3. One job per (MAG, sample); every job loads its own profile once.
+    # ---- 3. One job per MAG; every job reads the MAG's cache files once, at the
+    # candidate sites only.  The cache is the single per-site source after QC:
+    # already site-filtered, and holding QC-passing samples only, so which
+    # samples are assessed is decided there (spec 2.1).
     model = build_error_model(min_base_quality=args.min_base_quality, fdr=args.fdr)
-    site_filter = site_depth_filter_from_args(args)
-    logger.info(f"site-depth filter: {site_filter}")
-    jobs = []
-    no_profile = (
-        []
-    )  # (mag_id, sample_id) with no profile: the MAG has no reads in that sample
-    for mag_id, cand in candidates_by_mag.items():
-        lengths = contig_lengths_for_mag(args.fasta, args.mag_mapping, mag_id)
-        slim = cand[["contig", "position", "allele"]].drop_duplicates()
-        for sample_id in meta["sample_id"]:
-            path = profile_path(args.profiles_dir, sample_id, mag_id)
-            if not os.path.exists(path):
-                # profile_mags writes no file when a MAG has zero mapped reads in a
-                # sample, and the pipeline's own QC lists such samples as absent for
-                # that MAG.  Zero reads = not_covered at every site, so the sample
-                # is kept, with that status, rather than crashing the run.
-                no_profile.append((mag_id, sample_id))
-                continue
-            jobs.append(
-                (
-                    mag_id,
-                    sample_id,
-                    path,
-                    lengths,
-                    slim,
-                    model,
-                    args.min_freq,
-                    args.min_cov,
-                    site_filter,
-                )
-            )
-    logger.info(
-        f"assessing {len(jobs)} (MAG, sample) profiles with {args.cpus} workers"
-    )
-    if no_profile:
-        per_mag = pd.Series([m for m, _ in no_profile]).value_counts()
-        for mag_id, n in per_mag.items():
-            logger.warning(
-                f"MAG {mag_id}: no profile for {n} of {len(meta)} samples (no reads there); "
-                f"reported as not_covered"
-            )
-    if len(no_profile) == len(jobs) + len(no_profile) and no_profile:
-        raise FileNotFoundError(
-            f"no profile found for ANY (MAG, sample) under {args.profiles_dir}; wrong --profiles_dir?"
+    sample_ids = list(meta["sample_id"])
+    jobs = [
+        (
+            mag_id,
+            args.cache_dir,
+            [earlier, later],
+            sample_ids,
+            cand[["contig", "position", "allele"]].drop_duplicates(),
+            model,
+            args.min_freq,
+            args.min_cov,
         )
+        for mag_id, cand in candidates_by_mag.items()
+    ]
+    logger.info(
+        f"assessing {len(jobs)} MAGs from the cache at {args.cache_dir} with {args.cpus} workers"
+    )
     if not jobs:
         # No significant site for this test / threshold / MAG selection: a legitimate
         # outcome (Wilcoxon at n=8 cannot reach q<0.05, for instance).  Write the
@@ -1210,36 +1228,14 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         return 0
     with multiprocessing.Pool(processes=args.cpus) as pool:
         verdicts = pd.concat(
-            pool.imap_unordered(_assess_one_sample, jobs, chunksize=4),
-            ignore_index=True,
+            pool.imap_unordered(_assess_one_mag, jobs), ignore_index=True
         )
-    if no_profile:
-        # One not_covered row per candidate (site, allele) for each missing pair;
-        # the bar at 0 reads is model[0] so the row still carries a threshold.
-        frames = []
-        for mag_id, sample_id in no_profile:
-            slim = candidates_by_mag[mag_id][
-                ["contig", "position", "allele"]
-            ].drop_duplicates()
-            frames.append(
-                pd.DataFrame(
-                    {
-                        "mag_id": mag_id,
-                        "sample_id": sample_id,
-                        "contig": slim["contig"].to_numpy(),
-                        "position": slim["position"].to_numpy(),
-                        "allele": slim["allele"].to_numpy(),
-                        "allele_reads": 0,
-                        "total_reads": 0,
-                        "detection_threshold_reads": int(model[0]),
-                        "allele_frequency": np.nan,
-                        "allele_status": EVIDENCE_NOT_COVERED,
-                        "allele_present": False,
-                    }
-                )
-            )
-        verdicts = pd.concat([verdicts, *frames], ignore_index=True)
-
+    n_assessed = verdicts["sample_id"].nunique()
+    if n_assessed < len(sample_ids):
+        logger.info(
+            f"{len(sample_ids) - n_assessed} of {len(sample_ids)} metadata samples have "
+            f"no cache rows for any MAG with candidates (failed QC there): not assessed"
+        )
     # ---- 4. Long table: verdicts + site context + sample context (+ optional joins).
     site_ctx = pd.concat(candidates_by_mag.values(), ignore_index=True)
     long = verdicts.merge(
@@ -1356,20 +1352,15 @@ def main():
     )
     parser.add_argument("--threshold", type=float, default=0.05)
     parser.add_argument(
-        "--profiles_dir",
+        "--cache_dir",
         required=True,
-        help="Profiles root: {sample}/{sample}_{mag}_profiled.tsv.gz",
+        help="The run's allele_freq_cache/ directory: {timepoint}/{mag}_{timepoint}_allele_frequency.parquet. "
+        "Verdicts are read from the cache (QC-passing samples, site-filtered), never from raw profiles.",
     )
     parser.add_argument(
         "--metadata",
         required=True,
         help="Sample metadata TSV (sample_id, subjectID, group, time[, replicate])",
-    )
-    parser.add_argument(
-        "--fasta", required=True, help="Reference FASTA (its .fai gives contig lengths)"
-    )
-    parser.add_argument(
-        "--mag_mapping", required=True, help="contig -> MAG mapping TSV"
     )
     parser.add_argument("--output_dir", required=True)
     parser.add_argument(
@@ -1412,7 +1403,6 @@ def main():
         help="Base quality assumed by the null model",
     )
     parser.add_argument("--cpus", type=int, default=multiprocessing.cpu_count())
-    add_site_depth_filter_args(parser)
     args = parser.parse_args()
     return chase_the_ancestors(args)
 

@@ -177,21 +177,51 @@ import shutil
 import subprocess
 import tempfile
 
-PROFILE_HEADER = "contig\tposition\tref_base\ttotal_coverage\tA\tC\tG\tT\tN\tgene_id\n"
+SAMPLE_TIME = {"S1": "pre", "S2": "pre", "S3": "end", "S4": "end"}
 
 
 def _write_profile(directory, sample, mag, rows):
-    """rows: (contig, position, ref, A, C, G, T, gene_id)."""
-    sample_dir = os.path.join(directory, sample)
-    os.makedirs(sample_dir, exist_ok=True)
-    with gzip.open(
-        os.path.join(sample_dir, f"{sample}_{mag}_profiled.tsv.gz"), "wt"
-    ) as handle:
-        handle.write(PROFILE_HEADER)
-        for contig, pos, ref, a, c, g, t, gene in rows:
-            handle.write(
-                f"{contig}\t{pos}\t{ref}\t{a + c + g + t}\t{a}\t{c}\t{g}\t{t}\t0\t{gene}\n"
+    """rows: (contig, position, ref, A, C, G, T, gene_id); written into the run's cache
+    (``{run}/allele_freq_cache/{tp}/``), the single per-site source after QC."""
+    from alleleflux.scripts.utilities.cache_io import cache_path
+
+    run = os.path.dirname(directory.rstrip("/"))
+    tp = SAMPLE_TIME[sample]
+    path = cache_path(os.path.join(run, "allele_freq_cache"), mag, tp)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    recs = []
+    for contig, pos, ref, a, c, g, t, gene in rows:
+        tot = a + c + g + t
+        recs.append(
+            dict(
+                contig=contig,
+                position=pos,
+                gene_id=gene,
+                total_coverage=tot,
+                A=a,
+                C=c,
+                G=g,
+                T=t,
+                sample_id=sample,
+                group="x",
+                subjectID=sample,
+                replicate=sample,
+                A_frequency=a / tot,
+                T_frequency=t / tot,
+                G_frequency=g / tot,
+                C_frequency=c / tot,
+                time=tp,
             )
+        )
+    new = pd.DataFrame(recs)
+    if os.path.exists(path):
+        old = pd.read_parquet(path)
+        for col in ("sample_id", "group", "subjectID", "replicate"):
+            old[col] = old[col].astype(str)
+        new = pd.concat([old[old["sample_id"] != sample], new], ignore_index=True)
+    for col in ("sample_id", "group", "subjectID", "replicate"):
+        new[col] = new[col].astype("category")
+    new.to_parquet(path, index=False)
 
 
 class TestStrainTurnoverCLI(unittest.TestCase):
@@ -248,6 +278,9 @@ class TestStrainTurnoverCLI(unittest.TestCase):
                 "time": ["pre", "pre", "end", "end"],
                 "genome_size": [6] * 4,
                 "breadth": [1.0] * 4,
+                # both averages, as quality_control.py writes them (the pairwise step requires them)
+                "average_coverage": [20.0] * 4,
+                "average_coverage_including_zeros": [20.0] * 4,
                 "coverage_threshold_passed": [True] * 4,
             }
         ).to_csv(self.qc, sep="\t", index=False)
@@ -266,8 +299,8 @@ class TestStrainTurnoverCLI(unittest.TestCase):
                 "alleleflux-pairwise-ani",
                 "--mag",
                 self.MAG,
-                "--profiles_dir",
-                self.profiles,
+                "--cache_dir",
+                os.path.join(self.tmp, "allele_freq_cache"),
                 "--qc_files",
                 self.qc,
                 "--fasta",

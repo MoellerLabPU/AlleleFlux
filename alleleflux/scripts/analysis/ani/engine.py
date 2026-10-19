@@ -1,7 +1,7 @@
 """Comparing every sample pair of one MAG, contig by contig.
 
 The work is organised contig-first, pair-second: each contig's dense count arrays
-(from ``profile_io.dense_contig_counts``) are compared for every requested pair
+(built by ``ani_io.dense_counts_from_cache``) are compared for every requested pair
 while they are hot in cache, and per-pair tallies accumulate across contigs.  At
 the end the totals become genome-level ANI -- a sum over contigs, nothing fancier.
 
@@ -25,7 +25,7 @@ How this module is driven
 This is a library module: it has no ``if __name__ == "__main__"`` block because
 there is nothing to run directly -- it exports functions.  The runnable entry
 point is the ``alleleflux-pairwise-ani`` command (``pairwise_ani.py``), whose
-``main()`` loads the data via ``profile_io``, builds the error model, and calls
+``main()`` loads the data via ``ani_io``, builds the error model, and calls
 ``compare_all_pairs`` -- by hand you would do the same from a Python session.
 
 Two INDEPENDENT outputs come back: the pair table (the scoreboard -- compared
@@ -37,11 +37,11 @@ pair table; it only leaves the locations table empty.
 The inputs, concretely
 ----------------------
 ``dense_by_sample`` is ``{sample_id -> {contig -> (length, 4) uint16 array}}``,
-i.e. one ``profile_io.dense_contig_counts`` result per QC-passing sample.  Every
+i.e. ``ani_io.dense_counts_from_cache``'s arrays for each QC-passing sample.  Every
 sample dict carries an array for EVERY contig of the MAG (zeros if uncovered), so
 a missing key is a caller bug and raises.
 
-Worked example (the real pair SLG1007 vs SLG1102 on MAG SLG1007_DASTool_bins_35,
+Worked example (a real pair, S1 vs S2 on MAG_A, identifiers anonymised;
 min_cov 5, Q30 analytic model; verified 2026-08-27):  1,649,007 positions compared
 (54.8% of the 3,007,590 bp genome), 212 consensus SNPs and 29 population SNPs ->
 conANI 0.999871, popANI 0.9999824.  For orientation against the investigation's
@@ -66,18 +66,39 @@ logger = logging.getLogger(__name__)
 # One row per sample pair.  min_cov travels with the numbers it shaped, so no
 # table can ever be read without knowing which gate produced it.
 PAIR_COLUMNS = [
-    "MAG_ID", "sample1", "sample2",
-    "compared_bases_count", "percent_genome_compared", "coverage_overlap",
-    "consensus_SNPs", "population_SNPs", "conANI", "popANI", "min_cov",
+    "MAG_ID",
+    "sample1",
+    "sample2",
+    "compared_bases_count",
+    "percent_genome_compared",
+    "coverage_overlap",
+    "consensus_SNPs",
+    "population_SNPs",
+    "conANI",
+    "popANI",
+    "min_cov",
 ]
 
 # One row per flagged position of a requested pair, with BOTH samples' counts --
 # the raw material for the future strain-turnover / de-novo work.
 SNP_LOCATION_COLUMNS = [
-    "MAG_ID", "sample1", "sample2", "contig", "position",
-    "consensus_SNP", "population_SNP",
-    "A_1", "C_1", "G_1", "T_1", "coverage_1",
-    "A_2", "C_2", "G_2", "T_2", "coverage_2",
+    "MAG_ID",
+    "sample1",
+    "sample2",
+    "contig",
+    "position",
+    "consensus_SNP",
+    "population_SNP",
+    "A_1",
+    "C_1",
+    "G_1",
+    "T_1",
+    "coverage_1",
+    "A_2",
+    "C_2",
+    "G_2",
+    "T_2",
+    "coverage_2",
 ]
 
 
@@ -206,8 +227,8 @@ def compare_all_pairs(
     ----------
     dense_by_sample : dict
         ``sample_id -> {contig -> (length, 4) array}`` -- one
-        ``profile_io.dense_contig_counts`` result per sample.  Every sample must
-        carry every contig in ``contig_lengths`` (profile_io guarantees it);
+        ``ani_io.dense_counts_from_cache`` entry per sample.  Every sample must
+        carry every contig in ``contig_lengths`` (ani_io guarantees it);
         a missing key raises KeyError rather than silently skipping data.
     contig_lengths : dict
         ``contig -> length``; iteration order fixes the contig processing order.
@@ -238,7 +259,12 @@ def compare_all_pairs(
     # One accumulator per pair; the keys deliberately mirror
     # compare_pair_on_contig's counters so results sum straight in.
     totals = {
-        pair: {"compared": 0, "covered_either": 0, "consensus_snps": 0, "population_snps": 0}
+        pair: {
+            "compared": 0,
+            "covered_either": 0,
+            "consensus_snps": 0,
+            "population_snps": 0,
+        }
         for pair in pairs
     }
     # Small per-(contig, pair) frames of flagged positions, concatenated ONCE at
@@ -251,11 +277,11 @@ def compare_all_pairs(
         for pair in pairs:
             sample_a, sample_b = pair
             # Two-level lookup: dense_by_sample[SAMPLE][CONTIG] -> (length, 4)
-            # array.  profile_io.dense_contig_counts built each sample's inner
+            # array.  ani_io.dense_counts_from_cache built each sample's inner
             # {contig -> array} dict; the CLI stacked them per sample.  ANI is a
             # PAIR metric, so we pull the SAME contig from TWO different
             # samples' dicts and compare the arrays row by row.
-            # Direct indexing on purpose: profile_io gives every sample an array
+            # Direct indexing on purpose: ani_io gives every sample an array
             # for every contig (zeros if uncovered), so a missing key is a caller
             # bug and must raise, not skip (silently dropping a contig would
             # deflate `compared` and inflate ANI).
@@ -269,24 +295,31 @@ def compare_all_pairs(
                 counts_a, counts_b, model, min_freq, min_cov, want_locations=want
             )
             # Fold this contig's four counters into the pair's genome totals.
-            for key in ("compared", "covered_either", "consensus_snps", "population_snps"):
+            for key in (
+                "compared",
+                "covered_either",
+                "consensus_snps",
+                "population_snps",
+            ):
                 totals[pair][key] += contig_result[key]
 
             found = contig_result["snp_positions"]
             if want and found is not None:
                 # Assemble this contig's flagged rows immediately (small frames)
                 # rather than holding raw arrays until the end.
-                frame = pd.DataFrame({
-                    "MAG_ID": mag_id,
-                    "sample1": sample_a,
-                    "sample2": sample_b,
-                    "contig": contig,
-                    "position": found["position"],
-                    "consensus_SNP": found["consensus_SNP"],
-                    "population_SNP": found["population_SNP"],
-                    "coverage_1": found["coverage_1"],
-                    "coverage_2": found["coverage_2"],
-                })
+                frame = pd.DataFrame(
+                    {
+                        "MAG_ID": mag_id,
+                        "sample1": sample_a,
+                        "sample2": sample_b,
+                        "contig": contig,
+                        "position": found["position"],
+                        "consensus_SNP": found["consensus_SNP"],
+                        "population_SNP": found["population_SNP"],
+                        "coverage_1": found["coverage_1"],
+                        "coverage_2": found["coverage_2"],
+                    }
+                )
                 # Split the (n, 4) count blocks into flat per-base columns
                 # (A_1, C_1, ...) so the output TSV is plain rectangular data.
                 for index, base in enumerate(BASES):
@@ -309,22 +342,26 @@ def compare_all_pairs(
         con_ani = (compared - consensus) / compared if compared else np.nan
         pop_ani = (compared - population) / compared if compared else np.nan
 
-        records.append({
-            "MAG_ID": mag_id,
-            "sample1": sample_a,
-            "sample2": sample_b,
-            "compared_bases_count": compared,
-            # The honesty column: how much genome the verdict rests on.
-            "percent_genome_compared": compared / genome_length if genome_length else np.nan,
-            # 0.0 = the two samples' deep regions never coincide (defined!);
-            # NaN only when NEITHER sample is deep anywhere (either == 0).
-            "coverage_overlap": compared / either if either else np.nan,
-            "consensus_SNPs": consensus,
-            "population_SNPs": population,
-            "conANI": con_ani,
-            "popANI": pop_ani,
-            "min_cov": min_cov,
-        })
+        records.append(
+            {
+                "MAG_ID": mag_id,
+                "sample1": sample_a,
+                "sample2": sample_b,
+                "compared_bases_count": compared,
+                # The honesty column: how much genome the verdict rests on.
+                "percent_genome_compared": (
+                    compared / genome_length if genome_length else np.nan
+                ),
+                # 0.0 = the two samples' deep regions never coincide (defined!);
+                # NaN only when NEITHER sample is deep anywhere (either == 0).
+                "coverage_overlap": compared / either if either else np.nan,
+                "consensus_SNPs": consensus,
+                "population_SNPs": population,
+                "conANI": con_ani,
+                "popANI": pop_ani,
+                "min_cov": min_cov,
+            }
+        )
 
     # columns= enforces schema AND order even when records is empty, so the CLI
     # can always write a header-only file for a MAG with too few samples.

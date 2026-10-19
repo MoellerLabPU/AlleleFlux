@@ -40,9 +40,13 @@ from alleleflux.scripts.utilities.site_depth_filter import (
 NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 
 # Columns retained in the Parquet cache.  Everything else written by
-# process_mag_files (MAG_ID, ref_base, breadth, genome_size,
-# average_coverage) is dropped before writing to avoid bloating the file
-# with data no downstream consumer reads.
+# process_mag_files (MAG_ID, breadth, genome_size, average_coverage) is
+# dropped before writing to avoid bloating the file with data no downstream
+# consumer reads.  ref_base (the reference genome's base at the position, as
+# mpileup copied it from the FASTA) IS kept (2026-10-17): dN/dS checks its
+# Prodigal gene parsing and strand handling against it and uses it as the
+# major-allele tie-breaker, and the cache is the only per-site source after
+# QC.  Four values, dictionary-encoded, ~1 byte per row.
 #
 # Downstream consumers and the columns each needs:
 #   allele_freq.py (Stage 2): contig, position, gene_id, total_coverage,
@@ -54,6 +58,7 @@ NUCLEOTIDES = ["A_frequency", "T_frequency", "G_frequency", "C_frequency"]
 CACHE_COLUMNS_BASE = [
     "contig",
     "position",
+    "ref_base",
     "gene_id",
     "total_coverage",
     "A",
@@ -88,8 +93,7 @@ PROFILE_READ_DTYPES = {
     # gene_id may be non-numeric (e.g. "k141_0_1") — keep as string.
     "gene_id": "string",
     "contig": "string",
-    # ref_base is dropped from the cache; leaving it at default dtype is fine
-    # since it's discarded immediately after column select.
+    "ref_base": "string",  # one letter per row; made categorical below
 }
 
 # Low/medium-cardinality string columns that should be encoded as Arrow
@@ -107,6 +111,7 @@ CACHE_CATEGORICAL_COLUMNS = [
     "subjectID",
     "replicate",
     "time",
+    "ref_base",  # A/C/G/T (N for a masked reference position): 4-5 categories
 ]
 
 logger = logging.getLogger(__name__)
@@ -329,9 +334,9 @@ def process_mag_files(args):
     df = calculate_frequencies(df)
 
     # Drop columns not consumed by any downstream cache reader.
-    # Excluded: MAG_ID (redundant — derivable from filename), ref_base
-    # (never read by Stage 2/CMH/LMM), breadth/genome_size/average_coverage
-    # (QC metrics that downstream rules re-read from QC TSVs if needed).
+    # Excluded: MAG_ID (redundant — derivable from filename) and
+    # breadth/genome_size/average_coverage (QC metrics that downstream rules
+    # re-read from QC TSVs if needed).  ref_base stays: see CACHE_COLUMNS_BASE.
     keep = (
         CACHE_COLUMNS_LONGITUDINAL
         if DATA_TYPE == "longitudinal" and "time" in df.columns

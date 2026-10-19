@@ -187,7 +187,9 @@ def _raw_answers(called: pd.Series, changed: pd.Series) -> dict[str, pd.Series]:
     }
 
 
-def _blank_below_floor(raw: dict[str, pd.Series], enough: pd.Series) -> dict[str, pd.Series]:
+def _blank_below_floor(
+    raw: dict[str, pd.Series], enough: pd.Series
+) -> dict[str, pd.Series]:
     """The yes/no columns as reported: the raw answers, BLANK where the floor is not met.
 
     Parameters
@@ -247,7 +249,11 @@ def _strain_status(
     # Only a majority vote can tie: exactly half is neither a majority nor a
     # minority, so the tie rule decides.  "at least one" and "every one" cannot.
     is_tie = enough & (changed * 2 == called) & (vote_rule == "majority")
-    tie_word = {"not_replaced": "not_replaced", "replaced": "replaced", "unresolved": "tie"}[tie]
+    tie_word = {
+        "not_replaced": "not_replaced",
+        "replaced": "replaced",
+        "unresolved": "tie",
+    }[tie]
     # Start from the safest word and overwrite upward, so a key no branch claims
     # can never end up labelled as verified.
     status = pd.Series("no_voters", index=called.index, dtype=object)
@@ -271,15 +277,19 @@ def _judge(
     called=9, changed=4 -> ({majority False, any True, all False, none False},
     ``not_replaced``); called=5, changed=3 -> (all four pd.NA, ``too_few_voters``).
     """
-    raw = _raw_answers(called, changed)     # majority / any / all / none, computed once
-    enough = called >= min_voters           # the floor, computed once
+    raw = _raw_answers(called, changed)  # majority / any / all / none, computed once
+    enough = called >= min_voters  # the floor, computed once
     return (
-        _blank_below_floor(raw, enough),                               # the facts, blank under the floor
-        _strain_status(called, changed, raw, enough, vote_rule, tie),  # the decision, from the same answers
+        _blank_below_floor(raw, enough),  # the facts, blank under the floor
+        _strain_status(
+            called, changed, raw, enough, vote_rule, tie
+        ),  # the decision, from the same answers
     )
 
 
-def _replicate_votes(df: pd.DataFrame, metric: str, replicate_rule: str) -> pd.DataFrame:
+def _replicate_votes(
+    df: pd.DataFrame, metric: str, replicate_rule: str
+) -> pd.DataFrame:
     """Collapse the mice of each replicate into that replicate's one vote.
 
     Parameters
@@ -308,7 +318,9 @@ def _replicate_votes(df: pd.DataFrame, metric: str, replicate_rule: str) -> pd.D
     """
     # Undetermined mice drop out HERE, once, so no rule can count them -- and so
     # "average" cannot pick up the ANI numbers their rows still carry.
-    cages = df[df["_called"] == 1].groupby(KEYS + ["replicate"], sort=True, observed=True)
+    cages = df[df["_called"] == 1].groupby(
+        KEYS + ["replicate"], sort=True, observed=True
+    )
     n_called = cages["_called"].sum()
     n_changed = cages["_changed"].sum()
     if replicate_rule == "any":
@@ -327,7 +339,9 @@ def _replicate_votes(df: pd.DataFrame, metric: str, replicate_rule: str) -> pd.D
         # otherwise judge some replicates against one line and some against another.
         thresholds = df[threshold_col].dropna().unique()
         if len(thresholds) > 1:
-            raise ValueError(f"{threshold_col} is not constant across the turnover table: {thresholds}")
+            raise ValueError(
+                f"{threshold_col} is not constant across the turnover table: {thresholds}"
+            )
         # The per-mouse rule (ANI < threshold, strict) applied to the cage mean.
         changed = cages[ani_col].mean() < cages[threshold_col].first()
     return pd.DataFrame({"_called": 1, "_changed": changed.astype(int)})
@@ -372,7 +386,7 @@ def _classify_one_metric(
     Diet groups are separate keys and never pooled.
 
     Worked example, metric="strain_replacement", ``min_voters=1``, MAG_A / group
-    fat / pre_end, five mice in three cages::
+    g1 / pre_end, five mice in three cages::
 
         mouse  cage  strain_replacement
         m1     c1    True
@@ -455,7 +469,11 @@ def _classify_one_metric(
     out["tie_rule"] = tie
     out["replicate_rule"] = replicate_rule
     return out[
-        KEYS + ["metric"] + list(MOUSE_COLUMNS) + list(REPLICATE_COLUMNS) + list(PROVENANCE_COLUMNS)
+        KEYS
+        + ["metric"]
+        + list(MOUSE_COLUMNS)
+        + list(REPLICATE_COLUMNS)
+        + list(PROVENANCE_COLUMNS)
     ]
 
 
@@ -511,10 +529,14 @@ def classify_mags(
     if tie not in TIE_RULES:
         raise ValueError(f"tie must be one of {TIE_RULES}, got {tie!r}")
     if replicate_rule not in REPLICATE_RULES:
-        raise ValueError(f"replicate_rule must be one of {REPLICATE_RULES}, got {replicate_rule!r}")
+        raise ValueError(
+            f"replicate_rule must be one of {REPLICATE_RULES}, got {replicate_rule!r}"
+        )
     stacked = pd.concat(
         [
-            _classify_one_metric(turnover, metric, min_voters, vote_rule, tie, replicate_rule)
+            _classify_one_metric(
+                turnover, metric, min_voters, vote_rule, tie, replicate_rule
+            )
             for metric in METRICS
         ],
         ignore_index=True,
@@ -526,7 +548,11 @@ def classify_mags(
     # How much of the table each status holds, per metric: the first thing to
     # look at, since "too_few_voters" / "no_voters" are usually the majority.
     for metric in METRICS:
-        counts = stacked.loc[stacked["metric"] == metric, "strain_status"].value_counts().to_dict()
+        counts = (
+            stacked.loc[stacked["metric"] == metric, "strain_status"]
+            .value_counts()
+            .to_dict()
+        )
         logger.info(f"  {metric}: {counts}")
     return stacked
 

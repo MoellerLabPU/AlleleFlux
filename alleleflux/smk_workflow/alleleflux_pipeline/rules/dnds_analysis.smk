@@ -27,10 +27,12 @@ rule dnds_from_timepoints:
     input:
         # P-value summary file for the specified test type
         significant_sites=get_significant_sites_df_path(),
-        # Profile directory containing all sample profiles
-        # Uses PROFILES_DIR which points to either existing profiles (if profiles_path
-        # is specified in config) or newly generated profiles in OUTDIR/profiles
-        profile_dir=PROFILES_DIR,
+        # The comparison's cache files (every QC-eligible MAG at both timepoints):
+        # the two samples' counts come from these; declared so a missing or stale
+        # cache re-runs the cache job rather than failing inside the command.
+        caches=lambda wildcards: allele_freq_cache_files_for_comparison(
+            wildcards.timepoints, wildcards.groups
+        ),
         # Prodigal gene predictions
         prodigal_fasta=config["input"]["prodigal_path"],
     output:
@@ -42,6 +44,9 @@ rule dnds_from_timepoints:
         p_value_threshold=config["statistics"]["p_value_threshold"],  # Use from statistics section
         dn_ds_test_type=DN_DS_TEST_TYPE,
         log_level=config.get("log_level", "INFO"),
+        # The allele-frequency cache (QC-passing samples, site-filtered): the two
+        # samples' counts come from here, never from raw profiles.
+        cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
         outdir=os.path.join(
             OUTDIR,
             "dnds_analysis",
@@ -139,6 +144,8 @@ rule dnds_from_timepoints:
             raise ValueError(f"No sample pair found for subject {wildcards.subject_id}")
         
         ancestral_sample_id, derived_sample_id = subject_pair
+        # the comparison's two timepoint labels name the cache files
+        ancestral_timepoint, derived_timepoint = wildcards.timepoints.split("_")
         
         # Log which samples are ancestral and derived
         logger.info(
@@ -157,7 +164,9 @@ rule dnds_from_timepoints:
             {group_analyzed_flag} \\
             --ancestral_sample_id {ancestral_sample_id} \\
             --derived_sample_id {derived_sample_id} \\
-            --profile_dir {input.profile_dir} \\
+            --cache_dir {params.cache_dir} \\
+            --ancestral_timepoint {ancestral_timepoint} \\
+            --derived_timepoint {derived_timepoint} \\
             --prodigal_fasta {input.prodigal_fasta} \\
             --outdir {outdir} \\
             --prefix {wildcards.subject_id} \\

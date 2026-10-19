@@ -8,8 +8,9 @@ The inputs, concretely
 ----------------------
 ``counts`` is one sample's pileup tally: one row per genome position, four columns
 saying how many of that sample's reads reported A, C, G or T there.  Rows come
-straight from the A, C, G, T columns of the sample's profile file
-(``{sample}_{MAG}_profiled.tsv.gz``).  A real line from SLG1007's profile::
+straight from the A, C, G, T columns of the sample's rows in the allele-frequency
+cache (which carries the profile's counts after QC and the site-depth filter).
+A real line, from one sample::
 
     contig        position  ref  total_coverage  A  C  G  T
     k141_102792   0         G    4               2  0  1  1
@@ -56,7 +57,7 @@ compared as the pair of bases it is, and "share any credible allele" is tested
 literally.  Wherever the two rules differ we call fewer SNPs, never more
 (``tests/analysis/ani/test_classify.py::test_never_less_conservative_than_instrain``).
 
-Worked example (real position k141_17312:13581, SLG1007 vs SLG1102; order A,C,G,T)::
+Worked example (a real position, k141_17312:13581, samples S1 vs S2; order A,C,G,T)::
 
     sample 1  [2, 0, 28, 0]  30x   consensus {G}   present {G}          credible {G}
     sample 2  [5, 0,  1, 0]   6x   consensus {A}   present {A}          credible {A}

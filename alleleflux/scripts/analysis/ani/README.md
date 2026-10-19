@@ -2,8 +2,8 @@
 
 Every gate, threshold and decision rule applied by `alleleflux-pairwise-ani`,
 and which of the two metrics each one touches. (Verified against the
-implementation 2026-09-01; the worked example is the real pair SLG1007 vs
-SLG1102 on MAG `SLG1007_DASTool_bins_35`.)
+implementation 2026-09-01; the worked example is a real pair, S1 vs S2 on
+`MAG_A`, identifiers anonymised.)
 
 ## The two metrics in one line each
 
@@ -34,11 +34,11 @@ A **population SNP** = the two samples' *credible-allele* sets are disjoint
 
 * QC's recorded `genome_size` must equal the reference-derived genome length
   (else QC and this run used different references).
-* Each sample's profile-derived breadth must match QC's recorded breadth
-  (else the profile changed after QC ran).
-* Corrupt inputs raise: duplicate `(contig, position)` rows, positions beyond a
-  contig's length, contigs missing from mapping/reference, profiles missing for
-  QC-passing samples.
+* Per-sample counts come from the allele-frequency cache (QC-passing samples,
+  site-depth-filtered); `breadth` in the samples table is QC's recorded value.
+* Corrupt inputs raise: positions beyond a contig's length, contigs missing from
+  mapping/reference, a QC-passing sample missing from an existing cache file (the
+  cache was built from a different QC table).
 
 ## Defaults at a glance
 
@@ -50,18 +50,17 @@ A **population SNP** = the two samples' *credible-allele* sets are disjoint
 | base-quality floor (sets error rate) | 30 | `profiling.min_base_quality` (same key the profiler used) |
 | `pairs` | `within_subject` | `analysis.pairwise_ani.pairs` / `--pairs`; `transitions` restricts to the configured `--transitions EARLIER:LATER` comparisons (DRiDO: 970 pairs instead of 2,570) |
 | `store_snp_locations` | `within_subject` | (`all` produced 7.7 GB in inStrain — use deliberately) |
-| `--cpus` | 1 | worker processes for profile loading (the bottleneck) + threads for comparison; output identical for any value |
 
 Only samples that take part in at least one pair are loaded and appear in the
-samples table (with `pairs: within_subject` on DRiDO that skips ~38 % of the
+samples table (with `pairs: within_subject` on a real cohort that skipped ~38 % of the
 QC-passing roster). Memory = genome length × 4 × 2 bytes per loaded sample, all
 held at once — size `mem_per_job` from that.
 
 ## Worked position (real data)
 
-`k141_17312:13581` — SLG1007 `[A=2, C=0, G=28, T=0]` at 30×; SLG1102
+`k141_17312:13581` — S1 `[A=2, C=0, G=28, T=0]` at 30×; S2
 `[A=5, C=0, G=1, T=0]` at 6×. Gate #2: 30 ≥ 5 and 6 ≥ 5 → compared. Consensus
-sets {G} vs {A} disjoint → **consensus SNP** (conANI). Credibility: A in SLG1007
-is 2 reads < 3 (#5 kills it despite 6.7 % passing #6); G in SLG1102 is 1 read
+sets {G} vs {A} disjoint → **consensus SNP** (conANI). Credibility: A in S1
+is 2 reads < 3 (#5 kills it despite 6.7 % passing #6); G in S2 is 1 read
 < 3. Credible sets {G} vs {A} disjoint → **population SNP** (popANI) — one of
 only 29 fixed differences across 1,649,007 compared positions of this pair.

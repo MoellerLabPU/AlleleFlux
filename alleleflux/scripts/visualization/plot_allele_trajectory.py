@@ -29,6 +29,7 @@ Usage:
 
 See --help for full CLI options.
 """
+
 import argparse
 import logging
 import re
@@ -769,7 +770,9 @@ def plot_combined(
         # An explicit group_order keeps colors stable across separate figures that may
         # not each contain every group.
         groups = (
-            list(group_order) if group_order is not None else sorted(df["group"].unique())
+            list(group_order)
+            if group_order is not None
+            else sorted(df["group"].unique())
         )
         palette = sns.color_palette(n_colors=len(groups))
 
@@ -885,7 +888,15 @@ def plot_combined_per_replicate(
 
     validate_input_columns(
         df,
-        ["frequency", "group", "replicate", "contig", "position", "anchor_allele", x_col],
+        [
+            "frequency",
+            "group",
+            "replicate",
+            "contig",
+            "position",
+            "anchor_allele",
+            x_col,
+        ],
         "for per-replicate combined plots",
     )
 
@@ -908,10 +919,14 @@ def plot_combined_per_replicate(
 
     replicates = sorted(df["replicate"].dropna().unique())
     if not len(replicates):
-        logger.warning("No non-null replicate values found; no per-replicate plots made")
+        logger.warning(
+            "No non-null replicate values found; no per-replicate plots made"
+        )
         return
 
-    logger.info(f"Creating per-replicate combined plots for {len(replicates)} replicates")
+    logger.info(
+        f"Creating per-replicate combined plots for {len(replicates)} replicates"
+    )
 
     for rep in replicates:
         sub = df[df["replicate"] == rep]
@@ -935,7 +950,9 @@ def plot_combined_per_replicate(
         if pd.api.types.is_numeric_dtype(mean_df[x_col]):
             mean_df = mean_df.sort_values(x_col)
 
-        n_sites_plotted = mean_df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+        n_sites_plotted = (
+            mean_df[["contig", "position", "anchor_allele"]].drop_duplicates().shape[0]
+        )
         logger.info(
             f"Replicate {rep}: plotting {n_sites_plotted} sites, "
             f"{mean_df[x_col].nunique()} x-values, "
@@ -1090,9 +1107,7 @@ def plot_per_site(
 
         # Include grouping mode in filename
         suffix = "_by_replicate" if group_by_replicate else ""
-        filename = (
-            f"{contig}_{pos}_{allele}_{value_col}_{x_col}{suffix}{filename_tag}.{output_format}"
-        )
+        filename = f"{contig}_{pos}_{allele}_{value_col}_{x_col}{suffix}{filename_tag}.{output_format}"
         # Sanitize filename: replace any character that is not a letter, number, underscore, hyphen, or dot with an underscore
         filename = re.sub(r"[^\w\-_.]", "_", filename)
         outpath = outdir / filename
@@ -1407,6 +1422,33 @@ def plot_group_distributions(
                 )
 
 
+def parse_n_sites(n_val, name):
+    """Interpret a "how many top sites" option: ``"all"`` or a positive integer.
+
+    ``n_val`` is what argparse (or a config) handed over: the word ``all`` in any
+    letter case means every site (the workflow's plotting rule accepts any
+    case, so the script must too); a positive whole number means the top N by
+    the ranking column.  Anything else -- zero, a negative, a decimal, another
+    word -- raises ValueError naming the option, so a config typo fails the
+    plotting job loudly instead of exiting 0 with no output (which Snakemake
+    then reports as a missing output after a job that looked successful).
+
+    Example: ``parse_n_sites("ALL", "n_sites_line")`` -> ``"all"``;
+    ``parse_n_sites("2000", ...)`` -> ``2000``; ``parse_n_sites("2.5", ...)`` raises.
+    """
+    text = str(n_val).strip()
+    if text.lower() == "all":
+        return "all"
+    # isdigit() pins the accepted spelling to plain digits (int() alone would
+    # also take "+5"), and > 0 rules out "0"; negatives and decimals fail isdigit.
+    if text.isdigit() and int(text) > 0:
+        return int(text)
+    raise ValueError(
+        f"Invalid {name} value {n_val!r}: expected 'all' (any case) or a positive "
+        "whole number of top sites"
+    )
+
+
 def main():
     """Main CLI function for plot_allele_trajectory."""
     setup_logging()
@@ -1554,16 +1596,8 @@ def main():
     df = pd.read_csv(input_path, sep="\t")
     logger.info(f"Loaded {len(df):,} rows with columns: {list(df.columns)}")
 
-    # Convert n_sites arguments to appropriate type
-    def parse_n_sites(n_val, name):
-        if n_val == "all":
-            return "all"
-        try:
-            return int(n_val)
-        except ValueError:
-            logger.error(f"Invalid {name} value: {n_val}")
-            return None
-
+    # Convert n_sites arguments to appropriate type; an invalid value raises
+    # (the job fails) rather than exiting 0 with nothing written.
     n_line = parse_n_sites(args.n_sites_line, "n_sites_line")
     n_dist = parse_n_sites(args.n_sites_dist, "n_sites_dist")
     n_per_site = (
@@ -1571,9 +1605,6 @@ def main():
         if args.n_sites_per_site
         else None
     )
-
-    if n_line is None or n_dist is None:
-        return
 
     # Run the full plotting pass once per requested bin width (or once, unbinned).
     # Each pass gets a fresh copy of the loaded table: the orchestrator adds

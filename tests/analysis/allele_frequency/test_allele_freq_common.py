@@ -56,6 +56,10 @@ class TestProcessMagFilesCoverage(unittest.TestCase):
         df = df.sort_values(["contig", "position"]).reset_index(drop=True)
         self.assertEqual(df["total_coverage"].tolist(), [10, 4, 60])
         self.assertNotIn("N", df.columns)
+        # ref_base is kept for the cache (dN/dS reads it), as a category so
+        # Parquet dictionary-encodes it: one letter per row costs ~1 byte.
+        self.assertEqual(df["ref_base"].astype(str).tolist(), [r[2] for r in ROWS])
+        self.assertEqual(df["ref_base"].dtype.name, "category")
         freq = df[["A_frequency", "C_frequency", "G_frequency", "T_frequency"]].sum(
             axis=1
         )

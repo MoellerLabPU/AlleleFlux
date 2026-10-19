@@ -425,6 +425,54 @@ PERMUTED_DIR = (
     else PERMUTED_METADATA_DIR
 )
 
+# Null runs switch off the label-blind extras
+# --------------------------------------------
+# dN/dS, baseline presence, pairwise ANI and strain turnover take their sample
+# labels from the real metadata / QC tables and never read a permuted sheet,
+# so inside a null run they would mix shuffled significance results with real
+# labels: meaningless files and wasted compute.  The statistics (stage 2, the
+# tests, CMH, LMM, eligibility) relabel from the permuted sheet and are the
+# point of a null run; these four are not.  Forced off here, in the shared
+# config layer, so generate-mode leaves AND bring-your-own-sheet runs are both
+# covered (decision 2026-10-17).
+LABEL_BLIND_EXTRAS = (
+    "use_dnds",
+    "use_baseline_presence",
+    "use_pairwise_ani",
+    "use_strain_turnover",
+)
+
+
+def switch_off_label_blind_extras(config, is_permuted_run):
+    """Force the four label-blind feature flags to False in a permuted run.
+
+    Mutates ``config["analysis"]`` in place and returns the flags that were ON
+    before (for the log line).  A non-permuted run is left untouched.
+    ``use_dnds`` defaults to True when absent (see generate_dnds_analysis_targets),
+    so an absent key counts as "was on" for that flag only.
+
+    Example: ``{"analysis": {"use_pairwise_ani": True}}`` in a permuted run ->
+    returns ``["use_dnds", "use_pairwise_ani"]`` and leaves all four keys False.
+    """
+    if not is_permuted_run:
+        return []
+    analysis = config.setdefault("analysis", {})
+    was_on = [
+        flag for flag in LABEL_BLIND_EXTRAS if analysis.get(flag, flag == "use_dnds")
+    ]
+    for flag in LABEL_BLIND_EXTRAS:
+        analysis[flag] = False
+    return was_on
+
+
+IS_PERMUTED_RUN = GENERATE_PERMUTED or bool(PERMUTED_METADATA_DIR)
+_switched_off = switch_off_label_blind_extras(config, IS_PERMUTED_RUN)
+if _switched_off:
+    logger.info(
+        f"Permuted (null) run: switched off {', '.join(_switched_off)} -- these read "
+        "real labels, not the permuted sheet, and are not part of the null tail"
+    )
+
 
 def permuted_metadata_path(groups_label):
     """Absolute path to a comparison pair's permuted sheet (generate or BYO).

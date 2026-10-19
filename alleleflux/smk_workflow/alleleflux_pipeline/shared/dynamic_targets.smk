@@ -1137,27 +1137,82 @@ def generate_rising_origin_targets():
     return [os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_summary.tsv")]
 
 
-def generate_allele_freq_cache_sidecar_targets():
-    """Every site-depth-filter sidecar the cache jobs of this run will write.
+def _cache_universe():
+    """Every (timepoints_label, groups_label, mag, timepoint) a cache job exists for.
 
-    One cache file exists per (MAG, timepoint) for every MAG that passes QC
-    eligibility in some configured comparison; its sidecar sits next to it.
-    The MAG universe comes from the QC eligibility checkpoint, so this is
-    checkpoint-dependent: call it from get_final_pipeline_outputs or a rule's
-    input *function*, never at parse time.
+    The one definition of "which cache files this run produces": a cache file
+    exists per (MAG, timepoint) for every MAG that passes QC eligibility in some
+    configured comparison.  The three helpers below are slices of this walk, so
+    the sidecar targets, the per-MAG inputs (pairwise ANI) and the
+    per-comparison inputs (baseline presence, dN/dS) can never disagree.  Reads
+    the QC eligibility checkpoint, so every caller is checkpoint-dependent:
+    call them from get_final_pipeline_outputs or a rule's input *function*,
+    never at parse time.
 
-    Example: comparisons pre_end and pre_post x fat_control, 80 and 79 QC-
-    eligible MAGs -> sidecars for the union of MAGs at pre, end and post.
+    Example: comparisons pre_end and pre_post x g1_g2, MAG_7 eligible in both,
+    MAG_9 only in pre_end -> yields (pre_end, g1_g2, MAG_7, pre), (.., end),
+    (pre_post, g1_g2, MAG_7, pre), (.., post), (pre_end, g1_g2, MAG_9, pre), (.., end).
     """
-    sidecars = set()
     for tp in timepoints_labels:
+        tps = tp.split("_") if DATA_TYPE == "longitudinal" else [tp]
         for gr in groups_labels:
-            tps = tp.split("_") if DATA_TYPE == "longitudinal" else [tp]
             for mag in _get_mags_by_eligibility(tp, gr, eligibility_type="all"):
                 for timepoint in tps:
-                    cache = get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
-                    sidecars.add(cache[: -len(".parquet")] + "_site_depth_filter.tsv")
-    return sorted(sidecars)
+                    yield tp, gr, mag, timepoint
+
+
+def generate_allele_freq_cache_sidecar_targets():
+    """Every site-depth-filter sidecar the cache jobs of this run will write
+    (one next to each cache file of ``_cache_universe``).
+
+    Example: 80 and 79 QC-eligible MAGs in two comparisons sharing ``pre`` ->
+    sidecars for the union of MAGs at pre, end and post.
+    """
+    return sorted(
+        {
+            get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)[
+                : -len(".parquet")
+            ]
+            + "_site_depth_filter.tsv"
+            for _, _, mag, timepoint in _cache_universe()
+        }
+    )
+
+
+def allele_freq_cache_files_for_mag(mag_id):
+    """The cache files of one MAG across every comparison it is QC-eligible in
+    (pairwise ANI's inputs: one job per MAG, group- and comparison-blind).
+
+    Example: a MAG eligible in pre_end and pre_post -> its caches at pre, end
+    and post; one eligible only in pre_end -> pre and end (its post samples,
+    if any passed QC, are then skipped by the ANI CLI with a warning).
+    """
+    return sorted(
+        {
+            get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
+            for _, _, mag, timepoint in _cache_universe()
+            if mag == mag_id
+        }
+    )
+
+
+def allele_freq_cache_files_for_comparison(timepoints_label, groups_label):
+    """The cache files of one comparison: every QC-eligible MAG of that
+    (timepoints, groups) combination at each of its timepoints (baseline
+    presence's and dN/dS's inputs).  A superset of the MAGs they will actually
+    open (those with significant sites, known only at run time), declared so a
+    deleted or stale cache re-triggers the cache job instead of surfacing as a
+    FileNotFoundError inside the consumer.
+
+    Example: pre_post x g1_g2 with 80 QC-eligible MAGs -> 160 cache paths.
+    """
+    return sorted(
+        {
+            get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
+            for tp, gr, mag, timepoint in _cache_universe()
+            if (tp, gr) == (timepoints_label, groups_label)
+        }
+    )
 
 
 def generate_site_depth_filter_summary_targets():

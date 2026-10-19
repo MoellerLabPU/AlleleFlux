@@ -81,7 +81,7 @@ alleleflux-dnds-from-timepoints \
     --input significant_sites_summary.tsv \
     --output output_dir/ \
     --mag_id Bacteroides_001 \
-    --profiles_dir profiles/ \
+    --cache_dir allele_freq_cache/ \
     --prodigal_fasta genes.fna \
     --fasta reference.fasta \
     --ancestral_timepoint pre \
@@ -114,7 +114,7 @@ alleleflux-dnds-from-timepoints \
     --group_analyzed treatment \
     --p_value_column q_value \
     --p_value_threshold 0.01 \
-    --profiles_dir profiles/ \
+    --cache_dir allele_freq_cache/ \
     --prodigal_fasta genes.fna \
     --fasta ref.fasta \
     --ancestral_timepoint day0 \
@@ -129,7 +129,7 @@ for mag in $(cat mag_list.txt); do
         --input p_value_summary.tsv \
         --output dnds_results/ \
         --mag_id $mag \
-        --profiles_dir profiles/ \
+        --cache_dir allele_freq_cache/ \
         --prodigal_fasta genes.fna \
         --fasta ref.fasta \
         --ancestral_timepoint pre \

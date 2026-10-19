@@ -1,10 +1,11 @@
 """Tests for the pair-comparison engine and genome-level aggregation.
 
-Dense arrays here are built exactly like ``profile_io.dense_contig_counts`` builds
+Dense arrays here are built exactly like ``ani_io.dense_counts_from_cache`` builds
 them: ``(contig_length, 4)`` uint16 in profile order A,C,G,T, zeros where no reads
-landed.  The real worked-example rows (SLG1007 vs SLG1102) reappear as one contig
+landed.  The real worked-example rows (two samples, S1 vs S2, of one MAG) reappear as one contig
 so the engine-level counts can be checked by hand.
 """
+
 import unittest
 
 import numpy as np
@@ -73,7 +74,9 @@ class TestComparePairOnContig(unittest.TestCase):
     def test_want_locations_returns_flagged_positions_with_counts(self):
         a = _dense({0: (2, 0, 28, 0), 2: (20, 0, 0, 0)}, 3)
         b = _dense({0: (5, 0, 1, 0), 2: (20, 0, 0, 0)}, 3)
-        got = compare_pair_on_contig(a, b, MODEL, MIN_FREQ, min_cov=5, want_locations=True)
+        got = compare_pair_on_contig(
+            a, b, MODEL, MIN_FREQ, min_cov=5, want_locations=True
+        )
         found = got["snp_positions"]
         self.assertIsNotNone(found)
         np.testing.assert_array_equal(found["position"], [0])
@@ -98,12 +101,18 @@ class TestCompareAllPairs(unittest.TestCase):
 
     def test_metrics_sum_across_contigs(self):
         table, _ = compare_all_pairs(
-            self.dense, self.contig_lengths, [("S1", "S2")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5, mag_id="MAG_X",
+            self.dense,
+            self.contig_lengths,
+            [("S1", "S2")],
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
+            mag_id="MAG_X",
         )
         self.assertEqual(list(table.columns), PAIR_COLUMNS)
         row = table.iloc[0]
-        self.assertEqual(int(row["compared_bases_count"]), 5)   # 3 on c1 + 2 on c2
+        self.assertEqual(int(row["compared_bases_count"]), 5)  # 3 on c1 + 2 on c2
         self.assertEqual(int(row["consensus_SNPs"]), 1)
         self.assertEqual(int(row["population_SNPs"]), 1)
         self.assertAlmostEqual(row["conANI"], 4 / 5)
@@ -116,8 +125,13 @@ class TestCompareAllPairs(unittest.TestCase):
 
     def test_identical_samples_score_one(self):
         table, _ = compare_all_pairs(
-            self.dense, self.contig_lengths, [("S1", "S3")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5,
+            self.dense,
+            self.contig_lengths,
+            [("S1", "S3")],
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
         )
         self.assertAlmostEqual(table.iloc[0]["conANI"], 1.0)
         self.assertAlmostEqual(table.iloc[0]["popANI"], 1.0)
@@ -127,8 +141,13 @@ class TestCompareAllPairs(unittest.TestCase):
         empty = {"c1": np.zeros((3, 4), np.uint16), "c2": np.zeros((2, 4), np.uint16)}
         dense = {"S1": self.dense["S1"], "S4": empty}
         table, _ = compare_all_pairs(
-            dense, self.contig_lengths, [("S1", "S4")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5,
+            dense,
+            self.contig_lengths,
+            [("S1", "S4")],
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
         )
         row = table.iloc[0]
         self.assertEqual(int(row["compared_bases_count"]), 0)
@@ -143,8 +162,13 @@ class TestCompareAllPairs(unittest.TestCase):
         empty_a = {"c1": np.zeros((3, 4), np.uint16), "c2": np.zeros((2, 4), np.uint16)}
         empty_b = {"c1": np.zeros((3, 4), np.uint16), "c2": np.zeros((2, 4), np.uint16)}
         table, _ = compare_all_pairs(
-            {"S4": empty_a, "S5": empty_b}, self.contig_lengths, [("S4", "S5")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5,
+            {"S4": empty_a, "S5": empty_b},
+            self.contig_lengths,
+            [("S4", "S5")],
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
         )
         row = table.iloc[0]
         self.assertEqual(int(row["compared_bases_count"]), 0)
@@ -153,38 +177,53 @@ class TestCompareAllPairs(unittest.TestCase):
 
     def test_popani_never_below_conani(self):
         table, _ = compare_all_pairs(
-            self.dense, self.contig_lengths,
+            self.dense,
+            self.contig_lengths,
             [("S1", "S2"), ("S1", "S3"), ("S2", "S3")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5,
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
         )
         valid = table.dropna(subset=["conANI", "popANI"])
         self.assertTrue(bool((valid["popANI"] >= valid["conANI"]).all()))
 
     def test_snp_locations_recorded_only_for_requested_pairs(self):
         table, locations = compare_all_pairs(
-            self.dense, self.contig_lengths, [("S1", "S2"), ("S1", "S3")],
-            MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5, mag_id="MAG_X",
+            self.dense,
+            self.contig_lengths,
+            [("S1", "S2"), ("S1", "S3")],
+            MODEL,
+            min_freq=MIN_FREQ,
+            min_cov=5,
+            genome_length=5,
+            mag_id="MAG_X",
             snp_location_pairs={("S1", "S2")},
         )
         self.assertEqual(len(table), 2)
         self.assertEqual(list(locations.columns), SNP_LOCATION_COLUMNS)
-        self.assertEqual(len(locations), 1)                      # only the fixed diff
+        self.assertEqual(len(locations), 1)  # only the fixed diff
         row = locations.iloc[0]
         self.assertEqual((row["sample1"], row["sample2"]), ("S1", "S2"))
         self.assertEqual((row["contig"], int(row["position"])), ("c1", 0))
         self.assertTrue(bool(row["population_SNP"]))
-        self.assertEqual(int(row["A_1"]), 20)                    # S1 is pure A there
-        self.assertEqual(int(row["T_2"]), 20)                    # S2 is pure T
+        self.assertEqual(int(row["A_1"]), 20)  # S1 is pure A there
+        self.assertEqual(int(row["T_2"]), 20)  # S2 is pure T
         self.assertEqual(int(row["coverage_1"]), 20)
 
     def test_missing_contig_array_is_a_loud_error(self):
-        """profile_io guarantees every contig an array (zeros if uncovered), so a
+        """ani_io guarantees every contig an array (zeros if uncovered), so a
         missing key means the caller assembled the inputs wrong -- not skippable."""
         broken = {"S1": {"c1": self.dense["S1"]["c1"]}, "S2": self.dense["S2"]}
         with self.assertRaises(KeyError):
             compare_all_pairs(
-                broken, self.contig_lengths, [("S1", "S2")],
-                MODEL, min_freq=MIN_FREQ, min_cov=5, genome_length=5,
+                broken,
+                self.contig_lengths,
+                [("S1", "S2")],
+                MODEL,
+                min_freq=MIN_FREQ,
+                min_cov=5,
+                genome_length=5,
             )
 
 
