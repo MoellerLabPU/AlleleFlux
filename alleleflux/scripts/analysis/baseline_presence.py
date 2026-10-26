@@ -742,6 +742,12 @@ SUMMARY_COLUMN_TEMPLATES = [
     # the carriers: later-timepoint mice with the allele present (covered + rule);
     # the carrier-level strain gate in rising origin judges THESE mice (spec 2.4)
     "{t1}_mice_allele_present",
+    # how hard we looked (spec 2.5; reporting only, nothing filters on these):
+    # reads at the position over the COVERED baseline samples (total_reads_{t0}
+    # below counts every sample, thin ones included), and the carriers whose
+    # OWN earlier sample was covered and clean, the strictest per-mouse evidence
+    "n_baseline_reads",
+    "n_carriers_own_baseline_absent",
     # same-mouse numbers: the strict framing, one count per de-novo/standing verdict
     "n_mice_standing_variation",
     "n_mice_de_novo_candidate",
@@ -957,6 +963,12 @@ def _site_record(
             tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
             tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
             tps.name("{t1}_mice_allele_present"): ",".join(sorted(mice_t1_present)),
+            "n_baseline_reads": int(t0_cov["total_reads"].sum()),
+            # a carrier whose own earlier sample was covered and absent reads
+            # de_novo_candidate in origin_in_own_mouse (label_origin_in_own_mouse)
+            "n_carriers_own_baseline_absent": int(
+                (t1["origin_in_own_mouse"] == ORIGIN_DE_NOVO).sum()
+            ),
         }
     )
     for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
@@ -1022,6 +1034,11 @@ def summarise_sites(
         over pre samples deep enough to judge; n_replicates_with_allele_at_pre --
         distinct replicates among the present ones; pre_mice_allele_present --
         their subjectIDs, comma-joined.  (Presence rule applied.)
+      end_mice_allele_present -- the carriers: end mice with the allele present.
+      n_baseline_reads -- reads at the position over the COVERED baseline
+        samples only (how hard we looked); n_carriers_own_baseline_absent --
+        carriers whose own earlier sample was covered and clean.  Reporting
+        only (spec 2.5): no verdict depends on either.
       n_mice_* -- end rows carrying that origin_in_own_mouse verdict (the
         same-mouse framing).
       total_reads_pre / allele_reads_pre / allele_frequency_pre (and _end) --

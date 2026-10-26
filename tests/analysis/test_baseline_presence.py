@@ -583,6 +583,8 @@ class TestSummariseSites(unittest.TestCase):
                 "n_replicates_with_allele_at_pre",
                 "pre_mice_allele_present",
                 "end_mice_allele_present",
+                "n_baseline_reads",
+                "n_carriers_own_baseline_absent",
                 "n_mice_standing_variation",
                 "n_mice_de_novo_candidate",
                 "n_mice_de_novo_candidate_below_detection_at_pre",
@@ -1230,7 +1232,7 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual((int(g.total_reads_end), int(g.allele_reads_end)), (120, 47))
         self.assertAlmostEqual(g.allele_frequency_end, 47 / 120)
         self.assertEqual(
-            len(summ.columns), 27
+            len(summ.columns), 29
         )  # 22 + first_carrier_date, first_detection_date, first_detection_cohort
 
     def test_strain_background_joins_when_given(self):
@@ -1343,6 +1345,14 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         # carrier-level strain gate downstream: fat m1 and m2, control nobody
         self.assertEqual(fat.end_mice_allele_present, "m1,m2")
         self.assertTrue(pd.isna(control.end_mice_allele_present))
+        # how hard we looked (spec 2.5, reporting only): reads over the COVERED
+        # baseline samples (m1, m2, m3 pre: 30 each; m4's 2 reads are not covered,
+        # unlike total_reads_pre which counts them), and the carriers whose OWN
+        # earlier sample was covered and clean (m2; m1's pre had 5 G reads)
+        self.assertEqual(int(fat.n_baseline_reads), 90)
+        self.assertEqual(int(fat.total_reads_pre), 92)
+        self.assertEqual(int(fat.n_carriers_own_baseline_absent), 1)
+        self.assertEqual(int(control.n_carriers_own_baseline_absent), 0)  # no carriers
         self.assertIn("rose in at least one group", done.stderr)  # counts logged
 
     # ---- Task 5 (spec 2.2, 2.5): optional metadata columns ride into the long table.

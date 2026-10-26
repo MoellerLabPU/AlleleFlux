@@ -105,6 +105,17 @@ analysis:
                                    # own_group = only its own group (groups housed apart, e.g. single-diet cages;
                                    #   needs summary single_sample or lmm_across_time, an error otherwise);
                                    # individual = the carrier mice's own earlier samples only.
+    cluster_window_bp: 1000        # cluster rule: de novo alleles within this many bp on one contig, in one
+                                   # group, at any age, are one block event (chained), never independent mutations
+    max_de_novo_neighbours: 0      # a de novo allele with MORE than this many such neighbours becomes a
+                                   # block_event; 0 = only lone alleles stay de novo
+    strain_gate: "carrier"         # which strain verdict decides whether a de novo allele stands:
+                                   # carrier = the allele's own carriers' per-mouse turnover verdicts (default);
+                                   # group = the across-cage classification vote; both = the stricter of the two;
+                                   # none = no strain gate.  Every gate but none needs use_strain_turnover: True
+                                   # (and use_pairwise_ani); both verdicts are written to every row regardless.
+    min_determined_carriers: 3     # carrier gate: carriers with a per-mouse verdict needed before their strain is
+                                   # called; fewer -> strain_undetermined (not de novo)
                                    # depth gate / presence rule reuse pairwise_ani.min_cov, min_freq, fdr
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
     - phylum                       # Remove or comment out levels you don't need; set to [] for MAG level only

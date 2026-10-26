@@ -1263,6 +1263,100 @@ def site_depth_filter_cli_args():
 SITE_DEPTH_FILTER_ARGS = site_depth_filter_cli_args()
 
 
+def de_novo_rule_params():
+    """``analysis.baseline_presence``'s de novo knobs with the house defaults, checked.
+
+    The knobs of the de novo analysis (spec 2.2-2.4), read ONCE so the
+    baseline_presence and rising_origin rules can never disagree:
+
+    * ``baseline_scope`` -- what "absent at baseline" is judged against
+      (``cohort`` by default: every sample of the run dated before the first
+      carrier; needs ``collection_date`` in the metadata);
+    * ``cluster_window_bp`` / ``max_de_novo_neighbours`` -- the cluster rule
+      (de novo alleles within the window on one contig in one group are one
+      block event; more than the tolerated neighbours -> block_event);
+    * ``strain_gate`` / ``min_determined_carriers`` -- which strain verdict
+      decides whether a de novo allele stands (``carrier`` by default: the
+      allele's own carriers' per-mouse turnover verdicts, at least the floor
+      of them determined).
+
+    Every gate but ``none`` reads strain-turnover outputs (the per-mouse tables
+    for ``carrier``, the classification table for ``group``, both for
+    ``both``), so those gates require ``use_strain_turnover`` and the run stops
+    at parse time otherwise, not after the statistics.  Unknown words and
+    negative numbers stop it too.
+
+    Example: a config with only ``summary`` in the block ->
+    ``{"baseline_scope": "cohort", "cluster_window_bp": 1000,
+    "max_de_novo_neighbours": 0, "strain_gate": "carrier",
+    "min_determined_carriers": 3}``.
+    """
+    # The two vocabularies, spelled here (not module-level) so the function is
+    # self-contained: the slice tests exec it alone, and the CLIs own the words.
+    BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+    STRAIN_GATES = ("carrier", "group", "both", "none")
+    analysis = config.get("analysis", {}) or {}
+    block = analysis.get("baseline_presence", {}) or {}
+    p = {
+        "baseline_scope": str(block.get("baseline_scope", "cohort")),
+        "cluster_window_bp": int(block.get("cluster_window_bp", 1000)),
+        "max_de_novo_neighbours": int(block.get("max_de_novo_neighbours", 0)),
+        "strain_gate": str(block.get("strain_gate", "carrier")),
+        "min_determined_carriers": int(block.get("min_determined_carriers", 3)),
+    }
+    if p["baseline_scope"] not in BASELINE_SCOPES:
+        raise ValueError(
+            f"analysis.baseline_presence.baseline_scope must be one of "
+            f"{BASELINE_SCOPES}, got {p['baseline_scope']!r}"
+        )
+    if p["strain_gate"] not in STRAIN_GATES:
+        raise ValueError(
+            f"analysis.baseline_presence.strain_gate must be one of {STRAIN_GATES}, "
+            f"got {p['strain_gate']!r}"
+        )
+    if p["strain_gate"] != "none" and not analysis.get("use_strain_turnover", False):
+        raise ValueError(
+            f"analysis.baseline_presence.strain_gate {p['strain_gate']!r} reads the "
+            f"strain-turnover outputs (per-mouse tables and/or the classification "
+            f"table): set analysis.use_strain_turnover: true (and use_pairwise_ani), "
+            f"or strain_gate: none"
+        )
+    if p["cluster_window_bp"] < 0 or p["max_de_novo_neighbours"] < 0:
+        raise ValueError(
+            "analysis.baseline_presence.cluster_window_bp and max_de_novo_neighbours "
+            "must be >= 0"
+        )
+    if p["min_determined_carriers"] < 1:
+        raise ValueError("analysis.baseline_presence.min_determined_carriers must be >= 1")
+    return p
+
+
+def de_novo_rule_cli_args():
+    """The rising-origin flags built from ``de_novo_rule_params``, once.
+
+    Example: defaults -> ``"--cluster_window_bp 1000 --max_de_novo_neighbours 0
+    --strain_gate carrier --min_determined_carriers 3"``.  (The baseline scope
+    is the baseline_presence rule's own flag and is not in this string.)
+    """
+    p = de_novo_rule_params()
+    return (
+        f"--cluster_window_bp {p['cluster_window_bp']} "
+        f"--max_de_novo_neighbours {p['max_de_novo_neighbours']} "
+        f"--strain_gate {p['strain_gate']} "
+        f"--min_determined_carriers {p['min_determined_carriers']}"
+    )
+
+
+# Evaluated once at parse time, only when the feature is on (a config without
+# use_baseline_presence must never trip the gate-vs-turnover check).
+if config.get("analysis", {}).get("use_baseline_presence", False):
+    DE_NOVO_RULE_PARAMS = de_novo_rule_params()
+    DE_NOVO_RULE_ARGS = de_novo_rule_cli_args()
+else:
+    DE_NOVO_RULE_PARAMS = None
+    DE_NOVO_RULE_ARGS = ""
+
+
 def get_strain_turnover_output_path(mag_wildcard="{mag}"):
     """Per-MAG strain-turnover table (the strain_turnover rule's primary output); OUTDIR, like ANI."""
     return os.path.join(OUTDIR, "strain_turnover", f"{mag_wildcard}_strain_turnover.tsv")

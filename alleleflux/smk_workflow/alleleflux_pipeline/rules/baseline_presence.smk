@@ -67,7 +67,7 @@ rule baseline_presence:
         # does not say (needs collection_date in the metadata).  own_group needs a
         # within-group summary family (single_sample / lmm_across_time); the CLI
         # refuses the rest.
-        baseline_scope=config["analysis"].get("baseline_presence", {}).get("baseline_scope", "cohort"),
+        baseline_scope=(DE_NOVO_RULE_PARAMS or {}).get("baseline_scope", "cohort"),
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -102,12 +102,20 @@ rule baseline_presence:
 
 
 def _rising_origin_inputs(wildcards):
-    """Every comparison's rising table, plus the classification when strain turnover runs.
+    """Every comparison's rising table, plus the strain-turnover outputs it reads.
 
     Reads the same list generate_rising_origin_targets gates on, so the rule is
-    only ever scheduled with at least one rising table to read.
+    only ever scheduled with at least one rising table to read.  With strain
+    turnover on, the classification table (the group verdict) and the per-MAG
+    turnover tables (the carrier verdict) are inputs too, so the count waits
+    for them; de_novo_rule_params already refused any gate but none without
+    use_strain_turnover.
     """
-    return generate_rising_table_targets() + generate_replacement_classification_targets()
+    return (
+        generate_rising_table_targets()
+        + generate_replacement_classification_targets()
+        + generate_strain_turnover_targets()
+    )
 
 
 # Seconds of pandas over small tables: not worth a cluster job.
@@ -117,8 +125,10 @@ localrules:
 
 rule rising_origin:
     """Standing vs de novo for the alleles that rose, over every comparison: one
-    tidy summary.  With strain turnover on, de novo in a replaced MAG becomes
-    new_strain (the run's classification table, its configured voter floor)."""
+    tidy summary.  Applies the cluster rule (block events) and the strain gate
+    (analysis.baseline_presence.strain_gate: the carriers' own turnover
+    verdicts by default, the group's classification vote, both, or none); both
+    verdicts are written to every row whenever strain turnover is on."""
     input:
         _rising_origin_inputs,
     output:
@@ -127,8 +137,17 @@ rule rising_origin:
     params:
         rising_dir=os.path.join(OUTDIR, "baseline_presence"),
         output_dir=os.path.join(OUTDIR, "baseline_presence", "rising_origin"),
+        # The cluster rule + strain gate flags, one string for the whole run
+        # (common.smk); the strain inputs ride along whenever turnover is on,
+        # so every row carries both verdicts whatever the gate reads.
+        de_novo_rule_args=DE_NOVO_RULE_ARGS,
         classification_arg=(
             f"--classification {get_replacement_classification_path()}"
+            if config["analysis"].get("use_strain_turnover", False)
+            else ""
+        ),
+        turnover_arg=(
+            f"--turnover_dir {os.path.join(OUTDIR, 'strain_turnover')}"
             if config["analysis"].get("use_strain_turnover", False)
             else ""
         ),
@@ -137,5 +156,7 @@ rule rising_origin:
         alleleflux-rising-origin \
             --rising_dir {params.rising_dir} \
             --output_dir {params.output_dir} \
-            {params.classification_arg}
+            {params.de_novo_rule_args} \
+            {params.classification_arg} \
+            {params.turnover_arg}
         """

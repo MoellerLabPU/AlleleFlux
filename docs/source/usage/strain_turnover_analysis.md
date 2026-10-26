@@ -202,6 +202,14 @@ baseline and later, in which the allele is present, and its batch).  The two
 pairs coincide when nobody earlier had the allele; the gap between them is
 how long it was in the colony before these mice carried it.
 
+**How hard we looked.** Two reporting-only columns on the summary and rising
+tables, filtered on by nothing: `n_baseline_reads`, the reads at the position
+over the covered baseline samples (a de novo call on 900 reads and one on 20
+are not the same claim), and `n_carriers_own_baseline_absent`, how many of the
+carriers have an earlier sample of their own that was covered and clean (the
+pooled "nobody had it" can rest entirely on other mice).  Sort the lone-allele
+candidates by them; they never change a verdict.
+
 **Where the baseline is cut.** Each row is judged against the samples dated
 strictly before its *cutoff*: the first carrier's date, or, for a group that
 rose without any later sample clearing the presence bar (no carrier, verdict
@@ -370,7 +378,19 @@ analysis:
     test_type: two_sample_paired_tTest
     threshold_column: q_value
     threshold: 0.05
+    baseline_scope: cohort          # needs collection_date in the metadata
+    cluster_window_bp: 1000
+    max_de_novo_neighbours: 0
+    strain_gate: carrier            # carrier | group | both | none
+    min_determined_carriers: 3
 ```
+
+The five de novo knobs are read once (`de_novo_rule_params` in `common.smk`)
+so the baseline-presence and rising-origin rules cannot disagree; every gate
+but `none` requires `use_strain_turnover` (the rising-origin job then waits
+for the classification table and the per-MAG turnover tables and receives
+`--classification` and `--turnover_dir`), and the run stops at parse time
+otherwise.
 
 Pairwise ANI, strain turnover and classification run for the **tested MAGs
 only**: the union, over every configured comparison and enabled test, of the
