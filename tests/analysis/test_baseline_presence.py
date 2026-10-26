@@ -18,6 +18,7 @@ import pandas as pd
 
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
 from alleleflux.scripts.analysis.baseline_presence import (
+    BASELINE_SCOPE_DEFAULT,
     EVIDENCE_ABSENT,
     EVIDENCE_BELOW_DETECTION,
     EVIDENCE_NOT_COVERED,
@@ -573,10 +574,15 @@ class TestSummariseSites(unittest.TestCase):
                 "n_candidate_alleles",
                 "q_value",
                 "origin_any_mouse",
+                "first_carrier_date",
+                "first_carrier_cohort",
+                "first_detection_date",
+                "first_detection_cohort",
                 "n_pre_samples_allele_present",
                 "n_pre_samples_covered",
                 "n_replicates_with_allele_at_pre",
                 "pre_mice_allele_present",
+                "end_mice_allele_present",
                 "n_mice_standing_variation",
                 "n_mice_de_novo_candidate",
                 "n_mice_de_novo_candidate_below_detection_at_pre",
@@ -1223,7 +1229,9 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual((int(g.total_reads_pre), int(g.allele_reads_pre)), (92, 6))
         self.assertEqual((int(g.total_reads_end), int(g.allele_reads_end)), (120, 47))
         self.assertAlmostEqual(g.allele_frequency_end, 47 / 120)
-        self.assertEqual(len(summ.columns), 22)
+        self.assertEqual(
+            len(summ.columns), 27
+        )  # 22 + first_carrier_date, first_detection_date, first_detection_cohort
 
     def test_strain_background_joins_when_given(self):
         tdir = os.path.join(self.tmp, "turnover")
@@ -1331,7 +1339,335 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual((int(fat.n_replicates), int(fat.n_mice)), (1, 2))
         # judged on control's end mice only: m3 2/30 under the bar, m4 0/30
         self.assertEqual(control.origin_any_mouse, "allele_not_present_at_end")
+        # the carriers (later-timepoint mice with the allele present), for the
+        # carrier-level strain gate downstream: fat m1 and m2, control nobody
+        self.assertEqual(fat.end_mice_allele_present, "m1,m2")
+        self.assertTrue(pd.isna(control.end_mice_allele_present))
         self.assertIn("rose in at least one group", done.stderr)  # counts logged
+
+    # ---- Task 5 (spec 2.2, 2.5): optional metadata columns ride into the long table.
+    def _long(self):
+        return pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence.tsv.gz",
+            ),
+            sep="\t",
+            dtype=str,
+        )
+
+    def test_optional_metadata_columns_ride_along(self):
+        """collection_date (ISO YYYY-MM-DD) and cohort copied from the metadata onto
+        every long row of that sample, verbatim."""
+        meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
+        # 8 samples -> dates 2016-01-01 .. 2016-01-08 in metadata order (m1_pre first)
+        meta["collection_date"] = [f"2016-01-0{i + 1}" for i in range(len(meta))]
+        meta["cohort"] = "batch1"
+        meta.to_csv(self.metadata, sep="\t", index=False)
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        long = self._long()
+        self.assertEqual(
+            long.loc[long.sample_id == "m1_pre", "collection_date"].iloc[0],
+            "2016-01-01",
+        )
+        self.assertEqual(
+            long.loc[long.sample_id == "m4_end", "collection_date"].iloc[0],
+            "2016-01-08",
+        )
+        self.assertEqual(set(long["cohort"]), {"batch1"})
+
+    def test_missing_optional_columns_are_blank(self):
+        """Metadata without the two columns: they exist in the long table, all blank."""
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        long = self._long()
+        self.assertIn("collection_date", long.columns)
+        self.assertIn("cohort", long.columns)
+        self.assertTrue(long["collection_date"].isna().all())
+        self.assertTrue(long["cohort"].isna().all())
+        # placed right after `time`, so the sample-context block stays together
+        cols = list(long.columns)
+        self.assertEqual(
+            cols[cols.index("time") : cols.index("time") + 3],
+            ["time", "collection_date", "cohort"],
+        )
+
+    def test_non_iso_date_is_refused_before_any_output(self):
+        """A date in any format but YYYY-MM-DD (here DD/MM/YYYY) is a malformed
+        metadata file: the job stops and names the format, no guessing, no output."""
+        meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
+        meta["collection_date"] = "10/01/2017"
+        meta.loc[meta.sample_id == "m1_pre", "collection_date"] = (
+            "2017-01-10"  # one good
+        )
+        meta.to_csv(self.metadata, sep="\t", index=False)
+        done = self._run()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("YYYY-MM-DD", done.stderr)
+        self.assertIn("10/01/2017", done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+    def test_blank_dates_are_allowed(self):
+        """An empty collection_date cell is "unknown", not malformed: the job runs and
+        the row's date is blank while the dated rows keep theirs."""
+        meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
+        meta["collection_date"] = ""
+        meta.loc[meta.sample_id == "m1_pre", "collection_date"] = "2017-01-10"
+        meta.to_csv(self.metadata, sep="\t", index=False)
+        # explicit scope: under the default (cohort) a partly dated sheet is refused
+        done = self._run("--baseline_scope", "comparison")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        long = self._long()
+        self.assertEqual(
+            long.loc[long.sample_id == "m1_pre", "collection_date"].iloc[0],
+            "2017-01-10",
+        )
+        self.assertTrue(
+            long.loc[long.sample_id == "m2_pre", "collection_date"].isna().all()
+        )
+
+    # ---- Task 6 (spec 2.2): baseline scopes individual and cohort.
+    def _summary(self, **read_kw):
+        return pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_summary.tsv",
+            ),
+            sep="\t",
+            **read_kw,
+        )
+
+    def test_individual_scope_uses_carriers_own_baseline_only(self):
+        """Carriers at end are m1 and m2 (m3's 2/30 is under the bar).  Under
+        `individual` only THEIR pre samples are the baseline, so m3's pre with its
+        one stray G read is not consulted.  With m1's pre G reads removed, both
+        carriers' pre samples are covered and absent: de_novo_candidate, judged on
+        2 covered baseline samples (the default scope would say below_detection
+        from m3's pre, on 3)."""
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+        done = self._run("--baseline_scope", "individual")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "de_novo_candidate")
+        self.assertEqual(int(g["n_pre_samples_covered"]), 2)
+        self.assertEqual(
+            (
+                g["pre_mice_allele_present"]
+                if isinstance(g["pre_mice_allele_present"], str)
+                else ""
+            ),
+            "",
+        )
+        # and the default scope on the same data still consults m3's pre
+        done = self._run("--baseline_scope", "comparison")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(
+            g["origin_any_mouse"], "de_novo_candidate_below_detection_at_pre"
+        )
+        self.assertEqual(int(g["n_pre_samples_covered"]), 3)
+
+    def _add_cohort_samples(self, dates=None):
+        """Two mice of a third group 'other' at a timepoint 'mid' (replicate r3),
+        G present in both (20/30).  With ``dates`` (sample -> 'YYYY-MM-DD' or ''),
+        every sample is dated from it and given a cohort label; with None the
+        sheet gets NO collection_date / cohort column at all."""
+        prof = os.path.join(self.run, "profiles")
+        meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
+        extra = []
+        for mouse in ("m5", "m6"):
+            s = f"{mouse}_mid"
+            _write_profile(
+                prof,
+                s,
+                self.MAG,
+                [(p, 30, 0, 0, 0) for p in range(6) if p != 1] + [(1, 10, 0, 20, 0)],
+            )
+            extra.append(
+                {
+                    "sample_id": s,
+                    "subjectID": mouse,
+                    "group": "other",
+                    "time": "mid",
+                    "replicate": "r3",
+                    "bam_path": "x",
+                }
+            )
+        meta = pd.concat([meta, pd.DataFrame(extra)], ignore_index=True)
+        if dates is not None:
+            meta["collection_date"] = [dates[s] for s in meta["sample_id"]]
+            meta["cohort"] = [
+                "wave1" if s.endswith("_mid") else "wave2" for s in meta["sample_id"]
+            ]
+        meta.to_csv(self.metadata, sep="\t", index=False)
+
+    def test_cohort_scope_finds_the_allele_in_another_group_before_the_first_carrier(
+        self,
+    ):
+        """The fat carriers' end samples are dated 2017-06-10.  A third-group sample
+        dated 2016-09-01 already carries G: standing under `cohort` (the allele was
+        in the building), de novo under `comparison`.  The 2018 sample is after the
+        first carrier and is not baseline."""
+        dates = {f"{m}_pre": "2017-01-10" for m in ("m1", "m2", "m3", "m4")}
+        dates.update({f"{m}_end": "2017-06-10" for m in ("m1", "m2", "m3", "m4")})
+        dates.update({"m5_mid": "2016-09-01", "m6_mid": "2018-01-01"})
+        self._add_cohort_samples(dates)
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = (
+            self._summary(dtype={"first_detection_cohort": str})
+            .set_index("allele")
+            .loc["G"]
+        )
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")
+        self.assertEqual(g["first_detection_date"], "2016-09-01")
+        self.assertEqual(g["first_detection_cohort"], "wave1")
+        self.assertEqual(g["first_carrier_date"], "2017-06-10")
+        # covered baseline: m1, m2, m3 pre (m4 pre has 2 reads: not covered) + m5_mid
+        self.assertEqual(int(g["n_pre_samples_covered"]), 4)
+        self.assertEqual(g["pre_mice_allele_present"], "m5")
+        # the comparison-level numbers stay the comparison's: end reads from fat+control only
+        self.assertEqual(int(g["total_reads_end"]), 120)
+        rising = pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+        ).set_index("rose_in")
+        self.assertEqual(sorted(rising.index), ["control", "fat"])  # no row for 'other'
+        self.assertEqual(rising.loc["fat", "origin_any_mouse"], "standing_variation")
+        long = self._long()
+        self.assertEqual(
+            set(long.loc[long.group == "other", "is_comparison_sample"]), {"False"}
+        )
+        self.assertEqual(
+            set(long.loc[long.group != "other", "is_comparison_sample"]), {"True"}
+        )
+        # same data, default scope: the third group is never loaded
+        done = self._run("--baseline_scope", "comparison")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertTrue(g["origin_any_mouse"].startswith("de_novo_candidate"))
+        self.assertNotIn("other", set(self._long()["group"]))
+
+    def test_cohort_is_the_default_scope(self):
+        """No --baseline_scope on the command line means cohort (user decision
+        2026-10-22): on the dated sheet the default run finds G in the third-group
+        sample from 2016 and calls it standing, exactly as --baseline_scope cohort."""
+        dates = {f"{m}_pre": "2017-01-10" for m in ("m1", "m2", "m3", "m4")}
+        dates.update({f"{m}_end": "2017-06-10" for m in ("m1", "m2", "m3", "m4")})
+        dates.update({"m5_mid": "2016-09-01", "m6_mid": "2018-01-01"})
+        self._add_cohort_samples(dates)
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+        done = self._run()  # no scope flag
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")
+        self.assertEqual(g["pre_mice_allele_present"], "m5")
+        self.assertEqual(BASELINE_SCOPE_DEFAULT, "cohort")
+
+    def test_no_carrier_row_is_cut_at_the_groups_sampling_day_and_carrier_wave_is_reported(
+        self,
+    ):
+        """Control rose (1 -> 2 reads) but no control mouse clears the bar: no carrier.
+        Its baseline is cut at the day control was sampled at the later timepoint
+        (2017-06-10), the same line as the fat row, so both rows describe the same
+        4 covered baseline samples with m5 present; its first_carrier_* stay blank.
+        The fat row reports the carriers' wave (wave2) beside the first detection's
+        (wave1).  Dates are never replaced by label order on a dated sheet."""
+        dates = {f"{m}_pre": "2017-01-10" for m in ("m1", "m2", "m3", "m4")}
+        dates.update({f"{m}_end": "2017-06-10" for m in ("m1", "m2", "m3", "m4")})
+        dates.update({"m5_mid": "2016-09-01", "m6_mid": "2018-01-01"})
+        self._add_cohort_samples(dates)
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rising = pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+            dtype=str,
+        ).set_index("rose_in")
+        fat, control = rising.loc["fat"], rising.loc["control"]
+        self.assertEqual(int(fat["n_pre_samples_covered"]), 4)
+        self.assertEqual(int(control["n_pre_samples_covered"]), 4)
+        self.assertEqual(
+            control["pre_mice_allele_present"], "m1,m5"
+        )  # m1 pre has 5 G reads here
+        self.assertEqual(control["origin_any_mouse"], "allele_not_present_at_end")
+        self.assertTrue(pd.isna(control["first_carrier_date"]))
+        self.assertTrue(pd.isna(control["first_carrier_cohort"]))
+        self.assertEqual(control["first_detection_date"], "2016-09-01")
+        self.assertEqual(fat["first_carrier_date"], "2017-06-10")
+        self.assertEqual(fat["first_carrier_cohort"], "wave2")
+        self.assertEqual(fat["first_detection_cohort"], "wave1")
+
+    def test_cohort_partly_dated_sheet_is_refused(self):
+        """A collection_date column with blanks under `cohort` is a data error, not
+        a design: ordering the baseline by label while some samples ARE dated
+        would be silent damage.  Stop before any output, name every undated sample."""
+        dates = {
+            f"{m}_{t}": "" for m in ("m1", "m2", "m3", "m4") for t in ("pre", "end")
+        }
+        dates.update({"m5_mid": "2016-09-01", "m6_mid": "2018-01-01"})
+        self._add_cohort_samples(dates)
+        done = self._run("--baseline_scope", "cohort")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("collection_date", done.stderr)
+        for s in ("m1_pre", "m4_end"):
+            self.assertIn(s, done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+        # the same sheet is fine under every other scope: dates are only carried along
+        done = self._run("--baseline_scope", "comparison")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_cohort_without_a_date_column_falls_back_to_label_order_with_warning(self):
+        """No collection_date column anywhere: a study that never recorded dates.
+        'before' means an earlier timepoint LABEL in the sheet's order (pre, end,
+        mid): 'mid' sorts after 'end', neither extra sample is baseline, and the
+        run says so once."""
+        self._add_cohort_samples(dates=None)
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("timepoint order", done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(int(g["n_pre_samples_covered"]), 3)  # m1, m2, m3 pre only
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")  # m1 pre has G
+        self.assertTrue(pd.isna(g["first_carrier_date"]))
+
+    def test_cohort_skips_timepoints_without_a_cache_for_the_mag(self):
+        """A third timepoint in the sheet whose cache has no file for this genome
+        (the genome was not QC-eligible there): skipped with a log line, no crash."""
+        meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
+        meta = pd.concat(
+            [
+                meta,
+                pd.DataFrame(
+                    [
+                        {
+                            "sample_id": "m7_late",
+                            "subjectID": "m7",
+                            "group": "other",
+                            "time": "late",
+                            "replicate": "r4",
+                            "bam_path": "x",
+                        }
+                    ]
+                ),
+            ]
+        )
+        meta.to_csv(self.metadata, sep="\t", index=False)
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("late", done.stderr)
+        self.assertNotIn("m7_late", set(self._long()["sample_id"]))
 
 
 class TestCheckBaselineScope(unittest.TestCase):

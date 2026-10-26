@@ -931,6 +931,11 @@ Reads every `*_baseline_presence_rising.tsv` in `--rising_dir` and counts, per c
 | `--classification` | — | `replacement_classification.tsv` table(s), one per voter floor (`min_voters`). When given, de novo in a replaced MAG becomes `new_strain` and the summary is split by floor and strain class. |
 | `--strain_metric` | `dominant_strain_change` | Classification metric (`dominant_strain_change` = conANI; `strain_replacement` = popANI, stricter). |
 | `--status_column` | `strain_status_replicates` | Verdict column: replicates vote, or `strain_status` for mice. |
+| `--cluster_window_bp` | `1000` | Cluster rule: two de novo alleles on the same contig that rose in the same group are neighbours when at most this many bp apart (any age); neighbours chain into blocks. |
+| `--max_de_novo_neighbours` | `0` | Cluster rule: a de novo allele with more than this many de novo neighbours becomes a `block_event`, never an independent de novo mutation; 0 keeps only lone alleles as de novo. |
+| `--turnover_dir` | — | Folder of `{mag}_strain_turnover.tsv` tables (`alleleflux-strain-turnover`): the per-mouse strain verdicts the carrier gate reads for each allele's carriers. |
+| `--strain_gate` | `carrier` | Which strain verdict decides whether a de novo allele stands: `carrier` = the allele's own carriers (needs `--turnover_dir`); `group` = the across-cage vote (needs `--classification`); `both` = the stricter of the two (needs both inputs); `none` = no strain gate. See [Outputs](outputs.md#rising-origin). |
+| `--min_determined_carriers` | `3` | Carrier gate: carriers with a per-mouse verdict needed before their strain is called; fewer → `strain_undetermined`. |
 
 Outputs `rising_origin_alleles.tsv` and `rising_origin_summary.tsv`; see [Outputs](outputs.md).
 
@@ -961,7 +966,7 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 | `--summary` | `two_sample_paired` | Summary family: `two_sample_paired`, `two_sample_unpaired`, `single_sample`, `lmm`, `lmm_across_time`. CMH is not offered (no per-base p-value). |
 | `--threshold_column` | `q_value` | `q_value` or `min_p_value`. |
 | `--threshold` | 0.05 | Significance cutoff. |
-| `--baseline_scope` | `comparison` | Samples a site is judged on: `comparison` = both groups; `own_group` = only the group the site was significant in (within-group tests only: `single_sample`, `lmm_across_time`; an error with any other family). |
+| `--baseline_scope` | `cohort` | What "absent at baseline" is judged against: `individual` = the carrier mice's own earlier samples; `own_group` = every earlier sample of the site's own group (within-group tests only: `single_sample`, `lmm_across_time`; an error with any other family); `comparison` = every earlier sample of both groups; `cohort` = every QC-passing sample of the run, any group, any timepoint, collected before the first carrier sample (needs `collection_date`, `YYYY-MM-DD`, for every sample in the metadata: a partly dated sheet is an error; with no dates at all "before" means an earlier timepoint label and a warning is logged). |
 | `--turnover_dir` | — | Strain-turnover outputs; adds a `strain_background` column. |
 | `--mags` | all | Restrict to these MAG ids. |
 | `--min_cov` | 5 | Reads at a position before any verdict (1 = off). |

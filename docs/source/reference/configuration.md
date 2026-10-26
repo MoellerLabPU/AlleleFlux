@@ -340,6 +340,7 @@ Settings for the strain-turnover branch (see the [Strain Turnover and Baseline P
 | `baseline_presence.test_type` | required | Row filter, spelled as the summary file does (e.g. `two_sample_unpaired_tTest`, `LMM_abs`). |
 | `baseline_presence.threshold_column` | `q_value` | `q_value` (BH) or `min_p_value`. |
 | `baseline_presence.threshold` | 0.05 | Significance cutoff. |
+| `baseline_presence.baseline_scope` | `cohort` | Which earlier samples "absent at baseline" is judged against: `individual` (the carrier mice's own), `own_group` (the site's own group; within-group tests only), `comparison` (both groups), `cohort` (every QC-passing sample of the run, any group, any age, collected before the first carrier sample; needs a `collection_date` column, `YYYY-MM-DD`, for every sample: a partly dated sheet is an error, a sheet with no dates falls back to timepoint order with a warning). See the [usage guide](../usage/strain_turnover_analysis.md#which-samples-are-the-baseline-baseline_scope). |
 
 The MAG universe of this branch is the set of **tested** MAGs: the union over every comparison and enabled test of the MAGs the eligibility (and preprocessing, when enabled) checkpoints admitted. Resource overrides use the rule names `pairwise_ani` and `baseline_presence`; `strain_turnover` and `replacement_classification` run locally.
 

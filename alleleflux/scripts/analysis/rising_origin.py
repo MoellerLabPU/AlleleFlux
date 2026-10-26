@@ -13,14 +13,32 @@ with the timepoint names taken out so every comparison shares one vocabulary:
     de_novo                  covered earlier samples, the allele in none of them
     de_novo_below_detection  only a few reads at the earlier timepoint, under
                              the detection bar
-    new_strain               (strain verdicts only) de novo or de novo below
-                             detection, but in a MAG whose strain was REPLACED
-                             in that comparison x group: the allele most likely
-                             arrived with the new strain, not by mutation
+    new_strain               de novo or de novo below detection, but the strain
+                             gate says the allele most likely arrived with a new
+                             strain, not by mutation: the group's across-cage
+                             vote says REPLACED (gate ``group``), or more than
+                             half of the allele's own carriers changed strain
+                             (gate ``carrier``)
+    strain_undetermined      de novo or de novo below detection, but the strain
+                             gate could not say: too few carriers with a
+                             per-mouse verdict, or a group vote that is neither
+                             replaced nor not_replaced (too few voters, no
+                             voters, not in the table, a tie).  Never counted
+                             as de novo (user ruling 2026-10-23)
+    block_event              de novo (either flavour) but with more than
+                             ``--max_de_novo_neighbours`` other de novo alleles
+                             within ``--cluster_window_bp`` on the same contig,
+                             same group, any age: one imported or recombined
+                             chunk, never counted as independent mutations
+                             (spec 2.3; ``block_id`` names the block)
     not_present_later        no covered later sample of the group shows it
     baseline_not_covered     no earlier sample deep enough to judge
 
-The first four are verdicts (``CALLED``); the last two are not.
+The first four are verdicts (``CALLED``); the last four are not.  The
+cluster rule runs BEFORE any strain gate: whether alleles sit together is a
+fact about positions, so it is judged on every candidate before a gate can
+relabel some of them (a gate that ran first would hide neighbours and could
+leave one member of a block looking like a lone de novo allele).
 
 Strain verdicts (``--classification``, optional)
 ------------------------------------------------
@@ -35,14 +53,47 @@ are never mixed):
   (``combine_arms``): one replaced arm is enough to explain a difference.
 
 A MAG x group x period with no row in a table was never classified: its status
-is ``not_in_strain_table`` and its class ``unverified``, never a guess.  Then
-de novo in a ``replaced`` MAG becomes ``new_strain``; standing stays standing
-(the allele was there either way).
+is ``not_in_strain_table`` and its class ``unverified``, never a guess.
+``attach_strain`` only REPORTS (``strain_status``, ``strain_class``); which
+verdict changes an origin is the gate's business.
+
+Carrier verdicts (``--turnover_dir``, optional; spec 2.4)
+--------------------------------------------------------
+The per-mouse ``{mag}_strain_turnover.tsv`` tables of alleleflux-strain-turnover
+(one row per mouse and transition, ``dominant_strain_change`` True / False /
+blank).  For every rising allele the mice carrying it at the later timepoint
+(``{later}_mice_allele_present`` from the rising table) are looked up for the
+allele's period: ``carrier_strain_status`` is ``new_strain_carriers`` when more
+than half of the determined carriers changed, ``same_strain_carriers``
+otherwise, ``strain_undetermined`` when fewer than ``--min_determined_carriers``
+could be judged (or the MAG has no turnover table).  The thresholds live in the
+turnover step; nothing is recomputed here.
+
+The gate (``--strain_gate``; ``apply_strain_gate``, the ONLY place an origin
+changes after the cluster rule) relabels the two de novo flavours and nothing
+else:
+
+* ``carrier`` (default): from ``carrier_strain_status``;
+* ``group``: from ``strain_class``: replaced -> new_strain, not_replaced -> kept,
+  anything else -> strain_undetermined;
+* ``both``: an allele must pass both; one undetermined verdict makes it
+  ``strain_undetermined`` (not explained), otherwise one ``replaced`` /
+  ``new_strain_carriers`` makes it ``new_strain`` (strain_undetermined >
+  new_strain > kept);
+* ``none``: no relabel.
+
+Whatever the gate, every row carries BOTH verdicts (``strain_status`` /
+``strain_class`` and ``carrier_strain_status`` + counts) whenever their inputs
+were given; the unused one is reporting only, there to be compared, never read
+by the gate.
 
 Outputs (``--output_dir``)
 --------------------------
-* ``rising_origin_alleles.tsv`` -- every rising allele with its ``origin`` (and
-  ``floor``, ``strain_status``, ``strain_class`` with verdicts).
+* ``rising_origin_alleles.tsv`` -- every rising allele with its ``origin``,
+  ``block_id`` / ``n_de_novo_neighbours``, and, when the inputs were given,
+  ``floor`` / ``strain_status`` / ``strain_class`` (group verdict) and
+  ``carrier_strain_status`` / ``n_carriers`` / ``n_carriers_determined`` /
+  ``n_carriers_strain_changed`` (carrier verdict).
 * ``rising_origin_summary.tsv`` -- one row per floor x comparison x group x
   strain class x origin, zero counts included: ``n_alleles``, ``n_mags``,
   ``n_rising`` / ``n_called`` (the block's totals), ``pct_of_all`` (of every
@@ -66,6 +117,14 @@ import numpy as np
 import pandas as pd
 
 from alleleflux.scripts.analysis.baseline_presence import parse_comparison
+from alleleflux.scripts.analysis.de_novo_rules import (
+    BLOCK_EVENT,
+    CARRIER_NEW_STRAIN,
+    CARRIER_SAME_STRAIN,
+    CARRIER_UNDETERMINED,
+    assign_blocks,
+    carrier_strain_verdicts,
+)
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -76,11 +135,20 @@ ORIGINS = [
     "de_novo",
     "de_novo_below_detection",
     "new_strain",
+    BLOCK_EVENT,  # not a verdict: a cluster of de novo alleles counted as one event
+    CARRIER_UNDETERMINED,  # not a verdict: the strain gate could not say
     "not_present_later",
     "baseline_not_covered",
 ]
 CALLED = ORIGINS[:4]
-DE_NOVO = ("de_novo", "de_novo_below_detection")  # what a replaced MAG relabels
+DE_NOVO = ("de_novo", "de_novo_below_detection")  # the only origins a gate relabels
+STRAIN_GATES = ("carrier", "group", "both", "none")
+# Precedence of a gate verdict under ``both`` (user ruling 2026-10-26): an
+# allele is only EXPLAINED (new_strain) when both gates could speak and at
+# least one found a swap; if either gate is undetermined the allele is removed
+# from the de novo count as undetermined, and the other gate's verdict stays
+# readable in its own column.  None = the gate keeps the origin.
+_GATE_RANK = {None: 0, "new_strain": 1, CARRIER_UNDETERMINED: 2}
 
 # Raw verdicts a classification table may carry, and the class each maps to.
 # Anything else is a contract violation and raises (never guessed).
@@ -185,7 +253,19 @@ def load_rising(rising_dir: str) -> pd.DataFrame:
         if df.empty:
             logger.info(f"{comparison} {test}: no rising alleles (header-only table)")
             continue
+        # The carriers (mice with the allele present at the later timepoint),
+        # written by baseline presence under the comparison's own later label;
+        # required like every other column (a table without it is from an older
+        # baseline presence and must be regenerated).
+        carriers_col = f"{later}_mice_allele_present"
+        if carriers_col not in df.columns:
+            raise ValueError(
+                f"{os.path.basename(path)} lacks column {carriers_col} (the carriers): "
+                f"rerun alleleflux-baseline-presence"
+            )
+        carriers = df[carriers_col].fillna("").astype(str)
         df = df[REQUIRED].copy()
+        df["carriers"] = carriers
         df["group_analyzed"] = df["group_analyzed"].fillna("")  # blank = between-group
         df["gene_id"] = df["gene_id"].fillna("")  # intergenic
         df.insert(0, "age", later)
@@ -198,7 +278,9 @@ def load_rising(rising_dir: str) -> pd.DataFrame:
         frames.append(df)
     if not frames:
         return pd.DataFrame(
-            columns=["comparison", "test_type", "period", "age"] + REQUIRED + ["origin"]
+            columns=["comparison", "test_type", "period", "age"]
+            + REQUIRED
+            + ["carriers", "origin"]
         )
     return pd.concat(frames, ignore_index=True)
 
@@ -294,12 +376,12 @@ def attach_strain(
     ``tables`` = ``load_classification`` results, one per floor.  Within-group
     rows read the arm they rose in; between-group rows read both arms of their
     comparison and combine them (``strain_status`` then shows both, e.g.
-    ``40:not_replaced|AL:replaced``).  De novo in a ``replaced`` MAG becomes
-    ``new_strain``; ``origin_any_mouse`` keeps the raw verdict.
+    ``40:not_replaced|AL:replaced``).  REPORTING ONLY: no origin changes here;
+    ``apply_strain_gate`` decides what the verdict does to a de novo allele.
 
-    Example (floor 8, MAG_B replaced in 40): MAG_B's C, de novo below detection
-    in 40 -> ``new_strain``; at floor 4, where MAG_B is kept, it stays
-    ``de_novo_below_detection``.
+    Example (floor 8, MAG_B replaced in 40): MAG_B's C gets strain_status
+    ``replaced``, class ``replaced``; at floor 4, where MAG_B is kept,
+    ``not_replaced``.  Its origin is ``de_novo_below_detection`` in both copies.
     """
     floors = [f for f, _ in tables]
     if len(set(floors)) != len(floors):
@@ -329,10 +411,149 @@ def attach_strain(
             cls[~is_within] = [combine_arms(sa, sb) for sa, sb in zip(a, b)]
         out["strain_status"] = status
         out["strain_class"] = cls
-        relabel = out["origin"].isin(DE_NOVO) & (out["strain_class"] == "replaced")
-        out.loc[relabel, "origin"] = "new_strain"
         copies.append(out)
     return pd.concat(copies, ignore_index=True)
+
+
+def attach_carrier_gate(
+    alleles: pd.DataFrame, turnover_dir: str, min_determined: int
+) -> pd.DataFrame:
+    """Add the carrier-level strain verdict to every row (spec 2.4).
+
+    Reads ``{turnover_dir}/{mag}_strain_turnover.tsv`` once per MAG (the
+    per-mouse verdicts of alleleflux-strain-turnover) and asks
+    ``carrier_strain_verdicts`` about each row's carriers for its period.
+    Adds ``carrier_strain_status``, ``n_carriers``, ``n_carriers_determined``
+    and ``n_carriers_strain_changed``; changes no origin.  A MAG with no
+    turnover table gives ``strain_undetermined`` for all its rows, with one
+    warning per MAG.
+
+    Example: carriers m1, m2, m3 with verdicts True, True, False at floor 3 ->
+    ``new_strain_carriers``, 3, 3, 2.
+    """
+    out = alleles.copy()
+    tables: dict[str, pd.DataFrame | None] = {}
+    for mag in sorted(out["mag_id"].unique()):
+        path = os.path.join(turnover_dir, f"{mag}_strain_turnover.tsv")
+        if not os.path.exists(path):
+            logger.warning(
+                f"{mag}: no strain-turnover table at {path}; its alleles are "
+                f"strain_undetermined under the carrier gate"
+            )
+            tables[mag] = None
+            continue
+        tables[mag] = pd.read_csv(
+            path,
+            sep="\t",
+            dtype={"subjectID": str, "transition": str, "sample_t2": str},
+            usecols=["subjectID", "transition", "sample_t2", "dominant_strain_change"],
+        )
+    status, n_car, n_det, n_chg = [], [], [], []
+    for mag, period, carriers in zip(out["mag_id"], out["period"], out["carriers"]):
+        mice = [m for m in str(carriers).split(",") if m]
+        table = tables[mag]
+        if table is None:
+            verdict = (CARRIER_UNDETERMINED, 0, 0)
+        else:
+            verdict = carrier_strain_verdicts(mice, table, period, min_determined)
+        status.append(verdict[0])
+        n_car.append(len(mice))
+        n_det.append(verdict[1])
+        n_chg.append(verdict[2])
+    out["carrier_strain_status"] = status
+    out["n_carriers"] = n_car
+    out["n_carriers_determined"] = n_det
+    out["n_carriers_strain_changed"] = n_chg
+    logger.info(
+        f"carrier gate (floor {min_determined} determined carriers): "
+        f"{pd.Series(status).value_counts().to_dict()}"
+    )
+    return out
+
+
+def _group_verdict(strain_class: str):
+    """What the group vote does to a de novo allele (user ruling 2026-10-23):
+    replaced -> new_strain; not_replaced -> None (kept); anything else (unverified:
+    too few / no voters, not in the table; or tie) -> strain_undetermined."""
+    if strain_class == "replaced":
+        return "new_strain"
+    if strain_class == "not_replaced":
+        return None
+    return CARRIER_UNDETERMINED
+
+
+def _carrier_verdict(carrier_status: str):
+    """What the carriers' verdict does to a de novo allele."""
+    if carrier_status == CARRIER_NEW_STRAIN:
+        return "new_strain"
+    if carrier_status == CARRIER_SAME_STRAIN:
+        return None
+    if carrier_status == CARRIER_UNDETERMINED:
+        return CARRIER_UNDETERMINED
+    raise ValueError(f"unknown carrier_strain_status {carrier_status!r}")
+
+
+def apply_strain_gate(alleles: pd.DataFrame, gate: str) -> pd.DataFrame:
+    """Which strain verdict decides whether a de novo allele keeps its origin (spec 2.4).
+
+    The ONLY place an origin changes after the cluster rule, and only for the
+    two de novo flavours (``DE_NOVO``); standing alleles, block events and the
+    non-verdicts are never touched.  ``origin_any_mouse`` keeps the raw verdict.
+
+    BOTH verdict columns stay on every row whatever the gate: ``strain_class``
+    (group) and ``carrier_strain_status`` (carrier) are written whenever their
+    input was given, so the two can be compared on the same run.  The gate only
+    decides which of them is READ; under ``group`` the carrier columns are
+    reporting only, under ``carrier`` the group columns are.
+
+    * ``group``: from ``strain_class`` (``attach_strain``): replaced ->
+      ``new_strain``; not_replaced -> kept; anything else ->
+      ``strain_undetermined``.
+    * ``carrier``: from ``carrier_strain_status`` (``attach_carrier_gate``):
+      new_strain_carriers -> ``new_strain``; same_strain_carriers -> kept;
+      strain_undetermined -> ``strain_undetermined``.
+    * ``both``: an allele must pass both.  If either gate is undetermined the
+      allele is ``strain_undetermined`` (removed, not explained: one gate
+      could not speak); else if either says a swap, ``new_strain``; else kept
+      (``strain_undetermined`` over ``new_strain`` over kept).
+    * ``none``: no relabel.
+
+    A gate whose column is missing raises (the inputs were not given).
+
+    Example: group not_replaced, carriers new_strain_carriers -> ``group`` keeps
+    de_novo, ``carrier`` and ``both`` give new_strain.  Group replaced,
+    carriers undetermined -> ``group`` gives new_strain, ``carrier`` and
+    ``both`` give strain_undetermined.
+    """
+    if gate not in STRAIN_GATES:
+        raise ValueError(
+            f"unknown strain gate {gate!r}; expected one of {STRAIN_GATES}"
+        )
+    out = alleles.copy()
+    if gate == "none":
+        return out
+    need = {"group": ["strain_class"], "carrier": ["carrier_strain_status"]}
+    need["both"] = need["group"] + need["carrier"]
+    missing = [c for c in need[gate] if c not in out.columns]
+    if missing:
+        raise ValueError(
+            f"--strain_gate {gate} needs {missing} on every row: give "
+            f"--classification (group) / --turnover_dir (carrier)"
+        )
+    is_dn = out["origin"].isin(DE_NOVO).to_numpy()
+    verdicts = []
+    for i in np.flatnonzero(is_dn):
+        row = out.iloc[i]
+        candidates = []
+        if gate in ("group", "both"):
+            candidates.append(_group_verdict(row["strain_class"]))
+        if gate in ("carrier", "both"):
+            candidates.append(_carrier_verdict(row["carrier_strain_status"]))
+        verdicts.append(max(candidates, key=_GATE_RANK.__getitem__))
+    idx = out.index[is_dn]
+    new = pd.Series(verdicts, index=idx, dtype=object)
+    out.loc[idx[new.notna().to_numpy()], "origin"] = new.dropna()
+    return out
 
 
 def summarise(alleles: pd.DataFrame) -> pd.DataFrame:
@@ -346,14 +567,21 @@ def summarise(alleles: pd.DataFrame) -> pd.DataFrame:
     ``pct_of_called`` by ``n_called`` (the four verdicts) and is NaN for the two
     non-verdicts.
     """
+    gated = (
+        "strain_class" in alleles.columns or "carrier_strain_status" in alleles.columns
+    )
     if "strain_class" in alleles.columns:
         tagged = pd.concat(
             [alleles, alleles.assign(strain_class="all")], ignore_index=True
         )
-        origins = ORIGINS
     else:
         tagged = alleles.assign(strain_class="all", floor=np.nan)
-        origins = [o for o in ORIGINS if o != "new_strain"]
+    # Without any strain input the two gate outcomes cannot occur: no zero rows for them.
+    origins = (
+        ORIGINS
+        if gated
+        else [o for o in ORIGINS if o not in ("new_strain", CARRIER_UNDETERMINED)]
+    )
     rows = []
     for block, g in tagged.groupby(BLOCK, sort=True, dropna=False):
         n_rising = len(g)
@@ -384,6 +612,15 @@ def tally_the_origins(args: argparse.Namespace) -> int:
     logger.info(
         f"{len(rising):,} rising alleles from {rising['comparison'].nunique()} comparisons"
     )
+    # Cluster rule first (spec 2.3), on every candidate, before any strain gate.
+    rising = assign_blocks(rising, args.cluster_window_bp, args.max_de_novo_neighbours)
+    n_block_rows = int((rising["origin"] == BLOCK_EVENT).sum())
+    n_blocks = rising.loc[rising["block_id"] != "", "block_id"].nunique()
+    logger.info(
+        f"cluster rule (window {args.cluster_window_bp} bp, > "
+        f"{args.max_de_novo_neighbours} de novo neighbours): {n_block_rows:,} de novo "
+        f"rows relabelled block_event in {n_blocks} blocks"
+    )
     if args.classification:
         tables = [
             load_classification(
@@ -395,12 +632,21 @@ def tally_the_origins(args: argparse.Namespace) -> int:
         ]
         alleles = attach_strain(rising, tables)
         logger.info(
-            f"strain verdicts: floors {sorted(f for f, _ in tables)}; "
-            f"{int((alleles['origin'] == 'new_strain').sum()):,} de novo rows relabelled "
-            f"new_strain (replaced MAGs, all floors)"
+            f"group strain verdicts attached: floors {sorted(f for f, _ in tables)}"
         )
     else:
         alleles = rising
+    if args.turnover_dir:
+        alleles = attach_carrier_gate(
+            alleles, args.turnover_dir, args.min_determined_carriers
+        )
+    # The gate: the only place an origin changes after the cluster rule.
+    alleles = apply_strain_gate(alleles, args.strain_gate)
+    logger.info(
+        f"strain gate {args.strain_gate}: "
+        f"{int((alleles['origin'] == 'new_strain').sum()):,} de novo rows -> new_strain, "
+        f"{int((alleles['origin'] == CARRIER_UNDETERMINED).sum()):,} -> strain_undetermined"
+    )
     summary = summarise(alleles)
     os.makedirs(args.output_dir, exist_ok=True)
     allele_path = os.path.join(args.output_dir, "rising_origin_alleles.tsv")
@@ -434,6 +680,44 @@ def main():
         "split by floor and strain class",
     )
     parser.add_argument(
+        "--cluster_window_bp",
+        type=int,
+        default=1000,
+        help="cluster rule: two de novo alleles on the same contig that rose in the "
+        "same group are neighbours when at most this many bp apart (any age); "
+        "neighbours chain into blocks",
+    )
+    parser.add_argument(
+        "--max_de_novo_neighbours",
+        type=int,
+        default=0,
+        help="cluster rule: a de novo allele with MORE than this many de novo "
+        "neighbours becomes a block_event (one imported or recombined chunk), never "
+        "an independent de novo mutation; 0 = only lone alleles stay de novo",
+    )
+    parser.add_argument(
+        "--turnover_dir",
+        default=None,
+        help="folder of {mag}_strain_turnover.tsv tables (alleleflux-strain-turnover): "
+        "per-mouse strain verdicts the carrier gate reads for each allele's carriers",
+    )
+    parser.add_argument(
+        "--strain_gate",
+        choices=STRAIN_GATES,
+        default="carrier",
+        help="which strain verdict decides whether a de novo allele stands: carrier = "
+        "the allele's own carriers (needs --turnover_dir); group = the across-cage "
+        "vote (needs --classification); both = the stricter of the two; none = no "
+        "strain gate.  Both verdicts are written to every row whenever given",
+    )
+    parser.add_argument(
+        "--min_determined_carriers",
+        type=int,
+        default=3,
+        help="carrier gate: carriers with a per-mouse verdict needed before the "
+        "carriers' strain is called; fewer -> strain_undetermined",
+    )
+    parser.add_argument(
         "--strain_metric",
         default="dominant_strain_change",
         help="classification metric: dominant_strain_change (conANI) or "
@@ -445,7 +729,12 @@ def main():
         help="verdict column: strain_status_replicates (replicates vote) or "
         "strain_status (mice vote)",
     )
-    return tally_the_origins(parser.parse_args())
+    args = parser.parse_args()
+    if args.strain_gate in ("carrier", "both") and not args.turnover_dir:
+        parser.error(f"--strain_gate {args.strain_gate} needs --turnover_dir")
+    if args.strain_gate in ("group", "both") and not args.classification:
+        parser.error(f"--strain_gate {args.strain_gate} needs --classification")
+    return tally_the_origins(args)
 
 
 if __name__ == "__main__":

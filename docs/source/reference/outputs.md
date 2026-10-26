@@ -338,7 +338,7 @@ checkable) and a True/False flag can hold only two. Keep
 
 **Path:** `baseline_presence/{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long), `..._summary.tsv`, `..._rising.tsv`
 
-Long table: one row per significant site × allele × sample, with `allele_reads`, `total_reads`, `detection_threshold_reads`, `allele_frequency`, `allele_status` (`present`, `below_detection`, `absent`, `not_covered`; `not_covered` covers both "too few reads" and "position removed for this sample by the site-depth filter", since neither leaves a cache row), `origin_in_own_mouse`, and optionally `strain_background`.
+Long table: one row per significant site × allele × sample, with `allele_reads`, `total_reads`, `detection_threshold_reads`, `allele_frequency`, `allele_status` (`present`, `below_detection`, `absent`, `not_covered`; `not_covered` covers both "too few reads" and "position removed for this sample by the site-depth filter", since neither leaves a cache row), `origin_in_own_mouse`, and optionally `strain_background`. Two sample-context columns, `collection_date` (ISO `YYYY-MM-DD`, e.g. `2017-01-10`) and `cohort`, are copied from the metadata when it has them and are blank otherwise (see [inputs](inputs.md), optional columns).
 
 Summary: one row per site × allele. Sample-count columns (`origin_any_mouse`, `n_{earlier}_samples_allele_present`, `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`, `n_mice_standing_variation`, `n_mice_de_novo_candidate`, ...) apply the presence rule; read-count columns (`total_reads_{tp}`, `allele_reads_{tp}`, `allele_frequency_{tp}`) are unfiltered sums over every sample at that timepoint. Timepoint names in column headers are the comparison's own labels.
 
@@ -355,11 +355,25 @@ Written by `alleleflux-rising-origin` once every comparison's rising table exist
 | `standing_variation` | present in at least one covered earlier sample |
 | `de_novo` | earlier samples covered, the allele in none of them |
 | `de_novo_below_detection` | a few earlier reads, under the detection bar |
-| `new_strain` | (with strain verdicts) de novo, but in a MAG whose strain was replaced in that comparison x group: the allele most likely arrived with the new strain |
+| `new_strain` | de novo, but the strain gate says the allele most likely arrived with a new strain: the group's across-cage vote says replaced (gate `group`), or more than half of the allele's own carriers changed strain (gate `carrier`) |
+| `strain_undetermined` | de novo, but the strain gate could not say: fewer than `min_determined_carriers` carriers with a per-mouse verdict (gate `carrier`), or a group vote that is neither replaced nor not replaced: too few voters, no voters, not in the table, a tie (gate `group`). Never counted as de novo |
+| `block_event` | de novo (either flavour) with more than `max_de_novo_neighbours` other de novo alleles within `cluster_window_bp` on the same contig, in the same group, at any age: one imported or recombined chunk, never counted as independent mutations. `block_id` (`{mag}:{contig}:{group}:{k}`) names the block and `n_de_novo_neighbours` the count; both columns are in the allele table for every row |
 | `not_present_later` | no covered later sample of the group shows it |
 | `baseline_not_covered` | no earlier sample deep enough to judge |
 
-The first four are verdicts. With strain turnover on, every allele is joined to its MAG's verdict for that period: a within-group allele reads the group it rose in, and a between-group allele reads both groups and takes the dirtier arm. A MAG never classified is `unverified` (`strain_status = not_in_strain_table`).
+The first four are verdicts; `block_event`, `strain_undetermined` and the last two are not, so a block or an undetermined strain drops out of `n_called` and lowers the de novo share. Two different letters rising at the *same* position (possible only at a site where three or four bases were tested) are two alleles 0 bp apart and form a block: two independent mutations at one base in one group is about as unlikely as it gets, while reads from a related strain mapping with a mismatch there, or an imported chunk carrying a different letter, produce exactly this picture; neither is two clean de novo events. The cluster rule runs before any strain gate, on every de novo candidate, because adjacency is a fact about positions and a gate that ran first could hide a block member's neighbours. With strain turnover on, every allele is joined to its MAG's verdict for that period: a within-group allele reads the group it rose in, and a between-group allele reads both groups and takes the dirtier arm. A MAG never classified is `unverified` (`strain_status = not_in_strain_table`).
+
+**The strain gate** (`--strain_gate`, config `analysis.baseline_presence.strain_gate`) decides which verdict relabels a de novo allele; only the two de novo flavours are ever relabelled. Two verdicts are available and **both are written to every row** whenever their input was given, whatever the gate: under `group` the carrier columns are reporting only, under `carrier` the group columns are. The gate decides which is *read*, so the two can always be compared on the same run.
+
+- the *group* verdict (`strain_status`, `strain_class`): the across-cage vote of the replacement-classification table for the allele's MAG, group and period;
+- the *carrier* verdict (`carrier_strain_status`, `n_carriers`, `n_carriers_determined`, `n_carriers_strain_changed`): the mice carrying the allele at the later timepoint (`{later}_mice_allele_present` in the rising table) looked up in the per-mouse `{mag}_strain_turnover.tsv` for the allele's period; a carrier is *determined* when its `dominant_strain_change` verdict is not blank and *changed* when it is true; more than half changed → `new_strain_carriers`, fewer determined than `min_determined_carriers` (default 3) → `strain_undetermined`, otherwise `same_strain_carriers`. A MAG with no turnover table is `strain_undetermined` with a warning.
+
+| gate | relabels from | replaced / new strain carriers | not replaced / same strain | anything else |
+|---|---|---|---|---|
+| `carrier` (default) | the carrier verdict | `new_strain` | kept | `strain_undetermined` |
+| `group` | the group verdict | `new_strain` | kept | `strain_undetermined` |
+| `both` | both: one undetermined verdict → `strain_undetermined` (removed, not explained); else one replaced / new-strain verdict → `new_strain`; else kept | | | |
+| `none` | nothing | | | |
 
 Summary: one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the four verdicts). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
 

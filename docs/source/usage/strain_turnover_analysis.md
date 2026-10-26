@@ -152,6 +152,64 @@ sample) one of four statuses:
 The presence rule is the same one pairwise ANI uses, so the two agree by
 construction; the workflow passes the same `min_cov`, `min_freq` and `fdr`.
 
+### Which samples are the baseline (`baseline_scope`)
+
+"Absent at baseline" is only meaningful once you say *which* earlier samples
+count.  `analysis.baseline_presence.baseline_scope` (CLI `--baseline_scope`)
+picks one of four answers.  In plain words, for an allele G that rose in the
+fat group of a fat-vs-control comparison, where mice m1 and m2 (fat) carry G
+at the later timepoint and m3 (control) does not:
+
+| value | look for G in | intended design |
+|---|---|---|
+| `individual` | only the carriers' own earlier samples, m1's and m2's. If neither had any G, it is new. m3's earlier sample is not consulted, even if it had a whisper of G, because m3 is not a carrier. | isolated populations that never share alleles |
+| `own_group` | every fat mouse's earlier sample (within-group test families only: `single_sample`, `lmm_across_time`; an error otherwise) | groups housed apart |
+| `comparison` | every earlier sample of both groups, fat and control | one population split across groups |
+| `cohort` (default) | every QC-passing sample of the whole run, any group, any age, as long as it was collected on an earlier **date** than the first carrier's sample. If a completely unrelated mouse had G a year earlier, G was already in the building: not new. | shared facility or colony |
+
+**What `cohort` needs.** A `collection_date` column in the metadata, ISO
+`YYYY-MM-DD` (see [inputs](../reference/inputs.md)).  The job then loads every
+sample in the sheet, not only the comparison's, and for each site keeps as
+baseline those dated strictly before the earliest later-timepoint sample that
+carries the allele (the *first carrier*).  Samples dated on or after it, the
+carriers' own later samples included, are not baseline.  A `cohort` column
+(enrollment batch), when present, is carried into the outputs.
+
+**Dates are all-or-nothing.** A `collection_date` column with *some* blank
+cells is refused under `cohort`: the job stops before writing anything and
+names every undated sample.  Ordering the baseline by timepoint label while
+some samples are dated would silently change the answer, so it is treated as a
+data error.  (Under every other scope blank dates are fine; they are only
+carried along.)  A sheet with **no** dates at all, a study that never recorded
+them, still runs: "before" then means an earlier timepoint label in the
+metadata's order, the run logs one warning saying so, and staggered designs
+are not handled in that mode.  Samples outside the comparison whose label
+sorts after the later timepoint then never count.
+
+**What stays the comparison's, whatever the scope.** The later-timepoint
+checks and counts, the frequency change, and the rising table use only the
+comparison's own samples (long-table column `is_comparison_sample`).  Samples
+loaded for `cohort` are baseline material only; they never get a rising row.
+
+**Naming under `cohort`.** The baseline columns keep the comparison's earlier
+label (`n_pre_samples_covered`, `total_reads_pre`, `pre_mice_allele_present`)
+even when the baseline includes samples from other timepoints.  Four columns
+give the calendar evidence: `first_carrier_date` and `first_carrier_cohort`
+(the earliest-dated later sample of the row's group that carries the allele,
+and its enrollment batch) and `first_detection_date` and
+`first_detection_cohort` (the earliest-dated sample among those judged,
+baseline and later, in which the allele is present, and its batch).  The two
+pairs coincide when nobody earlier had the allele; the gap between them is
+how long it was in the colony before these mice carried it.
+
+**Where the baseline is cut.** Each row is judged against the samples dated
+strictly before its *cutoff*: the first carrier's date, or, for a group that
+rose without any later sample clearing the presence bar (no carrier, verdict
+`allele_not_present_at_{later}`), the day that group was first sampled at the
+later timepoint.  So the two rising rows of one site, and the summary row,
+describe comparable baselines, and timepoint-label order is used only on a
+sheet with no dates at all.
+
 ### Naming
 
 Every column or label that refers to a timepoint uses the comparison's own
@@ -179,6 +237,12 @@ one row per site × allele × sample with `allele_reads`, `total_reads`,
 
 With `--turnover_dir`, a `strain_background` column joins each mouse's strain
 verdict for the same transition.
+
+Two optional metadata columns ride along onto every row of their sample and are
+blank when the metadata lacks them: `collection_date`, the calendar date the
+sample was collected, accepted in **ISO `YYYY-MM-DD` form only** (`2017-01-10`;
+`10/01/2017` or `2017-1-10` stop the job with an error naming the sample, and an
+empty cell means unknown), and `cohort`, a free-text enrollment batch label.
 
 **Summary**, `..._baseline_presence_summary.tsv`: one row per site × allele.
 Its columns come in two kinds:
@@ -210,12 +274,34 @@ allele that rose in both gets one row per group.  Alleles with no mouse sampled
 at both timepoints have no change and no row; the run log counts them.
 
 **Across comparisons:** `alleleflux-rising-origin` tallies every rising
-table into one summary (see [Outputs](../reference/outputs.md)).  With strain
-turnover on, a de novo allele in a MAG whose strain was replaced in that
-comparison × group is relabelled `new_strain`: it most likely arrived with the
-new strain rather than by mutation.  The workflow runs it once, after the last
-baseline-presence job, with the run's classification table; by hand it takes
-one table per voter floor.
+table into one summary (see [Outputs](../reference/outputs.md)).  Before
+counting it applies two rules to the de novo alleles, in this order:
+
+1. **The cluster rule.** De novo alleles within `cluster_window_bp` (default
+   1000) of each other on one contig, in one group, at any age, are one
+   `block_event`, never independent mutations; an allele with more than
+   `max_de_novo_neighbours` (default 0) such neighbours is relabelled.  This
+   runs first because adjacency is a fact about positions: a strain gate that
+   ran first could relabel some members and hide a block member's neighbours.
+2. **The strain gate.** A de novo allele most likely arrived with a new strain
+   rather than by mutation when the strain changed.  Two verdicts exist.  The
+   *group* verdict is the across-cage vote of Step 3 for the allele's MAG,
+   group and period.  The *carrier* verdict asks only the mice carrying the
+   allele at the later timepoint (`{later}_mice_allele_present` in the rising
+   table): each carrier's own per-mouse `dominant_strain_change` from Step 2's
+   `{mag}_strain_turnover.tsv`; more than half of the determined carriers
+   changed → `new_strain_carriers`; fewer determined than
+   `min_determined_carriers` (default 3) → `strain_undetermined`.
+   `strain_gate` picks which decides: `carrier` (default), `group`, `both`
+   (one undetermined verdict makes the allele undetermined; otherwise one
+   swap verdict makes it `new_strain`) or `none`.  Under every gate but `none`, an allele whose
+   strain could not be determined, by its carriers or by a group vote that is
+   neither replaced nor not replaced, becomes `strain_undetermined` and is not
+   counted as de novo.  Both verdicts are written to every row for comparison.
+
+The workflow runs it once, after the last baseline-presence job, with the
+run's classification table and turnover tables; by hand it takes one
+classification table per voter floor and the turnover folder.
 
 ### Worked example (synthetic)
 

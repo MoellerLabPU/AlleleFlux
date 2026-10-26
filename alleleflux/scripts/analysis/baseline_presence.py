@@ -55,9 +55,13 @@ an age series), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appe
 as placeholders in templates and as shorthand in comments for "the earlier /
 the later timepoint of the comparison".
 
-Which samples count (``--baseline_scope``):
+Which samples count (``--baseline_scope``; see ``baseline_rows`` for all four):
 
-* ``comparison`` (default): every sample of both groups.  Right when both groups
+* ``cohort`` (default): every QC-passing sample of the whole run, any group, any
+  timepoint, collected before the first carrier sample (needs ``collection_date``
+  in the metadata).  Right for a shared facility, where an allele seen anywhere
+  earlier was already in the building.
+* ``comparison``: every sample of both groups.  Right when both groups
   are one population at baseline (e.g. littermates split across diets).
 * ``own_group``: each site is judged only on the samples of the group it was
   significant in, at both timepoints.  Right when groups are housed apart from
@@ -97,8 +101,16 @@ import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
-from alleleflux.scripts.utilities.cache_io import cache_samples, load_cache_sites
+from alleleflux.scripts.utilities.cache_io import (
+    cache_path,
+    cache_samples,
+    load_cache_sites,
+)
 from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.sample_metadata import (
+    META_OPTIONAL,
+    validate_collection_dates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +210,9 @@ LONG_COLUMNS = [
     "replicate",
     "group",
     "time",
+    "collection_date",  # optional metadata column, ISO YYYY-MM-DD or blank
+    "cohort",  # optional metadata column (enrollment batch), text or blank
+    "is_comparison_sample",  # True for the comparison's own samples; False only under cohort
     "allele_reads",
     "total_reads",
     "detection_threshold_reads",
@@ -209,6 +224,10 @@ LONG_COLUMNS = [
     "min_cov",
     "min_freq",
 ]
+
+# Optional per-sample metadata columns (collection_date in ISO YYYY-MM-DD,
+# cohort): defined and validated ONCE in utilities/sample_metadata.py, shared
+# with alleleflux-metadata so a malformed sheet stops the run at its first step.
 
 
 # ---------------------------------------------------------------------------
@@ -706,12 +725,23 @@ SUMMARY_COLUMN_TEMPLATES = [
     "q_value",
     # the verdict under the loosest framing (any baseline mouse)
     "origin_any_mouse",
+    # calendar evidence (blank without collection_date in the metadata): the
+    # earliest-dated later sample carrying the allele (date + enrollment wave),
+    # and the earliest-dated sample of all those judged (baseline + later) in
+    # which it is present (date + wave); equal when nobody earlier had it
+    "first_carrier_date",
+    "first_carrier_cohort",
+    "first_detection_date",
+    "first_detection_cohort",
     # any-mouse numbers, FILTERED by the presence rule (min_cov / bar / min_freq):
     # "present in 12 of the 14 pre samples we could judge, in 6 replicates"
     "n_{t0}_samples_allele_present",
     "n_{t0}_samples_covered",
     "n_replicates_with_allele_at_{t0}",
     "{t0}_mice_allele_present",
+    # the carriers: later-timepoint mice with the allele present (covered + rule);
+    # the carrier-level strain gate in rising origin judges THESE mice (spec 2.4)
+    "{t1}_mice_allele_present",
     # same-mouse numbers: the strict framing, one count per de-novo/standing verdict
     "n_mice_standing_variation",
     "n_mice_de_novo_candidate",
@@ -736,6 +766,126 @@ def summary_columns(tps: Timepoints) -> list[str]:
     return [tps.name(c) for c in SUMMARY_COLUMN_TEMPLATES]
 
 
+def _dates(rows: pd.DataFrame) -> pd.Series:
+    """``collection_date`` of ``rows`` as datetimes (NaT when blank or absent)."""
+    if "collection_date" not in rows.columns:
+        return pd.Series(pd.NaT, index=rows.index)
+    return pd.to_datetime(rows["collection_date"], format="%Y-%m-%d", errors="coerce")
+
+
+def _earliest_dated(rows: pd.DataFrame):
+    """The earliest-dated row of ``rows`` (a Series with ``_date`` added), or
+    None when ``rows`` is empty or ANY row is undated: a partly dated set
+    cannot be ordered safely."""
+    if rows.empty:
+        return None
+    dates = _dates(rows)
+    if dates.isna().any():
+        return None
+    return rows.assign(_date=dates).sort_values("_date").iloc[0]
+
+
+def first_carrier(t1_cov: pd.DataFrame):
+    """The earliest-dated later-timepoint row that carries the allele, or None.
+
+    ``t1_cov`` = covered later rows; the carriers are those with
+    ``allele_present``.  None when there is no carrier or any carrier is undated.
+    Its ``_date`` is the first carrier's date, its ``cohort`` the carriers' wave.
+
+    Example: carriers dated 2017-06-10 (wave2) and 2017-07-01 -> the
+    2017-06-10 row; one of them blank -> None.
+    """
+    return _earliest_dated(t1_cov[t1_cov["allele_present"]])
+
+
+def first_carrier_date(t1_cov: pd.DataFrame):
+    """``first_carrier(t1_cov)``'s date as a Timestamp, or None."""
+    row = first_carrier(t1_cov)
+    return None if row is None else row["_date"]
+
+
+def baseline_cutoff(t1: pd.DataFrame):
+    """The date one row's baseline is cut at: "before when?" (user rule 2026-10-22).
+
+    The first carrier's date when a later sample of this group carries the
+    allele; otherwise the day the group was first sampled at the later
+    timepoint (its earliest later sample, covered or not), so a group that
+    rose without any sample clearing the bar is still judged against
+    everything dated before it was sampled.  None when there is no later
+    sample or any relevant one is undated (then, and only on a sheet with no
+    dates at all, ``baseline_rows`` falls back to timepoint-label order).
+
+    Example: carriers dated 2017-06-10 and 2017-07-01 -> 2017-06-10; no
+    carrier, the group's later samples dated 2017-09-01 -> 2017-09-01.
+    """
+    t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+    fcd = first_carrier_date(t1_cov)
+    if fcd is not None:
+        return fcd
+    row = _earliest_dated(t1)
+    return None if row is None else row["_date"]
+
+
+def baseline_rows(
+    sub: pd.DataFrame,
+    scope: str,
+    tps: Timepoints,
+    carriers: set,
+    first_date,
+    label_order: list,
+) -> pd.DataFrame:
+    """The rows one (site, allele) is judged against as its baseline (spec 2.2).
+
+    In plain words, for an allele G that rose in the fat group of a fat-vs-control
+    comparison, where m1 and m2 (fat) carry G at the later timepoint and m3
+    (control) does not:
+
+    * ``individual``: look only in the carriers' own earlier samples, m1's and
+      m2's.  If neither had any G, it is new.  m3's earlier sample is not
+      consulted, even if it had a whisper of G, because m3 is not a carrier.
+    * ``own_group``: look in every fat mouse's earlier sample.
+    * ``comparison``: look in every earlier sample of both groups, fat and
+      control.
+    * ``cohort`` (the default): look in every sample of the whole run, any group, any age, as
+      long as it was collected on an earlier date than the first carrier's
+      sample.  If a completely unrelated mouse had G a year earlier, G was
+      already in the building: not new.
+
+    ``sub`` holds every row of the site (all samples loaded for the run).
+
+    comparison / own_group
+        the earlier-timepoint rows (``own_group`` rows were already restricted
+        to the site's group by ``restrict_to_own_group``).
+    individual
+        the earlier-timepoint rows of the ``carriers`` (mice that carry the
+        allele at the later timepoint); a carrier with no earlier sample adds
+        nothing, a non-carrier's earlier sample is never consulted.
+    cohort
+        every row of any group and timepoint dated strictly before
+        ``first_date`` (``baseline_cutoff``: the first carrier's date, or the
+        group's later sampling day when it has no carrier).  When the sheet has no dates
+        (``first_date`` None and every row undated; the orchestrator refuses a
+        partly dated sheet and warns once about an undated one) every row whose
+        timepoint label comes before ``tps.later`` in ``label_order`` (the
+        sheet's order of appearance).
+
+    Example (cohort, dates): first carrier 2017-06-10; rows dated 2017-01-10
+    (the comparison's pre samples) and 2016-09-01 (a third group) are the
+    baseline; a row dated 2018-01-01 is not, nor are the carriers' own rows.
+    """
+    if scope in ("comparison", "own_group"):
+        return sub[sub["time"] == tps.earlier]
+    if scope == "individual":
+        return sub[(sub["time"] == tps.earlier) & sub["subjectID"].isin(carriers)]
+    if scope == "cohort":
+        dates = _dates(sub)
+        if first_date is not None and dates.notna().all():
+            return sub[dates < first_date]
+        before = label_order[: label_order.index(tps.later)]
+        return sub[sub["time"].isin(before)]
+    raise ValueError(f"unknown baseline scope {scope!r}")
+
+
 def _site_record(
     key: tuple,
     site_rows: pd.DataFrame,
@@ -747,14 +897,17 @@ def _site_record(
 
     Shared by ``summarise_sites`` (t1 = every later sample in scope) and
     ``summarise_rising`` (t1 = the later samples of the group the allele rose
-    in).  ``t0`` is always every earlier sample in scope: the baseline.
-    ``site_rows`` supplies the site-level columns (``q_value``,
-    ``n_candidate_alleles``).
+    in).  ``t0`` is the baseline the caller chose through ``baseline_rows``
+    (the earlier samples by default; the carriers' own, or every earlier-dated
+    sample of the run, under the other scopes).  ``site_rows`` supplies the
+    site-level columns (``q_value``, ``n_candidate_alleles``).
     """
     t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
     t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
-    # Which mice / replicates had the allele at t0 (covered + present).
+    # Which mice / replicates had the allele at t0 (covered + present), and
+    # which carry it at t1 (the carriers the strain gate downstream asks about).
     mice_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "subjectID"])
+    mice_t1_present = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
     reps_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "replicate"])
     record = dict(zip(SITE_KEYS, key))
     for col in ("q_value", "n_candidate_alleles"):
@@ -771,15 +924,39 @@ def _site_record(
         origin = ORIGIN_DE_NOVO
     else:
         origin = tps.name(ORIGIN_T0_NOT_COVERED)
+    # Calendar evidence: the first carrier's date, and the earliest dated row
+    # among everything judged (t0 + t1) in which the allele is present.
+    fc = first_carrier(t1_cov)
+    judged = pd.concat([t0_cov, t1_cov])
+    seen = judged[judged["allele_present"]].assign(_date=lambda d: _dates(d))
+    seen = seen[seen["_date"].notna()].sort_values("_date")
+    first_seen = seen.iloc[0] if len(seen) else None
     record.update(
         {
             "origin_any_mouse": origin,
+            "first_carrier_date": (
+                fc["_date"].strftime("%Y-%m-%d") if fc is not None else ""
+            ),
+            "first_carrier_cohort": (
+                fc["cohort"] if fc is not None and "cohort" in t1_cov.columns else ""
+            ),
+            "first_detection_date": (
+                first_seen["_date"].strftime("%Y-%m-%d")
+                if first_seen is not None
+                else ""
+            ),
+            "first_detection_cohort": (
+                first_seen["cohort"]
+                if first_seen is not None and "cohort" in seen.columns
+                else ""
+            ),
             tps.name("n_{t0}_samples_allele_present"): int(
                 t0_cov["allele_present"].sum()
             ),
             tps.name("n_{t0}_samples_covered"): len(t0_cov),
             tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
             tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
+            tps.name("{t1}_mice_allele_present"): ",".join(sorted(mice_t1_present)),
         }
     )
     for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
@@ -799,7 +976,21 @@ def _site_record(
     return record
 
 
-def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
+def _comparison_mask(long: pd.DataFrame) -> pd.Series:
+    """``is_comparison_sample`` as booleans; all True when the column is absent
+    (unit-test frames and the non-cohort scopes, where every row is the comparison's).
+    """
+    if "is_comparison_sample" not in long.columns:
+        return pd.Series(True, index=long.index)
+    return long["is_comparison_sample"].astype(bool)
+
+
+def summarise_sites(
+    long: pd.DataFrame,
+    tps: Timepoints,
+    scope: str = "comparison",
+    label_order: list | None = None,
+) -> pd.DataFrame:
     """One row per site x allele: the few numbers the baseline question asks for.
 
     Deliberately lean (decided 2026-09-10): everything else is in the long
@@ -815,6 +1006,9 @@ def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
         ``origin_in_own_mouse``.
     tps
         Earlier / later timepoint labels; spells the column names.
+    scope, label_order
+        Which rows are the baseline (``baseline_rows``); ``label_order`` is the
+        sheet's timepoint order, needed only by ``cohort`` without dates.
 
     Returns
     -------
@@ -843,9 +1037,13 @@ def summarise_sites(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
     total_reads_end 245, allele_reads_end 179 (0.731).
     """
     rows = []
+    comp = _comparison_mask(long)
     for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
-        t0 = sub[sub["time"] == tps.earlier]
-        t1 = sub[sub["time"] == tps.later]
+        # Later rows: the comparison's own samples only, whatever was loaded.
+        t1 = sub[(sub["time"] == tps.later) & comp[sub.index]]
+        t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+        carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
+        t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1), label_order)
         rows.append(_site_record(key, sub, t0, t1, tps))
     return pd.DataFrame(rows, columns=summary_columns(tps))
 
@@ -869,7 +1067,11 @@ def rising_columns(tps: Timepoints) -> list[str]:
 
 
 def summarise_rising(
-    long: pd.DataFrame, change: pd.DataFrame, tps: Timepoints
+    long: pd.DataFrame,
+    change: pd.DataFrame,
+    tps: Timepoints,
+    scope: str = "comparison",
+    label_order: list | None = None,
 ) -> pd.DataFrame:
     """One row per (site, allele, group the allele ROSE in).
 
@@ -881,8 +1083,9 @@ def summarise_rising(
       ``frequency_change > 0`` in a group get a row;
     * **whose later samples count.** The end-point check ("is the allele present
       in at least one covered later sample?") and the later-timepoint counts use
-      the ``rose_in`` group's samples only.  The baseline (``t0``) is unchanged:
-      every earlier sample in the run's ``--baseline_scope``.
+      the ``rose_in`` group's samples only.  The baseline (``t0``) follows the
+      run's ``--baseline_scope`` through ``baseline_rows``; under ``individual``
+      it is the ``rose_in`` carriers' own earlier samples.
 
     Candidate groups: a within-group site (``group_analyzed`` set) is asked about
     its own group only; a between-group site about every group present.  Fell,
@@ -893,9 +1096,11 @@ def summarise_rising(
     long
         The long table after ``label_origin_in_own_mouse``.
     change
-        ``frequency_change_by_group(long, tps)``.
+        ``frequency_change_by_group(long, tps)`` over the comparison's rows.
     tps
         Earlier / later timepoint labels.
+    scope, label_order
+        As in ``summarise_sites``.
 
     Returns
     -------
@@ -915,16 +1120,18 @@ def summarise_rising(
     }
     rows = []
     n_unknown = 0  # candidate (site, allele, group) with no mouse at both timepoints
+    comp = _comparison_mask(long)
     for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
-        groups_here = sorted(sub["group"].astype(str).unique())
+        in_comp = comp[sub.index]
+        # The comparison's two groups; other groups loaded under cohort are
+        # baseline material only and never get a rising row.
+        groups_here = sorted(sub.loc[in_comp, "group"].astype(str).unique())
         if len(groups_here) > 2:
             raise ValueError(
                 f"site {key}: {len(groups_here)} groups {groups_here}; a comparison has two"
             )
         analyzed = str(key[SITE_KEYS.index("group_analyzed")])
         candidates = [analyzed] if analyzed else groups_here
-        # The baseline: every earlier sample in scope, whichever group rose.
-        t0 = sub[sub["time"] == tps.earlier]
         for group in candidates:
             if key + (group,) not in lookup:
                 n_unknown += 1  # counted here, where it is skipped: never silent
@@ -932,7 +1139,18 @@ def summarise_rising(
             if not delta > 0:  # fell, flat, or no paired mouse (NaN > 0 is False)
                 continue
             # The end-point check and later counts: this group's samples only.
-            t1 = sub[(sub["time"] == tps.later) & (sub["group"].astype(str) == group)]
+            t1 = sub[
+                (sub["time"] == tps.later)
+                & in_comp
+                & (sub["group"].astype(str) == group)
+            ]
+            # The baseline per rose_in group: the carriers (individual) and the
+            # first carrier's date (cohort) are this group's.
+            t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+            carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
+            t0 = baseline_rows(
+                sub, scope, tps, carriers, baseline_cutoff(t1), label_order
+            )
             record = _site_record(key, sub, t0, t1, tps)
             record.update(
                 {
@@ -1017,6 +1235,18 @@ def _assess_one_mag(job: tuple) -> pd.DataFrame:
     mag_id, cache_dir, timepoints, sample_ids, candidates, model, min_freq, min_cov = (
         job
     )
+    # Under cohort every timepoint of the sheet is requested; a genome has no
+    # cache file at a timepoint where it was not QC-eligible, so there are no
+    # QC-passing samples to assess there: skip it, say so, never crash.
+    present = [
+        tp for tp in timepoints if os.path.exists(cache_path(cache_dir, mag_id, tp))
+    ]
+    if len(present) < len(timepoints):
+        logger.info(
+            f"{mag_id}: no cache file at timepoint(s) "
+            f"{[tp for tp in timepoints if tp not in present]} (not QC-eligible there): skipped"
+        )
+    timepoints = present
     cand = candidates[["contig", "position", "allele"]].drop_duplicates()
     wanted = set(map(str, sample_ids))
     roster = sorted(
@@ -1059,7 +1289,15 @@ def _assess_one_mag(job: tuple) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)[columns]
 
 
-BASELINE_SCOPES = ("comparison", "own_group")
+# What "absent at baseline" is judged against (spec 2.2), narrowest first:
+#   individual  the carrier mice's own earlier samples
+#   own_group   every earlier sample of the site's own group (within-group tests)
+#   comparison  every earlier sample of both groups
+#   cohort      (default) every QC-passing sample of the run, any group, any timepoint,
+#               collected before the first carrier sample (calendar order via
+#               the metadata's collection_date; timepoint-label order without it)
+BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+BASELINE_SCOPE_DEFAULT = "cohort"  # user decision 2026-10-22 (spec 2.2 had comparison)
 
 
 def check_baseline_scope(family: str, scope: str) -> None:
@@ -1121,19 +1359,69 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     meta = pd.read_csv(args.metadata, sep="\t", dtype=str)
     if "replicate" not in meta.columns:
         meta["replicate"] = meta["subjectID"]  # same default as mag_metadata.py
-    meta = meta[meta["group"].isin(groups) & meta["time"].isin((earlier, later))].copy()
-    if meta.empty:
+    # Optional columns (collection_date, cohort): blank when absent.  Dates are
+    # checked over the WHOLE metadata, before any sample is dropped, so a bad
+    # spelling anywhere in the file stops the run (every comparison would hit it).
+    for col in META_OPTIONAL:
+        if col not in meta.columns:
+            meta[col] = np.nan
+    validate_collection_dates(meta)
+    # The comparison's own samples: both groups, both timepoints.  Every scope
+    # but cohort loads only those; cohort loads EVERY sample of the sheet as
+    # potential baseline and flags the comparison's, so the later-timepoint
+    # counts, the frequency change and the rising table stay the comparison's.
+    in_comparison = meta["group"].isin(groups) & meta["time"].isin((earlier, later))
+    if args.baseline_scope != "cohort":
+        meta = meta[in_comparison]
+    meta = meta.copy()
+    meta["is_comparison_sample"] = in_comparison[meta.index]
+    if not meta["is_comparison_sample"].any():
         raise ValueError(
             f"no samples in {args.metadata} for groups {groups} at {earlier}/{later}"
         )
     logger.info(
-        f"{len(meta)} samples: "
+        f"{int(meta['is_comparison_sample'].sum())} comparison samples: "
         + ", ".join(
             f"{g}/{t}={int(((meta.group == g) & (meta.time == t)).sum())}"
             for g in groups
             for t in (earlier, later)
         )
     )
+    # Timepoints the per-MAG workers read from the cache, and the sheet's
+    # timepoint order (the cohort fallback when dates cannot order the baseline).
+    label_order = list(dict.fromkeys(meta["time"]))
+    timepoints = label_order if args.baseline_scope == "cohort" else [earlier, later]
+    if args.baseline_scope == "cohort":
+        extra = meta[~meta["is_comparison_sample"]]
+        logger.info(
+            f"cohort scope: {len(extra)} samples outside the comparison loaded "
+            f"(groups {sorted(extra['group'].unique())}, timepoints "
+            f"{sorted(extra['time'].unique())}); which of ALL loaded samples count as "
+            f"baseline is decided per site: those dated before that site's first "
+            f"carrier sample"
+        )
+        # Dates decide the baseline, so they are all-or-nothing (user decision
+        # 2026-10-22, superseding the spec's warn-and-fall-back for partial
+        # dates).  No dates at all = a study that never recorded them: fall
+        # back to the sheet's timepoint order, warn once.  SOME dates = a data
+        # error: ordering by label while some samples are dated would silently
+        # change the baseline, so stop and name every undated sample.
+        dated = meta["collection_date"].notna() & (
+            meta["collection_date"].astype(str).str.strip() != ""
+        )
+        if dated.any() and not dated.all():
+            missing = sorted(meta.loc[~dated, "sample_id"])
+            raise ValueError(
+                f"--baseline_scope cohort needs a collection_date (YYYY-MM-DD) for "
+                f"every sample or for none; {len(missing)} of {len(meta)} are blank: "
+                f"{missing}"
+            )
+        if not dated.any():
+            logger.warning(
+                f"cohort scope: no collection_date in the metadata; 'before' means an "
+                f"earlier timepoint label in the sheet's timepoint order {label_order} "
+                f"(staggered designs are not handled)"
+            )
 
     # ---- 2. Significant sites of the chosen test, then their candidate alleles per MAG.
     summary_dir = os.path.join(args.run_dir, "p_value_summary", args.comparison)
@@ -1195,7 +1483,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         (
             mag_id,
             args.cache_dir,
-            [earlier, later],
+            timepoints,
             sample_ids,
             cand[["contig", "position", "allele"]].drop_duplicates(),
             model,
@@ -1242,7 +1530,17 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         site_ctx, on=["mag_id", "contig", "position", "allele"], how="left"
     )
     long = long.merge(
-        meta[["sample_id", "subjectID", "replicate", "group", "time"]],
+        meta[
+            [
+                "sample_id",
+                "subjectID",
+                "replicate",
+                "group",
+                "time",
+                *META_OPTIONAL,
+                "is_comparison_sample",
+            ]
+        ],
         on="sample_id",
         how="left",
     )
@@ -1277,8 +1575,13 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     long["min_freq"] = args.min_freq
     # Earlier timepoint before later within a site: an ordered categorical sorts
     # by comparison order, not alphabetically ("end" < "pre" would flip them).
+    # Other timepoints (cohort scope) follow, in the sheet's order; a label
+    # missing from the categories would turn into NaN, so every label is listed.
     long["time"] = pd.Categorical(
-        long["time"], categories=[earlier, later], ordered=True
+        long["time"],
+        categories=[earlier, later]
+        + [t for t in label_order if t not in (earlier, later)],
+        ordered=True,
     )
     long = long[LONG_COLUMNS].sort_values(
         ["mag_id", "contig", "position", "allele", "time", "group", "sample_id"]
@@ -1287,9 +1590,12 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
 
     # ---- 5. Summary (every reported allele) and rising table (only the allele
     # that rose, per group, judged on that group's later samples); write all three.
-    summary = summarise_sites(long, tps)
-    change = frequency_change_by_group(long, tps)
-    rising = summarise_rising(long, change, tps)
+    scope = args.baseline_scope
+    summary = summarise_sites(long, tps, scope, label_order)
+    # The change is the comparison's (both timepoints, its mice): cohort rows
+    # of other groups are baseline material only.
+    change = frequency_change_by_group(long[_comparison_mask(long)], tps)
+    rising = summarise_rising(long, change, tps, scope, label_order)
     stem = os.path.join(
         args.output_dir,
         f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",
@@ -1374,14 +1680,19 @@ def main():
     parser.add_argument(
         "--baseline_scope",
         choices=BASELINE_SCOPES,
-        default=BASELINE_SCOPES[0],
+        default=BASELINE_SCOPE_DEFAULT,
         help=(
-            "Samples a site is judged on: comparison = both groups (one population "
-            "at baseline, e.g. littermates split across diets); own_group = only "
-            "the group the site was significant in (groups housed apart).  "
-            "own_group works only with the within-group tests (--summary "
-            "single_sample or lmm_across_time); with a between-group test "
-            "(two_sample_paired, two_sample_unpaired, lmm) it is an error."
+            "What 'absent at baseline' is judged against.  individual = the "
+            "carrier mice's own earlier samples only (isolated populations); "
+            "own_group = every earlier sample of the site's own group (groups "
+            "housed apart; within-group tests only, --summary single_sample or "
+            "lmm_across_time, an error otherwise); comparison = every earlier "
+            "sample of both groups (one population split across groups); "
+            "cohort = every QC-passing sample of the whole run, any group, any "
+            "timepoint, collected before the first carrier sample (shared "
+            "facility; needs a collection_date column, YYYY-MM-DD, for every "
+            "sample: a partly dated sheet is an error; with no dates at all "
+            "'before' means an earlier timepoint label and a warning is logged)."
         ),
     )
     parser.add_argument(
