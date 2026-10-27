@@ -334,8 +334,152 @@ ALL_TEST_TYPES = BETWEEN_GROUP_TEST_TYPES + WITHIN_GROUP_TEST_TYPES
 # Global Configuration
 # =============================================================================
 
-# Define the global data_type variable to be used across all Snakemake files
-DATA_TYPE = config["analysis"]["data_type"]
+def check_data_type_features(config):
+    """Refuse, while the Snakefile is still being read, every setting that cannot
+    mean anything for the configured data type.  Returns the checked data type.
+
+    Single-timepoint data has no earlier timepoint, so nothing that compares a
+    mouse with its own past can run on it: dN/dS (ancestral vs derived sample),
+    regional contrast (mean change over time), baseline presence / de novo
+    (absent before, present after) and strain turnover (same-mouse ANI across a
+    transition).  Before this guard those features were silently skipped by the
+    target generators, so a single-timepoint run with ``use_dnds: True`` finished
+    with no dN/dS table and no word about why.  Now the run stops before any job
+    is submitted and the message names every offending key.
+
+    Only an EXPLICIT ``True`` is refused.  An absent key is the house default,
+    and the target generators already treat absent as off for single data (the
+    config template is written for longitudinal data, so its defaults are not
+    the user's fault).
+
+    Also checked, for both data types:
+
+    * every ``timepoints_combinations`` entry lists exactly 1 timepoint on single
+      data and exactly 2 on longitudinal data -- a mismatched entry used to be
+      skipped without a word, which meant "my pre/post comparison never ran";
+    * ``data_type`` itself is one of the two known words (an unknown word used to
+      fall through every ``if DATA_TYPE == ...`` branch, including the one that
+      picks the output sub-folder);
+    * ``use_strain_turnover`` needs ``use_pairwise_ani`` (it reads the ANI table).
+
+    Example: ``{"analysis": {"data_type": "single", "use_dnds": True,
+    "timepoints_combinations": [{"timepoint": ["t1"]}]}}`` raises
+    ``ValueError`` naming ``use_dnds``; the same config without the ``use_dnds``
+    key returns ``"single"``.
+    """
+    # Vocabulary lives inside the function so the unit tests can slice this
+    # function out of the .smk file and exec it alone (see tests/test_data_type_checks.py).
+    data_types = ("single", "longitudinal")
+    longitudinal_only = (
+        "use_dnds",
+        "use_regional_contrast",
+        "use_baseline_presence",
+        "use_strain_turnover",
+    )
+    analysis = config["analysis"]
+    data_type = analysis.get("data_type")
+    if data_type not in data_types:
+        raise ValueError(
+            f"analysis.data_type must be one of {data_types}, got {data_type!r}"
+        )
+
+    # One timepoint per entry on single data, two on longitudinal; anything
+    # else cannot be turned into a comparison label and used to vanish silently.
+    want = 1 if data_type == "single" else 2
+    bad = [
+        tc["timepoint"]
+        for tc in analysis["timepoints_combinations"]
+        if len(tc["timepoint"]) != want
+    ]
+    if bad:
+        raise ValueError(
+            f"analysis.data_type is {data_type!r}, so every entry of "
+            f"analysis.timepoints_combinations must list exactly {want} "
+            f"timepoint(s); offending entries: {bad}"
+        )
+
+    if data_type == "single":
+        # Explicit True only: an absent key is the (longitudinal-written) template
+        # default and already counts as off for single data downstream.
+        on = [flag for flag in longitudinal_only if analysis.get(flag, False)]
+        if on:
+            raise ValueError(
+                f"analysis.{', analysis.'.join(on)} cannot run on single-timepoint "
+                f"data: there is no earlier timepoint to compare against (dN/dS, "
+                f"regional contrast, baseline presence / de novo and strain "
+                f"turnover all compare a mouse with its own past).  Set the "
+                f"flag(s) to false or use data_type: longitudinal."
+            )
+
+    # Only ever reached on longitudinal data (on single data use_strain_turnover
+    # was already refused above): the turnover table is derived from the ANI
+    # table, so asking for one without the other cannot work.
+    if analysis.get("use_strain_turnover", False) and not analysis.get(
+        "use_pairwise_ani", False
+    ):
+        raise ValueError(
+            "analysis.use_strain_turnover requires analysis.use_pairwise_ani "
+            "(it reads the pairwise ANI table)"
+        )
+    return data_type
+
+
+def pairwise_ani_settings(config, data_type):
+    """Resolve the two pairwise-ANI *mode* knobs with data-type-aware defaults.
+
+    ``analysis.pairwise_ani.pairs`` picks which sample pairs are compared and
+    ``store_snp_locations`` which of them also get per-position SNP rows.  Both
+    default to ``within_subject`` (same-mouse pairs across timepoints), which is
+    the right default for longitudinal data and a meaningless one for
+    single-timepoint data: with one sample per mouse there are no same-mouse
+    pairs, so ``within_subject`` would compare nothing and ``transitions`` has no
+    transitions to match.  On single data the only sensible comparison is every
+    mouse against every other (``all``, the between-mouse strain-sharing
+    question), so that becomes the default and the same-mouse modes are refused
+    rather than quietly producing an empty table.
+
+    Returns ``{"pairs": ..., "store_snp_locations": ...}``; the other keys of the
+    block (``min_cov`` etc.) are read elsewhere and ignored here.
+
+    Example: ``{"analysis": {"data_type": "single"}}`` ->
+    ``{"pairs": "all", "store_snp_locations": "none"}``;
+    ``{"analysis": {"pairwise_ani": {"pairs": "within_subject"}}}`` on single data
+    raises ``ValueError``; on longitudinal data it is kept as written.
+    """
+    block = config["analysis"].get("pairwise_ani", {}) or {}
+    if data_type == "single":
+        pairs = block.get("pairs", "all")
+        store = block.get("store_snp_locations", "none")
+        if pairs != "all":
+            raise ValueError(
+                f"analysis.pairwise_ani.pairs: {pairs!r} needs same-mouse pairs "
+                f"across timepoints, but single-timepoint data has one sample per "
+                f"mouse; use pairs: all (every pair of samples)"
+            )
+        if store == "within_subject":
+            raise ValueError(
+                "analysis.pairwise_ani.store_snp_locations: 'within_subject' "
+                "selects same-mouse pairs, of which single-timepoint data has "
+                "none; use none or all"
+            )
+        return {"pairs": pairs, "store_snp_locations": store}
+    return {
+        "pairs": block.get("pairs", "within_subject"),
+        "store_snp_locations": block.get("store_snp_locations", "within_subject"),
+    }
+
+
+# The global data_type used across all Snakemake files, taken from the config
+# only after the guard above has refused every setting that cannot work with it.
+DATA_TYPE = check_data_type_features(config)
+# Pairwise-ANI mode knobs, resolved once; None when the feature is off so a
+# config that keeps the template's longitudinal defaults on single data (with
+# ANI switched off) is not refused for a block nothing will read.
+PAIRWISE_ANI = (
+    pairwise_ani_settings(config, DATA_TYPE)
+    if config["analysis"].get("use_pairwise_ani", False)
+    else None
+)
 OUTDIR = config["output"]["root_dir"]
 # Read defensively so a config with ``use_dnds: False`` (and no ``dnds:`` section)
 # still parses.  This value is only consumed when dN/dS targets are generated,

@@ -48,7 +48,11 @@ comes from a per-depth error model (`fdr`, `min_base_quality`).
 `pairs` chooses which pairs are compared: `within_subject` (every same-mouse
 pair), `transitions` (only same-mouse pairs matching the configured timepoint
 combinations; what strain turnover consumes), or `all` (every pair, for
-between-mouse strain-sharing questions).
+between-mouse strain-sharing questions).  On single-timepoint data every mouse
+has one sample, so there are no same-mouse pairs: `all` is the default there
+and the only accepted value, and strain turnover itself (which needs a
+transition) is refused at parse time together with the other
+longitudinal-only features (see `data_type` in the configuration reference).
 
 The filter-by-filter reference, with a worked position, lives with the code at
 `alleleflux/scripts/analysis/ani/README.md`.

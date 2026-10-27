@@ -1085,15 +1085,13 @@ def generate_strain_turnover_targets():
     """One turnover table per tested MAG (same universe as pairwise ANI), gated by use_strain_turnover.
 
     Checkpoint-dependent through get_tested_mags(), like the ANI targets.
-    Refuses configurations that cannot work rather than producing empty files:
-    it needs the ANI table and two-timepoint transitions.
+    The two things it cannot work without -- the ANI table (use_pairwise_ani)
+    and two-timepoint transitions (longitudinal data) -- are checked at parse
+    time by check_data_type_features in common.smk, so by the time this runs
+    the configuration is known to be workable.
     """
     if not config["analysis"].get("use_strain_turnover", False):
         return []
-    if not config["analysis"].get("use_pairwise_ani", False):
-        raise ValueError("use_strain_turnover requires use_pairwise_ani (it reads the pairwise table)")
-    if DATA_TYPE != "longitudinal":
-        raise ValueError("use_strain_turnover needs longitudinal data (transitions come from timepoints_combinations)")
     return [get_strain_turnover_output_path(mag_wildcard=mag) for mag in get_tested_mags()]
 
 

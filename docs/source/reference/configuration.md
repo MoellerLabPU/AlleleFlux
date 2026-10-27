@@ -74,7 +74,7 @@ Core analysis settings.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). |
+| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). Checked while the Snakefile is read: every `timepoints_combinations` entry must list exactly one timepoint for `single` and exactly two for `longitudinal`, and on `single` data an explicit `use_dnds`, `use_regional_contrast`, `use_baseline_presence` or `use_strain_turnover: true` stops the run before any job starts (these compare a sample with an earlier one, which single data does not have). Leaving those keys out is fine: absent means off for single data. |
 | `allele_analysis_only` | `false` | If true, only run allele frequency analysis without statistical tests. |
 | `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
@@ -327,8 +327,8 @@ Settings for the strain-turnover branch (see the [Strain Turnover and Baseline P
 | `pairwise_ani.min_cov` | 5 | Reads required in both samples for a position to be compared; 1 disables the depth gate. Also the depth gate of baseline presence. |
 | `pairwise_ani.min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI; baseline presence). |
 | `pairwise_ani.fdr` | 1e-6 | Tolerated chance that sequencing error alone explains an allele (popANI; baseline presence). |
-| `pairwise_ani.pairs` | `within_subject` | `within_subject`, `transitions` (only same-subject pairs matching `timepoints_combinations`; what strain turnover consumes) or `all`. |
-| `pairwise_ani.store_snp_locations` | `within_subject` | `none`, `within_subject` or `all` (large). |
+| `pairwise_ani.pairs` | `within_subject` (longitudinal), `all` (single) | `within_subject`, `transitions` (only same-subject pairs matching `timepoints_combinations`; what strain turnover consumes) or `all`. Single-timepoint data has one sample per mouse and therefore no same-mouse pairs, so only `all` is accepted there and the other two words stop the run at parse time. |
+| `pairwise_ani.store_snp_locations` | `within_subject` (longitudinal), `none` (single) | `none`, `within_subject` or `all` (large). `within_subject` is refused on single-timepoint data for the same reason. |
 | `strain_turnover.min_compared` | 0.1 | Fraction of the genome both samples must cover for a verdict. |
 | `strain_turnover.pop_threshold` | 0.99999 | popANI below this = `strain_replacement`. |
 | `strain_turnover.con_threshold` | 0.999 | conANI below this = `dominant_strain_change`. |

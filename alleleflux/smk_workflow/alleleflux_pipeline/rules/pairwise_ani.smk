@@ -55,23 +55,25 @@ rule pairwise_ani:
         min_freq=PRESENCE_RULE["min_freq"],
         fdr=PRESENCE_RULE["fdr"],
         min_base_quality=PRESENCE_RULE["min_base_quality"],
-        pairs=config["analysis"].get("pairwise_ani", {}).get("pairs", "within_subject"),
+        # The two mode knobs come from PAIRWISE_ANI (common.smk), resolved once
+        # with data-type-aware defaults: single data gets pairs=all and no SNP
+        # locations, and the same-mouse modes are refused there at parse time.
+        # PAIRWISE_ANI is None when the feature is off; the ``or {}`` keeps this
+        # params block parseable then (no job of this rule exists in that case).
+        pairs=(PAIRWISE_ANI or {}).get("pairs", ""),
         # --transitions is only meaningful for pairs == "transitions"; built from the
-        # configured timepoint combinations (EARLIER:LATER each), and left empty for
-        # single-timepoint data, where the CLI simply never sees the flag.
+        # configured timepoint combinations (EARLIER:LATER each).  The guard in
+        # common.smk refuses "transitions" on single data, so every entry here
+        # has two timepoints when this branch is taken.
         transitions_arg=(
             "--transitions " + " ".join(
                 f"{tc['timepoint'][0]}:{tc['timepoint'][1]}"
                 for tc in config["analysis"]["timepoints_combinations"]
-                if len(tc["timepoint"]) == 2
             )
-            if DATA_TYPE == "longitudinal"
-            and config["analysis"].get("pairwise_ani", {}).get("pairs") == "transitions"
+            if (PAIRWISE_ANI or {}).get("pairs") == "transitions"
             else ""
         ),
-        store_snp_locations=config["analysis"]
-        .get("pairwise_ani", {})
-        .get("store_snp_locations", "within_subject"),
+        store_snp_locations=(PAIRWISE_ANI or {}).get("store_snp_locations", ""),
     shell:
         """
         alleleflux-pairwise-ani \
