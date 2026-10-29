@@ -35,6 +35,7 @@ include: "rules/regional_contrast.smk"
 include: "rules/pairwise_ani.smk"
 include: "rules/strain_turnover.smk"
 include: "rules/baseline_presence.smk"
+include: "rules/figures.smk"
 
 # 3. Dynamic Output Function
 def get_final_pipeline_outputs(wildcards):
@@ -103,6 +104,9 @@ def get_final_pipeline_outputs(wildcards):
     # Run-once rollup of what the site-depth filter removed, over every cache
     # sidecar: after the loop, like the rising-origin summary.
     final_targets.extend(generate_site_depth_filter_summary_targets())
+    # Score heatmaps/boxplots per comparison and the HTML run report: after the
+    # loop, since the report needs every comparison's figures.
+    final_targets.extend(generate_figure_targets())
 
     # Pairwise conANI/popANI, strain turnover, replacement classification: one
     # target per TESTED MAG (union over every comparison and enabled test), so the

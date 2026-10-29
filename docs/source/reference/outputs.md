@@ -377,6 +377,22 @@ The first four are verdicts; `block_event`, `strain_undetermined` and the last t
 
 Summary: one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the four verdicts). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
 
+## Figures and run report
+
+Written by the local rules `plot_scores` and `run_report` when `analysis.figures.enabled` is on (the default), for every comparison that has combined MAG score tables; nothing when `analysis.allele_analysis_only` is on. See the [Score Figures and Run Report guide](../usage/figures_and_report.md).
+
+**Path:** `figures/{comparison}/`, `figures/run_report.html`
+
+| File | Description |
+|------|-------------|
+| `figures/{comparison}/score_heatmap_{family}.png` | Rows = every MAG tested in any cell of the family (taxonomy order, or tree tip order with `tree_path`), a phylum strip, then one tile per cell (parallelism per group, divergence) coloured by score 0-100 %, with the smallest BH q as stars (`***` < 0.001, `**` < 0.01, `*` < threshold); grey = not tested in that cell |
+| `figures/{comparison}/score_boxplot_{family}.png` | One box per cell, one dot per MAG, a grey line joining a MAG's two parallelism scores, `n=` under each box |
+| `figures/{comparison}/score_boxplot_{family}_by_phylum.png` | The same, one panel per phylum with at least `min_mags_per_phylum` MAGs; smaller phyla pooled as `other` |
+| `figures/{comparison}/score_figures.done` | The figure files written for the comparison (the workflow's sentinel); `.pdf` files alongside or instead of `.png` under `format: both` / `pdf` |
+| `figures/run_report.html` | One self-contained page: run and QC settings, the sample-and-MAG funnel per comparison, MAGs tested and MAGs with a significant site (`min_q_value < threshold`) per test cell, the site-depth filter per timepoint, and every PNG figure embedded with a caption |
+
+`{family}` is one of `ttest`, `ttest_unpaired`, `wilcoxon`, `mannwhitney`, `lmm`, `cmh`; a family with no score table is skipped.
+
 ## File Format Notes
 
 - Most files are gzip-compressed TSV (`.tsv.gz`)

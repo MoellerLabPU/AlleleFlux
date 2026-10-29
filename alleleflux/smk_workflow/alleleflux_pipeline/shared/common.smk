@@ -1403,6 +1403,42 @@ def site_depth_filter_cli_args():
     return " ".join(parts)
 
 
+
+
+def figures_params():
+    """The ``analysis.figures`` block with defaults: score figures + run report.
+
+    Example: ``{"analysis": {}}`` -> enabled True, families [] (= every family
+    with a score table), tree_path "", format "png", min_mags_per_phylum 3.
+    """
+    block = config["analysis"].get("figures", {}) or {}
+    return {
+        "enabled": bool(block.get("enabled", True)),
+        "families": list(block.get("families", []) or []),
+        "tree_path": block.get("tree_path", "") or "",
+        "format": block.get("format", "png"),
+        "min_mags_per_phylum": int(block.get("min_mags_per_phylum", 3)),
+    }
+
+
+def groups_for_label(label):
+    """``(treatment, control)`` for a groups label: the inverse of ``groups_labels``.
+
+    ``groups_labels`` spells every configured pair as ``f"{treatment}_{control}"``;
+    this maps that spelling back.  A lookup, not a split, because a group name
+    may itself contain underscores ("high_fat_control" -> ("high_fat", "control")).
+    KeyError for a label no configured pair produces (cannot happen for a
+    wildcard, which was matched from groups_labels in the first place).
+    """
+    pairs = {
+        f"{gr['treatment']}_{gr['control']}": (gr["treatment"], gr["control"])
+        for gr in config["analysis"]["groups_combinations"]
+    }
+    return pairs[label]
+
+
+FIGURES = figures_params()  # score heatmaps/boxplots + the run report (analysis.figures)
+
 # Evaluated once at parse time; the three profile-reading rules reference it in params.
 SITE_DEPTH_FILTER_ARGS = site_depth_filter_cli_args()
 

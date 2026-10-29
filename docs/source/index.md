@@ -45,6 +45,7 @@ usage/running_workflow.md
 usage/allele_freq_cache_architecture.md
 usage/artifact_reuse_and_null_runs.md
 usage/visualization_guide.md
+usage/figures_and_report.md
 usage/interpreting_results.md
 usage/dnds_analysis.md
 usage/strain_turnover_analysis.md

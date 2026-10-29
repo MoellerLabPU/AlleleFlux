@@ -807,6 +807,77 @@ alleleflux-terminal-nucleotide --significant-sites SITES \
 
 ---
 
+### `alleleflux-plot-scores` — score heatmaps and boxplots for one comparison
+
+Draw, per test family present, a MAG × cell heatmap and two boxplots from a finished run's combined MAG score tables and significant-sites summary. Run by the workflow once per comparison (local rule `plot_scores`); see the [Score Figures and Run Report guide](../usage/figures_and_report.md).
+
+```bash
+alleleflux-plot-scores --run_dir DIR --comparison LABEL --groups GROUP_A GROUP_B \
+  --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | The run's data-type directory (holds `scores/` and `p_value_summary/`). |
+| `--comparison` | Comparison label, e.g. `pre_post-treatment_control`. |
+| `--groups` | The comparison's two group labels, in configuration order (`treatment control`). |
+| `--output_dir` | Where the figures and `score_figures.done` are written. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--families` | every family with a score table | Families to draw: any of `ttest`, `ttest_unpaired`, `wilcoxon`, `mannwhitney`, `lmm`, `cmh`. `ttest`/`wilcoxon` use the paired divergence test, `ttest_unpaired`/`mannwhitney` the unpaired one (the one to read when samples cannot be paired across timepoints). |
+| `--tree` | None | Newick tree with MAG ids as tips; heatmap rows follow its tip order, MAGs absent from the tree are drawn below a divider. |
+| `--format` | `png` | `png`: PNG only; `pdf` (or `both`): PNG plus a PDF copy of every figure. |
+| `--q_threshold` | 0.05 | q below which a tile gets a star (the run's `p_value_threshold`). |
+| `--min_mags_per_phylum` | 3 | By-phylum boxplot: smaller phyla are pooled into one `other` panel. |
+| `--data_type` | `longitudinal` | `longitudinal` or `single`; `single` draws the divergence cell only (no within-group test). |
+| `--run_name` | `""` | Shown in figure titles. |
+
+#### Output
+
+`score_heatmap_{family}.{format}`, `score_boxplot_{family}.{format}` and `score_boxplot_{family}_by_phylum.{format}` per family, plus `score_figures.done` listing them. Grey tiles = the MAG was not tested in that cell; a column labelled `(no eligible MAGs)` had no score table at all. Stops with an error when a score table lacks its `total_sites_per_group_*` column or its tested MAGs differ from the summary's.
+
+---
+
+### `alleleflux-run-report` — one self-contained HTML report for a finished run
+
+Fold a run's bookkeeping tables and figures into one HTML page (inline CSS, images embedded, no scripts). Run by the workflow once, after every comparison's figures (local rule `run_report`); see the [Score Figures and Run Report guide](../usage/figures_and_report.md).
+
+```bash
+alleleflux-run-report --run_dir DIR --figures_dir DIR --output FILE \
+  --comparisons LABEL [LABEL ...] [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | The run's data-type directory. |
+| `--figures_dir` | Where `alleleflux-plot-scores` wrote `figures/<comparison>/`. |
+| `--output` | The HTML file to write. |
+| `--comparisons` | One or more comparison labels, e.g. `pre_post-treatment_control`. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--metadata_dir` | `<reuse_from or run_dir>/inputMetadata` | The `inputMetadata/` directory (the "MAGs with profiles" funnel row). |
+| `--metadata_path` | `input.metadata_path` of the runtime config | The sample sheet (the "samples in the metadata sheet" funnel rows). |
+| `--config` | newest `config_runtime_*.yml` in the run root | Runtime config YAML: shown on the page and read for `reuse_from`, `metadata_path` and the permutation settings. |
+| `--q_threshold` | 0.05 | A MAG counts as having a significant site when its smallest q is below this. |
+| `--data_type` | `longitudinal` | `longitudinal` or `single`; shown on the page. |
+| `--permuted` | off | Mark the report as a permuted (null) run (also set automatically from the config's `permutation` settings). |
+
+#### Output
+
+The HTML file: run and QC settings, the sample-and-MAG funnel per comparison, MAGs tested and MAGs with a significant site per test cell, the site-depth filter per timepoint, and every `score_*.png` under `figures_dir/<comparison>/` embedded with a caption. A section whose input is missing reads "not available in this run".
+
+---
+
 ## Getting help
 
 View detailed help for any tool:

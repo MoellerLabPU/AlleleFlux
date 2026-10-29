@@ -83,6 +83,11 @@ Core analysis settings.
 | `use_pairwise_ani` | `false` | Pairwise conANI/popANI between QC-passing sample pairs, one job per tested MAG (see [`pairwise_ani`](#pairwise_ani-strain_turnover-and-baseline_presence)). |
 | `use_strain_turnover` | `false` | Per-mouse strain-background verdicts per MAG plus the all-MAG classification. Requires `use_pairwise_ani` and longitudinal data. |
 | `use_baseline_presence` | `false` | For each significant site, was the allele present at the earlier timepoint? One job per comparison, after the statistics. |
+| `figures.enabled` | `true` | Score heatmaps and boxplots per comparison and test family, plus one HTML run report, once the scores exist (see the [Score Figures and Run Report guide](../usage/figures_and_report.md)). `false` = no figures, no report. Off automatically under `allele_analysis_only`. Heatmap stars use `statistics.p_value_threshold`. |
+| `figures.families` | `[]` | Families to draw: a subset of `ttest`, `ttest_unpaired`, `wilcoxon`, `mannwhitney`, `lmm`, `cmh`; `[]` = every family that has a score table. |
+| `figures.tree_path` | `""` | Optional Newick tree with MAG ids as tip names; heatmap rows follow its tip order instead of taxonomy, MAGs absent from the tree go below a divider. An input of the figure rule, so a new tree redraws the figures. |
+| `figures.format` | `png` | `png`: PNG only; `pdf` (or `both`): PNG plus a PDF copy of every figure. A PNG is always written because the report embeds PNGs. |
+| `figures.min_mags_per_phylum` | 3 | By-phylum boxplot: a phylum with fewer MAGs than this is pooled into one `other` panel. |
 | `timepoints_combinations` | Required | List of timepoint combinations to analyze (see below). |
 | `groups_combinations` | Required | List of group pairs to compare (see below). |
 

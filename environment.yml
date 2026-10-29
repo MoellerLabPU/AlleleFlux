@@ -12,10 +12,12 @@ dependencies:
   - matplotlib-base
   - statsmodels
   - seaborn
+  - plotnine
   - tqdm
   - pysam
   - samtools
   - biopython
+  - jinja2
   - intervaltree
   - snakemake>=8.0.0
   - snakemake-executor-plugin-cluster-generic

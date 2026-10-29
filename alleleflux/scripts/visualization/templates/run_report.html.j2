@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlleleFlux run report{% if run_name %}: {{ run_name }}{% endif %}</title>
+<style>
+  /* design tokens: one surface set for light, one for dark (OS setting or data-theme) */
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #ffffff; --surface-2: #f7f7f5; --line: #e2e1dc;
+    --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8a8985;
+    --accent: #2a78d6; --accent-soft: #e3eefb; --warn-bg: #fff3cd; --warn-line: #e3c25a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #141413; --surface: #1e1e1c; --surface-2: #262624; --line: #343432;
+      --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e88;
+      --accent: #3987e5; --accent-soft: #1f3450; --warn-bg: #4a3b12; --warn-line: #9c7f2a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #141413; --surface: #1e1e1c; --surface-2: #262624; --line: #343432;
+    --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e88;
+    --accent: #3987e5; --accent-soft: #1f3450; --warn-bg: #4a3b12; --warn-line: #9c7f2a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  header.hero { background: var(--surface); border-bottom: 1px solid var(--line); padding: 1.6rem 1rem 1.2rem; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+  .hero h1 { margin: 0 0 0.3rem; font-size: 1.7rem; font-weight: 650; letter-spacing: -0.01em; }
+  .hero .sub { color: var(--ink-2); margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
+  .chip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
+          padding: 0.2rem 0.7rem; font-size: 0.85rem; color: var(--ink-2); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  nav.toc { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 1px solid var(--line); }
+  nav.toc .wrap { display: flex; gap: 1.2rem; overflow-x: auto; padding-top: 0.5rem; padding-bottom: 0.5rem; font-size: 0.92rem; }
+  nav.toc a { color: var(--ink-2); white-space: nowrap; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding: 1.5rem 0 3rem; }
+  section { margin: 0 0 2rem; }
+  h2 { font-size: 1.25rem; margin: 0 0 0.8rem; font-weight: 650; }
+  :target { scroll-margin-top: 3.2rem; }
+  h3 { font-size: 1rem; margin: 1.2rem 0 0.5rem; color: var(--ink-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .card p.lead { color: var(--ink-2); margin: 0 0 0.8rem; }
+  .banner { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 0.7rem 1rem; margin: 0 0 1.2rem; font-weight: 600; }
+  .missing { color: var(--ink-3); font-style: italic; margin: 0.3rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  th, td { padding: 0.4rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { color: var(--ink-2); font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 2px solid var(--line); }
+  tbody tr:nth-child(even) { background: var(--surface-2); }
+  tr:last-child > th, tr:last-child > td { border-bottom: none; }
+  table.kv th { width: 42%; font-weight: 500; color: var(--ink-2); }
+  table.kv td, table.num td:not(:first-child), table.num th:not(:first-child) { text-align: right; }
+  table.kv.text td { text-align: left; }
+  td.bar { width: 160px; padding-right: 1rem; }
+  td.bar span { display: block; height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  td.bar i { display: block; height: 8px; border-radius: 4px; background: var(--accent-soft); }
+  td.bar i span { margin: 0; }
+  .num { overflow-x: auto; }
+  figure.boxplot { max-width: 760px; }
+  pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem 0.9rem; overflow-x: auto; font-size: 0.8rem; margin: 0.4rem 0; }
+  details > summary { cursor: pointer; color: var(--ink-2); margin-top: 0.6rem; }
+  dl.defs { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0.9rem 0 0; font-size: 0.88rem; }
+  dl.defs dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  dl.defs dd { margin: 0; color: var(--ink-2); }
+  .figgrid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem; }
+  figure img { display: block; width: 100%; height: auto; border-radius: 6px; }
+  figure.heatmap img { width: auto; max-width: 100%; margin: 0 auto; }  /* never upscale: small text blurs */
+  figcaption { margin-top: 0.6rem; font-size: 0.86rem; color: var(--ink-2); }
+  figcaption b { color: var(--ink); }
+  .figtoc { margin-bottom: 1rem; }
+  .figtoc table { width: auto; }
+  .figtoc td a { margin-right: 1rem; white-space: nowrap; }
+  footer { color: var(--ink-3); font-size: 0.82rem; padding: 1rem 0 2rem; }
+</style>
+</head>
+<body>
+{% set family_names = {"ttest": "t-test (paired)", "ttest_unpaired": "t-test (unpaired)", "wilcoxon": "Wilcoxon (paired)", "mannwhitney": "Mann-Whitney (unpaired)", "lmm": "LMM", "cmh": "CMH"} %}
+{% set kind_names = {"heatmap": "heatmap", "boxplot": "boxplot", "boxplot_by_phylum": "boxplot by phylum"} %}
+
+<header class="hero"><div class="wrap">
+  <h1>AlleleFlux run report</h1>
+  <p class="sub">{% if run_name %}{{ run_name }} &middot; {% endif %}{{ data_type }} &middot; report date {{ date }}</p>
+  <div class="chips">
+    <span class="chip">version <b>{{ version }}</b></span>
+    <span class="chip">commit <b>{{ commit }}</b></span>
+    <span class="chip">q threshold <b>{{ q_threshold }}</b></span>
+    <span class="chip">comparisons <b>{{ comparisons | length }}</b></span>
+  </div>
+</div></header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#run">Run</a><a href="#funnel">Funnel</a><a href="#significance">Significant sites</a><a href="#filter">Site-depth filter</a><a href="#figures">Figures</a>
+</div></nav>
+
+<main class="wrap">
+{% if permuted %}<div class="banner">This is a permuted (null) run: group labels were shuffled before the tests. Sample counts below describe the sheet the run was configured with.</div>{% endif %}
+
+<section id="run">
+<h2>Run</h2>
+<div class="card">
+<table class="kv text">
+  <tr><th>run name</th><td>{{ run_name }}</td></tr>
+  <tr><th>run directory</th><td>{{ run_dir }}</td></tr>
+  <tr><th>data type</th><td>{{ data_type }}</td></tr>
+  <tr><th>report date</th><td>{{ date }}</td></tr>
+  <tr><th>AlleleFlux version</th><td>{{ version }}</td></tr>
+  <tr><th>code commit</th><td>{{ commit }}</td></tr>
+  <tr><th>q threshold</th><td>{{ q_threshold }}</td></tr>
+</table>
+{% if config_text %}
+<h3>Quality control settings (from the saved runtime configuration)</h3>
+<pre>{{ qc_text }}</pre>
+<details><summary>Full runtime configuration</summary><pre>{{ config_text }}</pre></details>
+{% else %}
+<p class="missing">Runtime configuration: not available in this run (no config_runtime_*.yml found).</p>
+{% endif %}
+</div>
+</section>
+
+<section id="funnel">
+<h2>Funnel: samples and MAGs through the pipeline</h2>
+{% for c in comparisons %}
+<div class="card">
+<h3 style="margin-top:0">{{ c.name }}</h3>
+<table class="kv">
+{% for label, value in c.funnel %}
+  <tr><th>{{ label }}</th><td>{% if value is none %}<span class="missing">not available in this run</span>{% else %}{{ value | commas }}{% endif %}</td></tr>
+{% endfor %}
+</table>
+</div>
+{% endfor %}
+</section>
+
+<section id="significance">
+<h2>Significant sites per test cell</h2>
+{% for c in comparisons %}
+<div class="card">
+<h3 style="margin-top:0">{{ c.name }}</h3>
+<p class="lead">Per test cell: MAGs tested, and MAGs with at least one site with q &lt; {{ q_threshold }} (count and % of tested).</p>
+{% if c.significance is none %}
+<p class="missing">Significant-sites summary: not available in this run.</p>
+{% else %}
+<table class="num">
+<thead><tr><th>test type</th><th>group</th><th>MAGs tested</th><th>MAGs with a significant site</th><th>% of tested</th><th></th></tr></thead>
+<tbody>
+{% for r in c.significance.to_dict("records") %}
+  <tr><td>{{ r.test_type }}</td><td>{{ r.group_analyzed }}</td><td>{{ r.n_tested }}</td><td>{{ r.n_significant }}</td><td>{{ r.pct_significant }}</td><td class="bar"><i><span style="width:{{ r.pct_significant }}%"></span></i></td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+{% endfor %}
+<div class="card">
+<dl class="defs">
+  <dt>test type</dt><dd>The statistical test that produced the cell. Within-group tests (parallelism) ask whether allele frequencies changed between the two timepoints inside one group: <code>single_sample_tTest</code>, <code>single_sample_Wilcoxon</code>, <code>LMM_across_time</code>, <code>CMH_across_time</code>. Between-group tests (divergence) ask whether the change differs between the two groups: <code>two_sample_paired_*</code> and <code>two_sample_unpaired_*</code> (matched versus unmatched samples), <code>LMM</code>, <code>CMH</code>. An <code>_abs</code> suffix means the test was run on the absolute size of each sample's frequency change, so it asks whether the magnitude of change differs regardless of direction.</dd>
+  <dt>group</dt><dd>For a within-group test, the group that was tested. For <code>CMH</code> divergence, the focus timepoint. Blank for the other between-group tests, which use both groups.</dd>
+  <dt>MAGs tested</dt><dd>MAGs with at least one site in this cell's p-value table, i.e. MAGs that passed eligibility and preprocessing for this test.</dd>
+  <dt>MAGs with a significant site</dt><dd>Of those, MAGs whose smallest BH-adjusted q over all their sites is below the q threshold. One significant site is enough to count.</dd>
+  <dt>% of tested</dt><dd>The previous column as a percentage of MAGs tested; the bar draws the same number.</dd>
+</dl>
+</div>
+</section>
+
+<section id="filter">
+<h2>Site-depth filter</h2>
+<div class="card">
+{% if site_filter is none %}
+<p class="missing">Site-depth filter summary: not available in this run (filter off, or the summary was not written).</p>
+{% else %}
+<p class="lead">The filter runs once per sample and MAG, before any allele frequency is read. For each pair it computes the mean depth over the MAG's covered positions and drops positions whose depth is above <code>site_ratio</code> times that mean (likely repeats, multi-copy genes or regions shared with a related genome) or below <code>site_depth</code> (too thin to call). The thresholds are in the quality-control settings above. One row per timepoint:</p>
+<div class="num">{{ site_filter.summary | table | safe }}</div>
+<dl class="defs">
+  <dt>timepoint</dt><dd>The sampling timepoint whose profiles were filtered; each timepoint is filtered on its own.</dd>
+  <dt>sample_mag_pairs_checked</dt><dd>How many (sample, MAG) combinations the filter ran on at that timepoint. A pair is one MAG's profile in one sample; each pair gets its own mean depth and therefore its own ceiling.</dd>
+  <dt>mags</dt><dd>Distinct MAGs among those pairs.</dd>
+  <dt>sites_covered</dt><dd>Positions with any reads, summed over all pairs, before the filter.</dd>
+  <dt>sites_removed</dt><dd>Positions dropped by the ceiling plus the floor, summed over all pairs.</dd>
+  <dt>pct_removed</dt><dd>sites_removed as a percentage of sites_covered: the overall share of the data the filter took away.</dd>
+  <dt>median_row_pct</dt><dd>For each pair, the percentage of its own covered positions that were removed; this is the median over pairs, i.e. what a typical pair lost.</dd>
+  <dt>max_row_pct</dt><dd>The same per-pair percentage for the single pair that lost the most. A high value with a low median points at one MAG with a large repeat or cross-mapping region rather than a run-wide problem.</dd>
+</dl>
+{% if site_filter.histogram_b64 %}
+<figure style="margin-top:1rem; max-width:620px"><img src="data:image/png;base64,{{ site_filter.histogram_b64 }}" alt="fraction of positions removed per MAG and timepoint"><figcaption>Fraction of covered positions the filter removed, one value per MAG and timepoint.</figcaption></figure>
+{% endif %}
+{% endif %}
+</div>
+</section>
+
+<section id="figures">
+<h2>Figures</h2>
+{% if not figures %}
+<p class="missing">Figures: not available in this run (no score_*.png under the figures directory).</p>
+{% else %}
+<div class="card figtoc">
+<table>
+<thead><tr><th>comparison</th><th>family</th><th>figures</th></tr></thead>
+<tbody>
+{% for cmp_name, cmp_figs in figures | groupby("comparison") %}
+{% for fam, fam_figs in cmp_figs | groupby("family") %}
+<tr><td>{{ cmp_name }}</td><td><a href="#fam-{{ cmp_name }}-{{ fam }}">{{ family_names.get(fam, fam) }}</a></td><td>{% for kind in ["heatmap", "boxplot", "boxplot_by_phylum"] %}{% for f in fam_figs | selectattr("kind", "equalto", kind) %}<a href="#fig-{{ f.comparison }}-{{ f.family }}-{{ f.kind }}">{{ kind_names.get(f.kind, f.kind) }}</a>{% endfor %}{% endfor %}</td></tr>
+{% endfor %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+{% for cmp_name, cmp_figs in figures | groupby("comparison") %}
+{% for fam, fam_figs in cmp_figs | groupby("family") %}
+<h3 id="fam-{{ cmp_name }}-{{ fam }}">{{ cmp_name }} &middot; {{ family_names.get(fam, fam) }}</h3>
+<div class="figgrid">
+{% for kind in ["heatmap", "boxplot", "boxplot_by_phylum"] %}
+{% for f in fam_figs | selectattr("kind", "equalto", kind) %}
+<figure class="{{ f.kind }}" id="fig-{{ f.comparison }}-{{ f.family }}-{{ f.kind }}"><img src="data:image/png;base64,{{ f.png_b64 }}" alt="{{ f.kind }} {{ f.family }} {{ f.comparison }}"><figcaption><b>{{ kind_names.get(f.kind, f.kind) }}.</b> {{ f.caption }}</figcaption></figure>
+{% endfor %}
+{% endfor %}
+</div>
+{% endfor %}
+{% endfor %}
+</section>
+</main>
+<footer class="wrap">Generated by alleleflux-run-report. Every figure is embedded; the page has no external dependencies.</footer>
+</body>
+</html>

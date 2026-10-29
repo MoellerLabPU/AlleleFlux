@@ -1226,6 +1226,38 @@ def generate_site_depth_filter_summary_targets():
     return [os.path.join(OUTDIR, "site_depth_filter", "site_depth_filter_summary.tsv")]
 
 
+def figure_sentinel(outdir, tp, gr):
+    """``plot_scores`` output for one comparison: the done-file listing the figures written."""
+    return os.path.join(outdir, "figures", f"{tp}-{gr}", "score_figures.done")
+
+
+def run_report_path(outdir):
+    """The run-once HTML report."""
+    return os.path.join(outdir, "figures", "run_report.html")
+
+
+def generate_figure_targets():
+    """One figure sentinel per comparison that has combined MAG score tables, plus
+    the run report -- or nothing when figures are off or no scores exist.
+
+    Run-once-ish: added after the per-combination loop in the Snakefile because the
+    report needs every comparison's figures.  Reads the eligibility checkpoints
+    through generate_mag_scores_targets, so it belongs in get_final_pipeline_outputs.
+    """
+    if not FIGURES["enabled"]:
+        return []
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    targets = []
+    for tp in timepoints_labels:
+        for gr in groups_labels:
+            if generate_mag_scores_targets(tp, gr):
+                targets.append(figure_sentinel(OUTDIR, tp, gr))
+    if targets:
+        targets.append(run_report_path(OUTDIR))
+    return targets
+
+
 def generate_baseline_presence_targets(tp, gr):
     """Baseline-presence outputs for one comparison, only where its summary file will exist.
 

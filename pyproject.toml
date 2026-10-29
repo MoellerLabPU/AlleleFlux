@@ -20,6 +20,7 @@ dependencies = [
     "scipy",
     "matplotlib",
     "seaborn",
+    "plotnine",
     "statsmodels",
     "tqdm",
     "intervaltree",
@@ -31,6 +32,7 @@ dependencies = [
     "click",
     "questionary",
     "pyyaml",
+    "jinja2",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +67,8 @@ alleleflux-strain-turnover = "alleleflux.scripts.analysis.ani.strain_turnover:ma
 alleleflux-replacement-classification = "alleleflux.scripts.analysis.ani.replacement_classification:main"
 alleleflux-baseline-presence = "alleleflux.scripts.analysis.baseline_presence:main"
 alleleflux-rising-origin = "alleleflux.scripts.analysis.rising_origin:main"
+alleleflux-plot-scores = "alleleflux.scripts.visualization.plot_scores:main"
+alleleflux-run-report = "alleleflux.scripts.visualization.run_report:main"
 
 # Preprocessing scripts
 alleleflux-metadata = "alleleflux.scripts.preprocessing.mag_metadata:main"
@@ -120,6 +124,7 @@ alleleflux = [
     "smk_workflow/*.smk",           # Snakemake workflow files
     "smk_workflow/**/*.smk",        # Nested workflow rules
     "smk_workflow/**/Snakefile",    # Main Snakefile
+    "scripts/visualization/templates/*.j2",  # the run-report template
     "smk_workflow/*.yml",           # Config templates
     "smk_workflow/*.yaml",          # Config templates (alt extension)
     "smk_workflow/**/*.yml",        # Nested configs

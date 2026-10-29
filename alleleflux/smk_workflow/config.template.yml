@@ -117,6 +117,13 @@ analysis:
     min_determined_carriers: 3     # carrier gate: carriers with a per-mouse verdict needed before their strain is
                                    # called; fewer -> strain_undetermined (not de novo)
                                    # depth gate / presence rule reuse pairwise_ani.min_cov, min_freq, fdr
+  figures:                         # Score heatmaps + boxplots per comparison and test family, and one HTML run report
+    enabled: True                  # False = no figures, no report
+    families: []                   # [] = every family with a score table; else a subset of
+                                   # ttest, ttest_unpaired, wilcoxon, mannwhitney, lmm, cmh
+    tree_path: ""                  # Optional Newick tree with MAG ids as tips: heatmap rows follow it instead of taxonomy
+    format: "png"                  # png = PNG only; pdf (or both) = PNG plus a PDF copy of every figure
+    min_mags_per_phylum: 3         # By-phylum boxplot: phyla with fewer MAGs are pooled into one "other" panel
   taxa_score_levels:               # Taxonomy levels at which to aggregate MAG scores (MAG level is always computed)
     - phylum                       # Remove or comment out levels you don't need; set to [] for MAG level only
     - class
