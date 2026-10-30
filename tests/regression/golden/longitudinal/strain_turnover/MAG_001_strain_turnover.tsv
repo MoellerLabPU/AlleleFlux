@@ -1,0 +1,9 @@
+MAG_ID	subjectID	replicate	group	transition	sample_t1	sample_t2	compared_bases_count	percent_genome_compared	conANI	popANI	frequency_shift	strain_replacement	dominant_strain_change	background	min_compared	pop_threshold	con_threshold	min_cov
+MAG_001	subj1	A	control	pre_post	control_subj1_pre	control_subj1_post	2900	0.9863945578231292	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj2	B	control	pre_post	control_subj2_pre	control_subj2_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj3	C	control	pre_post	control_subj3_pre	control_subj3_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj4	D	control	pre_post	control_subj4_pre	control_subj4_post	2900	0.9863945578231292	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj5	A	treatment	pre_post	treatment_subj5_pre	treatment_subj5_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj6	B	treatment	pre_post	treatment_subj6_pre	treatment_subj6_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj7	C	treatment	pre_post	treatment_subj7_pre	treatment_subj7_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
+MAG_001	subj8	D	treatment	pre_post	treatment_subj8_pre	treatment_subj8_post	2940	1.0	0.9799319727891156	0.9809523809523808	0.0010204081632652073	True	True	strain_replacement+dominant_strain_change	0.1	0.99999	0.999	5

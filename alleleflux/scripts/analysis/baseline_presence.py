@@ -1,0 +1,1739 @@
+"""Was the significant allele already there at baseline?  (``alleleflux-baseline-presence``)
+
+AlleleFlux's tests say *that* an allele won at a position -- its frequency
+differs between groups at the later timepoint (divergence, the two-sample
+tests) or changed within a group (parallelism, the single-sample test).  They
+cannot say where the allele came from.  Two stories fit the same p-value:
+
+* it was **standing variation** -- present in the mice before treatment and
+  favoured by it (selection on existing diversity), or
+* it **arose after** baseline, by mutation or by a different strain arriving.
+
+This command tells them apart from the raw reads.  For every significant site
+it takes the allele(s) the test flagged and, in every sample of the site's
+baseline scope (both timepoints), counts that allele's reads and applies the same
+presence rule the ANI work uses: at least ``min_cov`` reads at the position to
+say anything at all, then at least the null-model bar AND ``min_freq`` of reads
+to call the allele present.  Each sample gets one of four verdicts::
+
+    present          covered, allele clears the bar and min_freq
+    below_detection  covered, 1+ reads of the allele but under the bar / min_freq
+    absent           covered, zero reads of the allele
+    not_covered      fewer than min_cov usable reads: no verdict, out of every
+                     denominator.  TWO causes share this word: the sample had
+                     too few reads there, OR the site-depth filter removed the
+                     position for that sample (reads existed but were judged a
+                     pile and never entered the cache).  A separate "filtered"
+                     verdict is queued (Phase 2 plan); until then the cache
+                     sidecar's n_removed_* columns say how much is filter-driven.
+
+Three outputs per (comparison, test):
+
+* ``{comparison}_{family}_{statistic}_baseline_presence.tsv.gz`` -- one row per site x allele
+  x sample: allele reads, total reads, detection bar, status, the mouse / replicate / group /
+  timepoint.
+* ``..._summary.tsv`` -- one row per site x allele: the any-mouse verdict with its
+  counts (present in how many covered baseline samples, in how many replicates),
+  the same-mouse counts (standing vs de novo per mouse), and the pooled reads per
+  timepoint (total reads at the position over every sample, reads carrying the
+  allele, their ratio) -- UNFILTERED, so "1,000 reads at baseline and the allele
+  never seen" bounds its baseline frequency below 1/1,000.  Which framing is the
+  paper's headline is a design question: littermates sharing a colony justify
+  "any mouse"; outbred, half-cross-sectional cohorts justify
+  "same mouse" plus a stable strain background.
+* ``..._rising.tsv`` -- the summary's columns plus ``rose_in``,
+  ``frequency_change``, ``n_replicates``, ``n_mice``: one row per (site,
+  allele, group the allele ROSE in).  At a biallelic site both alleles are candidates and both are in the summary,
+  but only one rose; the one that fell was the common one at baseline and always
+  reads "standing", so it is left out here.  The end-point check and the
+  later-timepoint counts use the rose_in group's samples only.  This is the
+  table to count standing vs de novo from.
+
+Column names and origin labels are spelled with the comparison's OWN timepoint
+names (``pre`` / ``end`` for ``pre_end-fat_control``, ``5mo`` / ``22mo`` for
+an age series), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appear only
+as placeholders in templates and as shorthand in comments for "the earlier /
+the later timepoint of the comparison".
+
+Which samples count (``--baseline_scope``; see ``baseline_rows`` for all four):
+
+* ``cohort`` (default): every QC-passing sample of the whole run, any group, any
+  timepoint, collected before the first carrier sample (needs ``collection_date``
+  in the metadata).  Right for a shared facility, where an allele seen anywhere
+  earlier was already in the building.
+* ``comparison``: every sample of both groups.  Right when both groups
+  are one population at baseline (e.g. littermates split across diets).
+* ``own_group``: each site is judged only on the samples of the group it was
+  significant in, at both timepoints.  Right when groups are housed apart from
+  the start (single-diet cages): another group's baseline mice are a different
+  population.  A smaller baseline pool calls more alleles de novo, so the de novo
+  criteria carry more weight under it.
+
+``own_group`` needs a WITHIN-group test (``--summary single_sample`` or
+``lmm_across_time``, where every site has a ``group_analyzed``).  The
+between-group families (two_sample_paired, two_sample_unpaired, and lmm, the
+two-way group x time model) compare the two groups, so their sites have no own
+group: own_group with them stops the run before anything is read.  CMH is not a
+``--summary`` choice for either scope (one p per site, so no allele to follow).
+
+The ANI/strain work is OPTIONAL: ``--turnover_dir`` adds a ``strain_background``
+column; without it the command runs on any AlleleFlux output.
+
+Worked site (two replicates, two groups; comparison pre_end):
+allele G at c1:10, pre reads m1 5/30, m2 0/30, m3 1/30, m4 0/2 -> present, absent,
+below_detection, not_covered.  Summary: n_pre_samples_covered 3,
+n_pre_samples_allele_present 1, origin_any_mouse standing_variation; per-mouse:
+n_mice_standing_variation 1, n_mice_de_novo_candidate 1,
+n_mice_de_novo_candidate_below_detection_at_pre 1; reads: total_reads_pre 92
+(30+30+30+2, the thin m4 included), allele_reads_pre 6, allele_frequency_pre 0.065.
+"""
+
+import argparse
+import glob
+import logging
+import multiprocessing
+import os
+from typing import NamedTuple
+
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
+
+from alleleflux.scripts.analysis.ani.classify import BASES
+from alleleflux.scripts.analysis.ani.null_model import build_error_model
+from alleleflux.scripts.utilities.cache_io import (
+    cache_path,
+    cache_samples,
+    load_cache_sites,
+)
+from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.sample_metadata import (
+    META_OPTIONAL,
+    validate_collection_dates,
+)
+
+logger = logging.getLogger(__name__)
+
+# The four per-sample verdicts (see module docstring).
+EVIDENCE_PRESENT = "present"
+EVIDENCE_BELOW_DETECTION = "below_detection"
+EVIDENCE_ABSENT = "absent"
+# not_covered has a dual meaning: too few reads, OR the site-depth filter
+# removed the position for that sample (no cache row either way).
+EVIDENCE_NOT_COVERED = "not_covered"
+
+
+class Timepoints(NamedTuple):
+    """The two timepoints of a comparison, and the one place their names get spelled.
+
+    ``earlier`` / ``later`` are the labels exactly as the metadata and the
+    comparison directory write them (``pre`` / ``end``, ``5mo`` / ``22mo``).
+    Column names and origin labels are TEMPLATES holding ``{t0}`` / ``{t1}``;
+    ``name()`` fills them, so every output name is derived from the comparison
+    and no timepoint name is ever hard-coded (house rule).
+
+    Example: ``Timepoints("pre", "end").name("n_{t0}_samples_covered")`` ->
+    ``"n_pre_samples_covered"``; ``.name(ORIGIN_T1_NOT_COVERED)`` -> ``"end_not_covered"``.
+    """
+
+    earlier: str
+    later: str
+
+    def name(self, template: str) -> str:
+        return template.format(t0=self.earlier, t1=self.later)
+
+
+# Per-mouse origin verdict on later-timepoint rows (``label_origin_in_own_mouse``):
+# what the allele's presence at t1 looks like against the SAME mouse's t0 sample.
+# Templates: ``{t0}`` / ``{t1}`` are filled with the comparison's real timepoint
+# names by ``Timepoints.name`` (``de_novo_candidate_below_detection_at_pre``).
+ORIGIN_STANDING = "standing_variation"  # t1 present, t0 present
+ORIGIN_DE_NOVO = "de_novo_candidate"  # t1 present, t0 covered and absent
+ORIGIN_DE_NOVO_BELOW_DETECTION = "de_novo_candidate_below_detection_at_{t0}"  # t1 present, t0 had a few reads under the bar
+ORIGIN_T0_NOT_COVERED = "{t0}_not_covered"  # t1 present, t0 too thin to say
+ORIGIN_NO_T0_SAMPLE = "no_{t0}_sample"  # t1 present, mouse has no t0 sample
+ORIGIN_BELOW_DETECTION_AT_T1 = (
+    "allele_below_detection_at_{t1}"  # t1 covered, a few reads under the bar
+)
+ORIGIN_ABSENT_AT_T1 = "allele_absent_at_{t1}"  # t1 covered, zero reads of the allele
+ORIGIN_T1_NOT_COVERED = "{t1}_not_covered"  # t1 too thin: nothing to explain
+# Site-level only (origin_any_mouse): no covered t1 sample shows the allele at all.
+ORIGIN_NOT_SEEN_AT_T1 = "allele_not_present_at_{t1}"
+
+# ``--summary`` families -> the stem of the per-base p-value column in that family's
+# source files.  A summary family fixes the file (``p_value_summary_{family}_*.tsv``),
+# the source directory (``significance_tests/{family}_{comparison}/``) and the
+# column convention; ``--test_type`` then picks rows within it exactly as the summary
+# spells them (two_sample_paired_Wilcoxon, LMM_abs, ...).  CMH is not offered: it reports ONE p per site,
+# never per base, so it cannot name the significant allele.
+SUMMARY_FAMILIES = {
+    # family: (column stem, group name appended to the column?)
+    # single_sample files hold one block of columns PER GROUP (A_..._tTest_fat);
+    # lmm_across_time files are one FILE per group with unsuffixed columns.
+    "two_sample_paired": ("_frequency_p_value_", False),
+    "two_sample_unpaired": ("_frequency_p_value_", False),
+    "single_sample": ("_frequency_p_value_", True),
+    "lmm": ("_p_value_", False),
+    "lmm_across_time": ("_p_value_", False),
+}
+# The families whose sites belong to ONE group (``group_analyzed`` set): the
+# single-sample test and the per-group LMM across time.  Only these can take
+# ``--baseline_scope own_group``.  The rest (two_sample_paired,
+# two_sample_unpaired, and lmm = the two-way group x time model) compare the two
+# groups, so a site has no "own" group and own_group is refused for them.
+WITHIN_GROUP_FAMILIES = ("single_sample", "lmm_across_time")
+
+# Site identity shared by both outputs.
+SITE_KEYS = [
+    "mag_id",
+    "contig",
+    "position",
+    "gene_id",
+    "test_type",
+    "group_analyzed",
+    "allele",
+]
+
+LONG_COLUMNS = [
+    "mag_id",
+    "contig",
+    "position",
+    "gene_id",
+    "test_type",
+    "group_analyzed",
+    "min_p_value",
+    "q_value",
+    "n_candidate_alleles",
+    "allele",
+    "sample_id",
+    "subjectID",
+    "replicate",
+    "group",
+    "time",
+    "collection_date",  # optional metadata column, ISO YYYY-MM-DD or blank
+    "cohort",  # optional metadata column (enrollment batch), text or blank
+    "is_comparison_sample",  # True for the comparison's own samples; False only under cohort
+    "allele_reads",
+    "total_reads",
+    "detection_threshold_reads",
+    "allele_frequency",
+    "allele_status",
+    "allele_present",
+    "origin_in_own_mouse",
+    "strain_background",
+    "min_cov",
+    "min_freq",
+]
+
+# Optional per-sample metadata columns (collection_date in ISO YYYY-MM-DD,
+# cohort): defined and validated ONCE in utilities/sample_metadata.py, shared
+# with alleleflux-metadata so a malformed sheet stops the run at its first step.
+
+
+# ---------------------------------------------------------------------------
+# Pure steps
+# ---------------------------------------------------------------------------
+
+
+def parse_comparison(label: str) -> tuple[str, str, str, str]:
+    """Split a comparison label into (earlier, later, group_a, group_b).
+
+    AlleleFlux names comparison directories ``{tp1}_{tp2}-{g1}_{g2}``, e.g.
+    ``pre_end-fat_control`` or ``5mo_22mo-40_AL``.  Exactly one ``-`` and one
+    ``_`` on each side; anything else raises rather than guessing.
+    """
+    parts = label.split("-")
+    if len(parts) != 2 or any(p.count("_") != 1 for p in parts):
+        raise ValueError(f"comparison must look like tp1_tp2-g1_g2, got {label!r}")
+    earlier, later = parts[0].split("_")
+    group_a, group_b = parts[1].split("_")
+    return earlier, later, group_a, group_b
+
+
+def find_summary_file(summary_dir: str, family: str, period: str) -> str:
+    """The one ``p_value_summary_{family}_{period}*.tsv`` in a comparison directory.
+
+    Older runs name it ``..._{period}.tsv``, newer ones
+    ``..._{period}-{groups}.tsv``; the trailing ``*`` covers both.  The
+    period is part of the pattern so that ``lmm`` never also matches
+    ``lmm_across_time`` (same prefix).  Zero or two matches raise: no silent
+    fallback to another family.
+
+    Example: ("…/pre_end-fat_control", "lmm", "pre_end") ->
+    ".../p_value_summary_lmm_pre_end.tsv" only.
+    """
+    pattern = os.path.join(summary_dir, f"p_value_summary_{family}_{period}*.tsv")
+    hits = sorted(glob.glob(pattern))
+    if len(hits) != 1:
+        raise FileNotFoundError(
+            f"expected exactly one file matching {pattern}, found {hits}; choose another --summary?"
+        )
+    return hits[0]
+
+
+def allele_p_column(family: str, test_type: str):
+    """Build the per-base p-value column name for one (family, test_type).
+
+    Parameters
+    ----------
+    family
+        A ``SUMMARY_FAMILIES`` key, e.g. ``"two_sample_paired"``.
+    test_type
+        The summary's ``test_type`` string, e.g. ``"two_sample_paired_Wilcoxon"``
+        or ``"LMM_abs"``.  The family prefix (if any) is stripped to leave the
+        statistic that names the column: ``Wilcoxon``, ``tTest_abs``, ``LMM``.
+
+    Returns
+    -------
+    ``column(base, group) -> str``.  ``group`` is appended only for families
+    whose files hold one column block per group (single_sample); families with
+    one FILE per group (lmm_across_time) have plain column names.
+
+    Examples: ("two_sample_unpaired", "two_sample_unpaired_MannWhitney_abs")
+    -> "G_frequency_p_value_MannWhitney_abs"; ("single_sample",
+    "single_sample_tTest") + group "fat" -> "A_frequency_p_value_tTest_fat";
+    ("lmm", "LMM_abs") -> "T_p_value_LMM_abs"; ("lmm_across_time", "LMM") +
+    group "control" -> "C_p_value_LMM" (group is in the file name).
+    """
+    if family not in SUMMARY_FAMILIES:
+        raise ValueError(
+            f"unknown summary family {family!r}; choose from {list(SUMMARY_FAMILIES)}"
+        )
+    stem, group_in_column = SUMMARY_FAMILIES[family]
+    # The statistic that names the column: strip the family prefix when present
+    # ("two_sample_paired_Wilcoxon" -> "Wilcoxon"); LMM types have no prefix.
+    prefix = f"{family}_"
+    stat = test_type[len(prefix) :] if test_type.startswith(prefix) else test_type
+
+    def column(base: str, group: str) -> str:
+        # Group goes into the column name only for families that keep one column
+        # block per group; one-file-per-group families use plain names.
+        suffix = f"_{group}" if (group_in_column and group) else ""
+        return f"{base}{stem}{stat}{suffix}"
+
+    return column
+
+
+def output_label(family: str, test_type: str) -> str:
+    """``{family}_{statistic}`` for output file names.
+
+    ``lmm`` and ``lmm_across_time`` both report test_type ``LMM``, so the
+    test_type alone would make their outputs overwrite each other; the family
+    is always included and the family prefix is not repeated.
+
+    Examples: ("two_sample_paired", "two_sample_paired_tTest") ->
+    "two_sample_paired_tTest"; ("lmm", "LMM_abs") -> "lmm_LMM_abs";
+    ("lmm_across_time", "LMM") -> "lmm_across_time_LMM".
+    """
+    prefix = f"{family}_"
+    stat = test_type[len(prefix) :] if test_type.startswith(prefix) else test_type
+    return f"{family}_{stat}"
+
+
+def load_significant_sites(
+    path: str, test_type: str, threshold_column: str, threshold: float
+) -> pd.DataFrame:
+    """Significant sites of ONE test from a p_value_summary file.
+
+    Parameters
+    ----------
+    path
+        The summary TSV (``period, mag_id, contig, position, gene_id, test_type,
+        [group_analyzed,] min_p_value, source_file, q_value``).
+    test_type
+        The exact ``test_type`` string to keep, as the summary spells it
+        (``two_sample_paired_Wilcoxon``, ``LMM_abs``, ...).  Required; a name
+        the file does not contain raises, listing the ones it does.
+    threshold_column, threshold
+        ``"q_value"`` (BH-corrected, the default) or ``"min_p_value"`` (raw),
+        kept where ``<= threshold``.
+
+    Returns
+    -------
+    One row per site with ``gene_id`` stripped (real files carry a trailing
+    space) and ``group_analyzed`` present ("" for two-sample tests, which have
+    no such column).  Raises if the test_type never occurs in the file.
+    """
+    df = pd.read_csv(
+        path,
+        sep="\t",
+        dtype={
+            "mag_id": str,
+            "contig": str,
+            "gene_id": str,
+            "group_analyzed": str,
+            "source_file": str,
+        },
+    )
+    present = df["test_type"].unique().tolist()
+    if not test_type or test_type not in present:
+        raise ValueError(
+            f"no {test_type} rows in {path}; test_types present: {present}"
+        )
+    df = df[df["test_type"] == test_type]
+    df = df[df[threshold_column] <= threshold].copy()
+    df["gene_id"] = df["gene_id"].fillna("").str.strip()
+    if "group_analyzed" not in df.columns:
+        df["group_analyzed"] = ""
+    df["group_analyzed"] = df["group_analyzed"].fillna("")
+    df["position"] = df["position"].astype(np.int64)
+    logger.info(
+        f"{len(df):,} {test_type} sites at {threshold_column} <= {threshold} across {df['mag_id'].nunique()} MAGs"
+    )
+    return df.reset_index(drop=True)
+
+
+def candidate_alleles(
+    sites: pd.DataFrame,
+    source: pd.DataFrame,
+    column_of,
+    line_by_group: dict[str, float],
+) -> pd.DataFrame:
+    """Which base(s) at each significant site are candidates for "the allele that rose".
+
+    The summary's ``min_p_value`` is the minimum over the four per-base tests
+    (``p_value_summary.py``); the per-MAG source file still has all four.  A base
+    is *tested* when its p < 1: the test writes exactly 1.0 for a base whose
+    frequency never changed in any sample ("identical values").  The rule:
+
+    * **two tested bases** (91% of significant sites in a cage-replicate run):
+      both are candidates.  Their frequencies are complementary (A = 1 - G), so
+      the two tests are one test; which base rose is decided downstream from the
+      frequency change (``summarise_rising``), never from the p-values;
+    * **three or four tested bases**: a base is a candidate when its own p is at
+      or below ``line_by_group[group_analyzed]``, the largest raw p that still
+      earned q <= threshold in this comparison and group (BH is monotone, so that
+      is exactly "would have q <= threshold itself").  A base that rose but is
+      not significant on its own is not a candidate;
+    * **no tested base** at a significant site: broken input, raises.
+
+    Why not "bases whose p equals min_p_value" (the old rule): the frequency
+    cache stores float32, so seesaw partners' p-values differ by ~1e-8 and a
+    tolerance-based tie fails for ~40% of two-base sites, silently dropping the
+    riser whenever the faller's p came out a hair smaller.  There is no tolerance
+    here; the only comparison is "p < 1" and "p <= line".
+
+    Parameters
+    ----------
+    sites
+        Rows of ``load_significant_sites`` for ONE MAG (``contig, position,
+        min_p_value, group_analyzed``).
+    source
+        That MAG's test file: ``contig, position`` plus
+        ``{B}_frequency_p_value_tTest`` (two-sample) or
+        ``{B}_frequency_p_value_tTest_{group}`` (single-sample, per group).
+    column_of
+        ``allele_p_column(family, test_type)``: maps (base, group_analyzed) to
+        the source column holding that base's p-value.
+    line_by_group
+        ``{group_analyzed: largest min_p_value with q <= threshold}`` over the
+        whole comparison (``"" ->`` line for two-sample families).  A site whose
+        group has no entry raises: the line must come from the same sites the
+        q-values were computed over.
+
+    Returns
+    -------
+    ``sites`` expanded to one row per (site, allele), plus ``allele`` and
+    ``n_candidate_alleles`` (how many bases were kept at that site).  Sites are
+    matched to the source on contig, position AND gene_id (so a gene-annotation
+    disagreement is caught too); any site without a match raises, listing the
+    first few.
+
+    Examples (two-sample, line 0.0025): A and G at 8.1e-5 and 8.1e-5 + 1e-13,
+    C and T at 1.0 -> two rows, A and G, n_candidate_alleles 2.  A 1e-4, C 0.002,
+    G 0.5, T 1.0 -> A and C (G is tested but above the line), n 2; with the line
+    at 0.0015 -> A alone, n 1.
+    """
+    # Normalise the source's gene_id the way load_significant_sites normalised the
+    # summary's: both files write a trailing space and NaN for intergenic positions.
+    source = source.assign(gene_id=source["gene_id"].fillna("").astype(str).str.strip())
+    keys = ["contig", "position", "gene_id"]
+    # Inner merge on all three keys: every summary row came from this source file,
+    # so every site MUST match; a shortfall is a broken run and is reported below.
+    merged = sites.merge(source, on=keys, how="inner")
+    if len(merged) != len(sites):
+        missing = sites.merge(source[keys], on=keys, how="left", indicator=True)
+        missing = missing[missing["_merge"] == "left_only"]
+        raise ValueError(
+            f"{len(missing)} of {len(sites)} sites have no matching row in the source file, e.g. "
+            f"{missing[keys].head(3).to_dict('records')}"
+        )
+    rows = []
+    for row in merged.itertuples(index=False):
+        group = str(row.group_analyzed)
+        if group not in line_by_group:
+            raise ValueError(
+                f"site {row.contig}:{row.position}: no significance line for group "
+                f"{group!r}; lines known for {sorted(line_by_group)}"
+            )
+        line = line_by_group[group]
+        p_values = {}
+        for base in BASES:
+            col = column_of(base, group)
+            if col not in merged.columns:
+                raise ValueError(f"source file lacks column {col}")
+            p_values[base] = getattr(row, col)
+        # Tested = the test ran on this base.  Exactly 1.0 is the test's own marker
+        # for "identical values in every sample" (see two_sample_*/single_sample.py);
+        # NaN would mean a test that could not run.  No tolerance: 0.999 is a test.
+        tested = {b: p for b, p in p_values.items() if np.isfinite(p) and p < 1.0}
+        if not tested:
+            raise ValueError(
+                f"site {row.contig}:{row.position} ({group!r}): significant "
+                f"(min_p_value {row.min_p_value}) but no tested base: p-values {p_values}"
+            )
+        if len(tested) <= 2:
+            # Two tested bases are the seesaw pair (one test seen twice); one tested
+            # base is that pair with the partner's test not run.  Keep them all.
+            winners = sorted(tested)
+        else:
+            # Three or four real changes at one site: each riser must stand on its
+            # own.  The site's min-p base is always <= line (the site is significant).
+            winners = sorted(b for b, p in tested.items() if p <= line)
+        for base in winners:
+            rows.append(
+                {
+                    **{c: getattr(row, c) for c in sites.columns},
+                    "allele": base,
+                    "n_candidate_alleles": len(winners),
+                }
+            )
+    return pd.DataFrame(
+        rows, columns=list(sites.columns) + ["allele", "n_candidate_alleles"]
+    )
+
+
+def assess_allele(
+    counts: npt.NDArray,
+    positions: npt.NDArray[np.int64],
+    base_idx: int,
+    model: npt.NDArray[np.int32],
+    min_freq: float,
+    min_cov: int,
+) -> dict[str, np.ndarray]:
+    """Per-position verdict for ONE base in ONE sample's dense counts.
+
+    Parameters
+    ----------
+    counts
+        Dense ``(contig_length, 4)`` A/C/G/T counts of one sample on one contig.
+    positions
+        0-based positions to assess (a contig's significant sites).
+    base_idx
+        Column of the allele under test (0..3 = A, C, G, T).
+    model, min_freq, min_cov
+        The presence rule: ``model[coverage]`` reads AND ``min_freq`` of reads;
+        ``min_cov`` reads at the position before any verdict (1 = off).
+
+    Returns
+    -------
+    Aligned arrays: ``allele_reads``, ``total_reads``, ``detection_threshold_reads``
+    (the bar at that depth), ``allele_frequency`` (NaN when not covered),
+    ``allele_status`` (one of the four tiers), ``allele_present`` (bool).
+
+    Example (bar 3 at 30x): counts row [25,0,5,0], G -> reads 5, present;
+    [29,0,1,0] -> below_detection; [30,0,0,0] -> absent; [2,0,0,0] at
+    min_cov 5 -> not_covered.
+    """
+    sub = counts[positions].astype(np.int64)
+    coverage = sub.sum(axis=1)
+    reads = sub[:, base_idx]
+    covered = coverage >= min_cov
+    # Same clip as presence_matrix: ultra-deep positions reuse the deepest bar.
+    threshold = model[np.clip(coverage, 0, len(model) - 1)].astype(np.int64)
+    freq = np.divide(
+        reads, coverage, out=np.full(len(reads), np.nan), where=coverage > 0
+    )
+    present = covered & (reads >= threshold) & (freq >= min_freq)
+    evidence = np.select(
+        [~covered, present, reads == 0],
+        [EVIDENCE_NOT_COVERED, EVIDENCE_PRESENT, EVIDENCE_ABSENT],
+        default=EVIDENCE_BELOW_DETECTION,
+    ).astype(object)
+    # Frequency only means something on covered positions.
+    freq = np.where(covered, freq, np.nan)
+    return {
+        "allele_reads": reads,
+        "total_reads": coverage,
+        "detection_threshold_reads": threshold,
+        "allele_frequency": freq,
+        "allele_status": evidence,
+        "allele_present": present,
+    }
+
+
+def label_origin_in_own_mouse(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
+    """Add ``origin_in_own_mouse`` to the long table: the per-mouse verdict.
+
+    Parameters
+    ----------
+    long
+        One row per site x allele x sample with ``time`` (the timepoint label as
+        the metadata spells it), ``subjectID`` and ``allele_status``.
+    tps
+        Which label is the earlier and which the later timepoint; also spells
+        the labels (``de_novo_candidate_below_detection_at_pre``).
+
+    Returns
+    -------
+    The same table with ``origin_in_own_mouse`` filled on later-timepoint rows
+    and NaN on earlier-timepoint rows.  The verdict reads BOTH timepoints of the
+    same mouse (shown for pre/end)::
+
+        end status                own pre status     label
+        present                   present            standing_variation
+        present                   below_detection    de_novo_candidate_below_detection_at_pre
+        present                   absent             de_novo_candidate
+        present                   not_covered        pre_not_covered
+        present                   (no pre sample)    no_pre_sample
+        below_detection           anything           allele_below_detection_at_end
+        absent                    anything           allele_absent_at_end
+        not_covered               anything           end_not_covered
+
+    A later-timepoint sample that does not show the allele has nothing to
+    explain, so its earlier sample is not consulted; that is why the later
+    status is tested first.
+
+    Example: mouse 533, G at 13509: pre present (5/19), end present -> standing_variation.
+    """
+    keys = SITE_KEYS + ["subjectID"]
+    is_t0 = long["time"] == tps.earlier
+    is_t1 = long["time"] == tps.later
+    # The same mouse's earlier-timepoint status, joined onto every row of that
+    # mouse at the site; a mouse with no earlier sample gets NaN.
+    t0_status = long[is_t0][keys + ["allele_status"]].rename(
+        columns={"allele_status": "_own_t0_status"}
+    )
+    out = long.merge(t0_status, on=keys, how="left")
+    is_t1 = (out["time"] == tps.later).to_numpy()
+    t1 = out["allele_status"]
+    t0 = out["_own_t0_status"]
+    out["origin_in_own_mouse"] = np.select(
+        [
+            ~is_t1,  # earlier-timepoint rows: no verdict
+            t1 == EVIDENCE_NOT_COVERED,
+            t1 == EVIDENCE_BELOW_DETECTION,
+            t1 == EVIDENCE_ABSENT,
+            t0.isna(),
+            t0 == EVIDENCE_PRESENT,
+            t0 == EVIDENCE_BELOW_DETECTION,
+            t0 == EVIDENCE_ABSENT,
+        ],
+        [
+            None,
+            tps.name(ORIGIN_T1_NOT_COVERED),
+            tps.name(ORIGIN_BELOW_DETECTION_AT_T1),
+            tps.name(ORIGIN_ABSENT_AT_T1),
+            tps.name(ORIGIN_NO_T0_SAMPLE),
+            ORIGIN_STANDING,
+            tps.name(ORIGIN_DE_NOVO_BELOW_DETECTION),
+            ORIGIN_DE_NOVO,
+        ],
+        default=tps.name(ORIGIN_T0_NOT_COVERED),
+    )
+    out["origin_in_own_mouse"] = (
+        out["origin_in_own_mouse"].astype(object).where(is_t1, np.nan)
+    )
+    return out.drop(columns="_own_t0_status")
+
+
+def frequency_change_by_group(long: pd.DataFrame, tps: Timepoints) -> pd.DataFrame:
+    """How much each candidate allele's frequency changed in each group.
+
+    The same three steps the within-group test is built on
+    (``allele_freq.calculate_allele_frequency_changes`` + ``get_mean_change``):
+
+    1. each mouse sampled at BOTH timepoints: later frequency minus earlier
+       frequency, frequency = ``allele_reads / total_reads`` (A+C+G+T).  A sample
+       with 0 reads has no frequency, so its mouse has no change;
+    2. mean over the mice of each replicate -> one change per replicate;
+    3. mean over the replicates -> the group's change.
+
+    The steps are the test's; the samples are this table's.  Like the test, any
+    read counts (no ``min_cov``: at thin sites few mice reach 5 reads at both
+    timepoints, so that floor would leave most changes unknown).  Unlike the
+    test, samples are not filtered by QC; on a cage-replicate run, QC-passing
+    samples alone gave the identical rose / fell call for every allele checked.
+
+    Parameters
+    ----------
+    long
+        The long table: ``SITE_KEYS`` + ``subjectID, replicate, group, time,
+        allele_reads, total_reads``.  ``group`` and ``time`` are text.
+    tps
+        Which timepoint label is the earlier and which the later.
+
+    Returns
+    -------
+    ``SITE_KEYS + ["group", "frequency_change", "n_replicates", "n_mice"]``: one row
+    per (site, allele, group) with at least one paired mouse.  A group with no
+    mouse sampled at both timepoints has no row (its change is unknown).
+
+    Example (allele G, fat, replicate r1): m1 5/30 -> 24/30 (+0.633), m2 0/30 ->
+    21/30 (+0.700); r1 mean +0.667; one replicate, so fat +0.667,
+    n_replicates 1, n_mice 2.  Its seesaw partner A gets -0.667.
+    """
+    mouse = SITE_KEYS + ["group", "replicate", "subjectID"]
+    # A blank in any key would be silently mishandled by groupby (dropped by
+    # default, or with dropna=False lumped into one "blank" replicate), so stop.
+    # Site keys are filled with "" upstream; blanks can only come from metadata.
+    blank = [c for c in mouse if long[c].isna().any()]
+    if blank:
+        raise ValueError(
+            f"blank values in {blank}: every sample needs a group, replicate and "
+            f"subjectID (check the metadata)"
+        )
+    seen = long[long["total_reads"] > 0]  # 0 reads: no frequency to compare
+    per_sample = seen[mouse + ["time"]].assign(
+        freq=(seen["allele_reads"] / seen["total_reads"]).to_numpy(),
+        group=seen["group"].astype(str),  # "40" stays "40" (numeric group names)
+    )
+    earlier = per_sample[per_sample["time"] == tps.earlier].drop(columns="time")
+    later = per_sample[per_sample["time"] == tps.later].drop(columns="time")
+    # Inner join on the mouse, its replicate and group: only mice with a sample at
+    # both timepoints carry a change (half a cross-sectional cohort has none).
+    # one_to_one: two samples of one mouse at one timepoint is broken input.
+    paired = later.merge(
+        earlier, on=mouse, suffixes=("_later", "_earlier"), validate="one_to_one"
+    )
+    paired["change"] = paired["freq_later"] - paired["freq_earlier"]
+    # Replicate first, then group: a replicate with 5 mice weighs the same as one
+    # with 1, as in the test (the replicate is the unit of replication).
+    per_replicate = paired.groupby(
+        SITE_KEYS + ["group", "replicate"], sort=True, dropna=False
+    )["change"].mean()
+    per_group = per_replicate.groupby(
+        SITE_KEYS + ["group"], sort=True, dropna=False
+    ).agg(frequency_change="mean", n_replicates="size")
+    # Mice behind the change, next to the cages: 16 paired mice in 12 cages
+    # weighs differently from 12 mice in 12 cages when judging a thin site.
+    n_mice = paired.groupby(SITE_KEYS + ["group"], sort=True, dropna=False).size()
+    return per_group.join(n_mice.rename("n_mice")).reset_index()
+
+
+# Summary column TEMPLATES (``{t0}`` / ``{t1}`` -> the comparison's timepoint names via
+# ``summary_columns``).  Shown here for pre_end.
+SUMMARY_COLUMN_TEMPLATES = [
+    # site + allele identity
+    "mag_id",
+    "contig",
+    "position",
+    "gene_id",
+    "group_analyzed",
+    "allele",
+    "n_candidate_alleles",
+    "q_value",
+    # the verdict under the loosest framing (any baseline mouse)
+    "origin_any_mouse",
+    # calendar evidence (blank without collection_date in the metadata): the
+    # earliest-dated later sample carrying the allele (date + enrollment wave),
+    # and the earliest-dated sample of all those judged (baseline + later) in
+    # which it is present (date + wave); equal when nobody earlier had it
+    "first_carrier_date",
+    "first_carrier_cohort",
+    "first_detection_date",
+    "first_detection_cohort",
+    # any-mouse numbers, FILTERED by the presence rule (min_cov / bar / min_freq):
+    # "present in 12 of the 14 pre samples we could judge, in 6 replicates"
+    "n_{t0}_samples_allele_present",
+    "n_{t0}_samples_covered",
+    "n_replicates_with_allele_at_{t0}",
+    "{t0}_mice_allele_present",
+    # the carriers: later-timepoint mice with the allele present (covered + rule);
+    # the carrier-level strain gate in rising origin judges THESE mice (spec 2.4)
+    "{t1}_mice_allele_present",
+    # how hard we looked (spec 2.5; reporting only, nothing filters on these):
+    # reads at the position over the COVERED baseline samples (total_reads_{t0}
+    # below counts every sample, thin ones included), and the carriers whose
+    # OWN earlier sample was covered and clean, the strictest per-mouse evidence
+    "n_baseline_reads",
+    "n_carriers_own_baseline_absent",
+    # same-mouse numbers: the strict framing, one count per de-novo/standing verdict
+    "n_mice_standing_variation",
+    "n_mice_de_novo_candidate",
+    "n_mice_de_novo_candidate_below_detection_at_{t0}",
+    # pooled reads per timepoint, UNFILTERED: every read at the position from every
+    # sample, thin ones included -- the numbers behind "never seen in 1,000 reads".
+    "total_reads_{t0}",
+    "allele_reads_{t0}",
+    "allele_frequency_{t0}",
+    "total_reads_{t1}",
+    "allele_reads_{t1}",
+    "allele_frequency_{t1}",
+]
+
+
+def summary_columns(tps: Timepoints) -> list[str]:
+    """``SUMMARY_COLUMN_TEMPLATES`` with the comparison's timepoint names filled in.
+
+    Example: ``summary_columns(Timepoints("pre", "end"))`` holds
+    ``n_pre_samples_covered``, ``total_reads_end``, ...
+    """
+    return [tps.name(c) for c in SUMMARY_COLUMN_TEMPLATES]
+
+
+def _dates(rows: pd.DataFrame) -> pd.Series:
+    """``collection_date`` of ``rows`` as datetimes (NaT when blank or absent)."""
+    if "collection_date" not in rows.columns:
+        return pd.Series(pd.NaT, index=rows.index)
+    return pd.to_datetime(rows["collection_date"], format="%Y-%m-%d", errors="coerce")
+
+
+def _earliest_dated(rows: pd.DataFrame):
+    """The earliest-dated row of ``rows`` (a Series with ``_date`` added), or
+    None when ``rows`` is empty or ANY row is undated: a partly dated set
+    cannot be ordered safely."""
+    if rows.empty:
+        return None
+    dates = _dates(rows)
+    if dates.isna().any():
+        return None
+    return rows.assign(_date=dates).sort_values("_date").iloc[0]
+
+
+def first_carrier(t1_cov: pd.DataFrame):
+    """The earliest-dated later-timepoint row that carries the allele, or None.
+
+    ``t1_cov`` = covered later rows; the carriers are those with
+    ``allele_present``.  None when there is no carrier or any carrier is undated.
+    Its ``_date`` is the first carrier's date, its ``cohort`` the carriers' wave.
+
+    Example: carriers dated 2017-06-10 (wave2) and 2017-07-01 -> the
+    2017-06-10 row; one of them blank -> None.
+    """
+    return _earliest_dated(t1_cov[t1_cov["allele_present"]])
+
+
+def first_carrier_date(t1_cov: pd.DataFrame):
+    """``first_carrier(t1_cov)``'s date as a Timestamp, or None."""
+    row = first_carrier(t1_cov)
+    return None if row is None else row["_date"]
+
+
+def baseline_cutoff(t1: pd.DataFrame):
+    """The date one row's baseline is cut at: "before when?" (user rule 2026-10-22).
+
+    The first carrier's date when a later sample of this group carries the
+    allele; otherwise the day the group was first sampled at the later
+    timepoint (its earliest later sample, covered or not), so a group that
+    rose without any sample clearing the bar is still judged against
+    everything dated before it was sampled.  None when there is no later
+    sample or any relevant one is undated (then, and only on a sheet with no
+    dates at all, ``baseline_rows`` falls back to timepoint-label order).
+
+    Example: carriers dated 2017-06-10 and 2017-07-01 -> 2017-06-10; no
+    carrier, the group's later samples dated 2017-09-01 -> 2017-09-01.
+    """
+    t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+    fcd = first_carrier_date(t1_cov)
+    if fcd is not None:
+        return fcd
+    row = _earliest_dated(t1)
+    return None if row is None else row["_date"]
+
+
+def baseline_rows(
+    sub: pd.DataFrame,
+    scope: str,
+    tps: Timepoints,
+    carriers: set,
+    first_date,
+    label_order: list,
+) -> pd.DataFrame:
+    """The rows one (site, allele) is judged against as its baseline (spec 2.2).
+
+    In plain words, for an allele G that rose in the fat group of a fat-vs-control
+    comparison, where m1 and m2 (fat) carry G at the later timepoint and m3
+    (control) does not:
+
+    * ``individual``: look only in the carriers' own earlier samples, m1's and
+      m2's.  If neither had any G, it is new.  m3's earlier sample is not
+      consulted, even if it had a whisper of G, because m3 is not a carrier.
+    * ``own_group``: look in every fat mouse's earlier sample.
+    * ``comparison``: look in every earlier sample of both groups, fat and
+      control.
+    * ``cohort`` (the default): look in every sample of the whole run, any group, any age, as
+      long as it was collected on an earlier date than the first carrier's
+      sample.  If a completely unrelated mouse had G a year earlier, G was
+      already in the building: not new.
+
+    ``sub`` holds every row of the site (all samples loaded for the run).
+
+    comparison / own_group
+        the earlier-timepoint rows (``own_group`` rows were already restricted
+        to the site's group by ``restrict_to_own_group``).
+    individual
+        the earlier-timepoint rows of the ``carriers`` (mice that carry the
+        allele at the later timepoint); a carrier with no earlier sample adds
+        nothing, a non-carrier's earlier sample is never consulted.
+    cohort
+        every row of any group and timepoint dated strictly before
+        ``first_date`` (``baseline_cutoff``: the first carrier's date, or the
+        group's later sampling day when it has no carrier).  When the sheet has no dates
+        (``first_date`` None and every row undated; the orchestrator refuses a
+        partly dated sheet and warns once about an undated one) every row whose
+        timepoint label comes before ``tps.later`` in ``label_order`` (the
+        sheet's order of appearance).
+
+    Example (cohort, dates): first carrier 2017-06-10; rows dated 2017-01-10
+    (the comparison's pre samples) and 2016-09-01 (a third group) are the
+    baseline; a row dated 2018-01-01 is not, nor are the carriers' own rows.
+    """
+    if scope in ("comparison", "own_group"):
+        return sub[sub["time"] == tps.earlier]
+    if scope == "individual":
+        return sub[(sub["time"] == tps.earlier) & sub["subjectID"].isin(carriers)]
+    if scope == "cohort":
+        dates = _dates(sub)
+        if first_date is not None and dates.notna().all():
+            return sub[dates < first_date]
+        before = label_order[: label_order.index(tps.later)]
+        return sub[sub["time"].isin(before)]
+    raise ValueError(f"unknown baseline scope {scope!r}")
+
+
+def _site_record(
+    key: tuple,
+    site_rows: pd.DataFrame,
+    t0: pd.DataFrame,
+    t1: pd.DataFrame,
+    tps: Timepoints,
+) -> dict:
+    """One summary record: the verdict and counts for one (site, allele).
+
+    Shared by ``summarise_sites`` (t1 = every later sample in scope) and
+    ``summarise_rising`` (t1 = the later samples of the group the allele rose
+    in).  ``t0`` is the baseline the caller chose through ``baseline_rows``
+    (the earlier samples by default; the carriers' own, or every earlier-dated
+    sample of the run, under the other scopes).  ``site_rows`` supplies the
+    site-level columns (``q_value``, ``n_candidate_alleles``).
+    """
+    t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
+    t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+    # Which mice / replicates had the allele at t0 (covered + present), and
+    # which carry it at t1 (the carriers the strain gate downstream asks about).
+    mice_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "subjectID"])
+    mice_t1_present = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
+    reps_t0_present = set(t0_cov.loc[t0_cov["allele_present"], "replicate"])
+    record = dict(zip(SITE_KEYS, key))
+    for col in ("q_value", "n_candidate_alleles"):
+        record[col] = site_rows[col].iloc[0] if col in site_rows.columns else np.nan
+    # A site verdict needs the allele to be SEEN at t1 in at least one covered
+    # sample; otherwise there is nothing whose origin to explain.
+    if not t1_cov["allele_present"].any():
+        origin = tps.name(ORIGIN_NOT_SEEN_AT_T1)
+    elif mice_t0_present:
+        origin = ORIGIN_STANDING
+    elif (t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION).any():
+        origin = tps.name(ORIGIN_DE_NOVO_BELOW_DETECTION)
+    elif (t0_cov["allele_status"] == EVIDENCE_ABSENT).any():
+        origin = ORIGIN_DE_NOVO
+    else:
+        origin = tps.name(ORIGIN_T0_NOT_COVERED)
+    # Calendar evidence: the first carrier's date, and the earliest dated row
+    # among everything judged (t0 + t1) in which the allele is present.
+    fc = first_carrier(t1_cov)
+    judged = pd.concat([t0_cov, t1_cov])
+    seen = judged[judged["allele_present"]].assign(_date=lambda d: _dates(d))
+    seen = seen[seen["_date"].notna()].sort_values("_date")
+    first_seen = seen.iloc[0] if len(seen) else None
+    record.update(
+        {
+            "origin_any_mouse": origin,
+            "first_carrier_date": (
+                fc["_date"].strftime("%Y-%m-%d") if fc is not None else ""
+            ),
+            "first_carrier_cohort": (
+                fc["cohort"] if fc is not None and "cohort" in t1_cov.columns else ""
+            ),
+            "first_detection_date": (
+                first_seen["_date"].strftime("%Y-%m-%d")
+                if first_seen is not None
+                else ""
+            ),
+            "first_detection_cohort": (
+                first_seen["cohort"]
+                if first_seen is not None and "cohort" in seen.columns
+                else ""
+            ),
+            tps.name("n_{t0}_samples_allele_present"): int(
+                t0_cov["allele_present"].sum()
+            ),
+            tps.name("n_{t0}_samples_covered"): len(t0_cov),
+            tps.name("n_replicates_with_allele_at_{t0}"): len(reps_t0_present),
+            tps.name("{t0}_mice_allele_present"): ",".join(sorted(mice_t0_present)),
+            tps.name("{t1}_mice_allele_present"): ",".join(sorted(mice_t1_present)),
+            "n_baseline_reads": int(t0_cov["total_reads"].sum()),
+            # a carrier whose own earlier sample was covered and absent reads
+            # de_novo_candidate in origin_in_own_mouse (label_origin_in_own_mouse)
+            "n_carriers_own_baseline_absent": int(
+                (t1["origin_in_own_mouse"] == ORIGIN_DE_NOVO).sum()
+            ),
+        }
+    )
+    for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
+        record[tps.name(f"n_mice_{label}")] = int(
+            (t1["origin_in_own_mouse"] == tps.name(label)).sum()
+        )
+    # Pooled reads, unfiltered: t0 / t1 here are ALL rows at the timepoint,
+    # not the covered subset, so thin and profile-less samples count too.
+    for role, part in (("{t0}", t0), ("{t1}", t1)):
+        total = int(part["total_reads"].sum())
+        allele = int(part["allele_reads"].sum())
+        record[tps.name(f"total_reads_{role}")] = total
+        record[tps.name(f"allele_reads_{role}")] = allele
+        record[tps.name(f"allele_frequency_{role}")] = (
+            allele / total if total else np.nan
+        )
+    return record
+
+
+def _comparison_mask(long: pd.DataFrame) -> pd.Series:
+    """``is_comparison_sample`` as booleans; all True when the column is absent
+    (unit-test frames and the non-cohort scopes, where every row is the comparison's).
+    """
+    if "is_comparison_sample" not in long.columns:
+        return pd.Series(True, index=long.index)
+    return long["is_comparison_sample"].astype(bool)
+
+
+def summarise_sites(
+    long: pd.DataFrame,
+    tps: Timepoints,
+    scope: str = "comparison",
+    label_order: list | None = None,
+) -> pd.DataFrame:
+    """One row per site x allele: the few numbers the baseline question asks for.
+
+    Deliberately lean (decided 2026-09-10): everything else is in the long
+    table and can be added back on request.  The read columns were added on
+    request 2026-09-11.
+
+    Parameters
+    ----------
+    long
+        The long table after ``label_origin_in_own_mouse``: one row per site x
+        allele x sample with ``time``, ``allele_status``, ``allele_present``,
+        ``allele_reads``, ``total_reads``, ``subjectID``, ``replicate``,
+        ``origin_in_own_mouse``.
+    tps
+        Earlier / later timepoint labels; spells the column names.
+    scope, label_order
+        Which rows are the baseline (``baseline_rows``); ``label_order`` is the
+        sheet's timepoint order, needed only by ``cohort`` without dates.
+
+    Returns
+    -------
+    ``summary_columns(tps)`` (shown for pre/end):
+      origin_any_mouse -- allele_not_present_at_end if no covered end sample
+        shows the allele; else standing_variation if any covered pre sample has
+        it present; else de_novo_candidate_below_detection_at_pre if any pre
+        has it below detection; else de_novo_candidate if any covered pre is
+        absent; else pre_not_covered.
+      n_pre_samples_allele_present / n_pre_samples_covered -- present pre samples
+        over pre samples deep enough to judge; n_replicates_with_allele_at_pre --
+        distinct replicates among the present ones; pre_mice_allele_present --
+        their subjectIDs, comma-joined.  (Presence rule applied.)
+      end_mice_allele_present -- the carriers: end mice with the allele present.
+      n_baseline_reads -- reads at the position over the COVERED baseline
+        samples only (how hard we looked); n_carriers_own_baseline_absent --
+        carriers whose own earlier sample was covered and clean.  Reporting
+        only (spec 2.5): no verdict depends on either.
+      n_mice_* -- end rows carrying that origin_in_own_mouse verdict (the
+        same-mouse framing).
+      total_reads_pre / allele_reads_pre / allele_frequency_pre (and _end) --
+        reads at the position summed over EVERY sample at that timepoint, reads
+        of this allele among them, and their ratio (NaN when no reads at all).
+        No min_cov, no bar, no min_freq: a sample with 2 reads contributes its
+        2 reads, a sample with no profile contributes 0.  This is what makes
+        "never seen in N reads" a frequency bound of 1/N.
+
+    Example (G at 13509, MAG bin.012, pre_end): origin standing_variation; present in
+    12 of 14 covered pre samples, 6 replicates; same-mouse 6 standing, 1 de novo,
+    1 de novo below detection; total_reads_pre 168, allele_reads_pre 125 (0.744),
+    total_reads_end 245, allele_reads_end 179 (0.731).
+    """
+    rows = []
+    comp = _comparison_mask(long)
+    for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
+        # Later rows: the comparison's own samples only, whatever was loaded.
+        t1 = sub[(sub["time"] == tps.later) & comp[sub.index]]
+        t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+        carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
+        t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1), label_order)
+        rows.append(_site_record(key, sub, t0, t1, tps))
+    return pd.DataFrame(rows, columns=summary_columns(tps))
+
+
+# Extra columns of the rising table, placed right after q_value.
+RISING_COLUMNS = [
+    "rose_in",  # the group this row's allele rose in
+    "frequency_change",  # its change there (frequency_change_by_group), > 0
+    # replicates (cages) of the rose_in group behind frequency_change: those with
+    # >= 1 mouse sampled at both timepoints (cages, not mice: 16 mice in 12 cages = 12)
+    "n_replicates",
+    "n_mice",  # the paired mice in those cages
+]
+
+
+def rising_columns(tps: Timepoints) -> list[str]:
+    """``summary_columns(tps)`` with ``RISING_COLUMNS`` inserted after ``q_value``."""
+    cols = summary_columns(tps)
+    cut = cols.index("q_value") + 1
+    return cols[:cut] + RISING_COLUMNS + cols[cut:]
+
+
+def summarise_rising(
+    long: pd.DataFrame,
+    change: pd.DataFrame,
+    tps: Timepoints,
+    scope: str = "comparison",
+    label_order: list | None = None,
+) -> pd.DataFrame:
+    """One row per (site, allele, group the allele ROSE in).
+
+    Fixes two things the pooled summary cannot say:
+
+    * **the seesaw.** At a biallelic site both alleles are candidates and are reported, but
+      only one of them rose; the one that fell was the common allele at baseline
+      and always reads "standing".  Here only alleles with
+      ``frequency_change > 0`` in a group get a row;
+    * **whose later samples count.** The end-point check ("is the allele present
+      in at least one covered later sample?") and the later-timepoint counts use
+      the ``rose_in`` group's samples only.  The baseline (``t0``) follows the
+      run's ``--baseline_scope`` through ``baseline_rows``; under ``individual``
+      it is the ``rose_in`` carriers' own earlier samples.
+
+    Candidate groups: a within-group site (``group_analyzed`` set) is asked about
+    its own group only; a between-group site about every group present.  Fell,
+    flat (0) and unknown (no paired mouse) give no row.
+
+    Parameters
+    ----------
+    long
+        The long table after ``label_origin_in_own_mouse``.
+    change
+        ``frequency_change_by_group(long, tps)`` over the comparison's rows.
+    tps
+        Earlier / later timepoint labels.
+    scope, label_order
+        As in ``summarise_sites``.
+
+    Returns
+    -------
+    ``rising_columns(tps)``.  Example (fat/control, G rose in fat +0.667 and in
+    control +0.017): two rows.  fat: standing_variation (m1 had G at pre),
+    later reads 45/60 from the fat mice only.  control: allele_not_present_at_end
+    (no control mouse has G above the bar at end), although the pooled summary
+    calls G standing.
+    """
+    # (site..., group) -> (change, n replicates, n mice); a missing key = change
+    # unknown (no mouse of that group sampled at both timepoints).
+    lookup = {
+        tuple(row[: len(SITE_KEYS) + 1]): row[len(SITE_KEYS) + 1 :]
+        for row in change[
+            SITE_KEYS + ["group", "frequency_change", "n_replicates", "n_mice"]
+        ].itertuples(index=False, name=None)
+    }
+    rows = []
+    n_unknown = 0  # candidate (site, allele, group) with no mouse at both timepoints
+    comp = _comparison_mask(long)
+    for key, sub in long.groupby(SITE_KEYS, sort=True, dropna=False):
+        in_comp = comp[sub.index]
+        # The comparison's two groups; other groups loaded under cohort are
+        # baseline material only and never get a rising row.
+        groups_here = sorted(sub.loc[in_comp, "group"].astype(str).unique())
+        if len(groups_here) > 2:
+            raise ValueError(
+                f"site {key}: {len(groups_here)} groups {groups_here}; a comparison has two"
+            )
+        analyzed = str(key[SITE_KEYS.index("group_analyzed")])
+        candidates = [analyzed] if analyzed else groups_here
+        for group in candidates:
+            if key + (group,) not in lookup:
+                n_unknown += 1  # counted here, where it is skipped: never silent
+            delta, n_reps, n_mice = lookup.get(key + (group,), (np.nan, 0, 0))
+            if not delta > 0:  # fell, flat, or no paired mouse (NaN > 0 is False)
+                continue
+            # The end-point check and later counts: this group's samples only.
+            t1 = sub[
+                (sub["time"] == tps.later)
+                & in_comp
+                & (sub["group"].astype(str) == group)
+            ]
+            # The baseline per rose_in group: the carriers (individual) and the
+            # first carrier's date (cohort) are this group's.
+            t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
+            carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
+            t0 = baseline_rows(
+                sub, scope, tps, carriers, baseline_cutoff(t1), label_order
+            )
+            record = _site_record(key, sub, t0, t1, tps)
+            record.update(
+                {
+                    "rose_in": group,
+                    "frequency_change": delta,
+                    "n_replicates": int(n_reps),
+                    "n_mice": int(n_mice),
+                }
+            )
+            rows.append(record)
+    logger.info(
+        f"{n_unknown:,} (site, allele, group) candidates had no mouse sampled at "
+        f"both timepoints: change unknown, no rising row"
+    )
+    return pd.DataFrame(rows, columns=rising_columns(tps))
+
+
+VERDICT_COLUMNS = [
+    "allele_reads",
+    "total_reads",
+    "detection_threshold_reads",
+    "allele_frequency",
+    "allele_status",
+    "allele_present",
+]
+
+
+def assess_rows(
+    rows: pd.DataFrame, allele: str, model, min_freq: float, min_cov: int
+) -> pd.DataFrame:
+    """The presence rule on cache rows: one row per (sample, site), columns A, C, G, T.
+
+    The same arithmetic as ``assess_allele`` (which works on one sample's dense
+    contig array), applied to a flat frame so one call covers every sample of a
+    MAG: ``min_cov`` reads before any verdict, then the null-model bar
+    ``model[coverage]`` AND ``min_freq`` of the reads for "present"; zero reads
+    of the allele at a covered position is "absent", anything in between is
+    "below_detection".  Returns ``VERDICT_COLUMNS`` indexed like ``rows``.
+
+    Example (bar 3 at 30x, min_cov 5): rows [25,0,5,0] G -> 5 reads, present;
+    [29,0,1,0] -> below_detection; [30,0,0,0] -> absent; [2,0,0,0] -> not_covered.
+    """
+    counts = rows[list(BASES)].to_numpy(dtype=np.int64)
+    coverage = counts.sum(axis=1)
+    reads = counts[:, BASES.index(allele)]
+    covered = coverage >= min_cov
+    threshold = model[np.clip(coverage, 0, len(model) - 1)].astype(np.int64)
+    freq = np.divide(
+        reads, coverage, out=np.full(len(reads), np.nan), where=coverage > 0
+    )
+    present = covered & (reads >= threshold) & (freq >= min_freq)
+    status = np.select(
+        [~covered, present, reads == 0],
+        [EVIDENCE_NOT_COVERED, EVIDENCE_PRESENT, EVIDENCE_ABSENT],
+        default=EVIDENCE_BELOW_DETECTION,
+    ).astype(object)
+    return pd.DataFrame(
+        {
+            "allele_reads": reads,
+            "total_reads": coverage,
+            "detection_threshold_reads": threshold,
+            "allele_frequency": np.where(covered, freq, np.nan),
+            "allele_status": status,
+            "allele_present": present,
+        },
+        index=rows.index,
+    )
+
+
+def _assess_one_mag(job: tuple) -> pd.DataFrame:
+    """Worker: one MAG -> verdict rows for every candidate (site, allele) in every cached sample.
+
+    ``job`` = (mag_id, cache_dir, timepoints, sample_ids, candidates, model,
+    min_freq, min_cov) where ``candidates`` has ``contig, position, allele``.
+    Reads the MAG's cache files once, at the candidate sites only.  Which samples
+    get rows is decided by the cache (spec 2.1): a sample with rows in the MAG's
+    cache passed QC for it and is assessed at every candidate site, with zero
+    reads (not_covered) where the cache has no row for that position; a sample
+    with no rows at all did not pass QC for this MAG and gets no rows.
+    Module-level so it pickles into ``multiprocessing.Pool``.
+    """
+    mag_id, cache_dir, timepoints, sample_ids, candidates, model, min_freq, min_cov = (
+        job
+    )
+    # Under cohort every timepoint of the sheet is requested; a genome has no
+    # cache file at a timepoint where it was not QC-eligible, so there are no
+    # QC-passing samples to assess there: skip it, say so, never crash.
+    present = [
+        tp for tp in timepoints if os.path.exists(cache_path(cache_dir, mag_id, tp))
+    ]
+    if len(present) < len(timepoints):
+        logger.info(
+            f"{mag_id}: no cache file at timepoint(s) "
+            f"{[tp for tp in timepoints if tp not in present]} (not QC-eligible there): skipped"
+        )
+    timepoints = present
+    cand = candidates[["contig", "position", "allele"]].drop_duplicates()
+    wanted = set(map(str, sample_ids))
+    roster = sorted(
+        {s for tp in timepoints for s in cache_samples(cache_dir, mag_id, tp)} & wanted
+    )
+    columns = ["mag_id", "sample_id", "contig", "position", "allele"] + VERDICT_COLUMNS
+    if not roster or cand.empty:
+        return pd.DataFrame(columns=columns)
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        timepoints,
+        sites=cand,
+        sample_ids=roster,
+        columns=list(BASES),
+    )
+    # The full (sample x site x allele) grid, zero-filled where the cache has no
+    # row.  A missing row has two possible causes the cache cannot tell apart:
+    # the sample had no read there, or the site-depth filter removed the
+    # position for that sample (a pile).  Both read as not_covered; a distinct
+    # "filtered" verdict is queued in the Phase 2 plan.
+    grid = cand.merge(pd.DataFrame({"sample_id": roster}), how="cross")
+    counts = rows[["contig", "position", "sample_id", *BASES]]
+    grid = grid.merge(counts, on=["contig", "position", "sample_id"], how="left")
+    grid[list(BASES)] = grid[list(BASES)].fillna(0).astype(np.int64)
+    frames = []
+    for allele, sub in grid.groupby("allele", sort=True):
+        got = assess_rows(sub, allele, model, min_freq, min_cov)
+        frames.append(
+            pd.concat(
+                [
+                    sub[["sample_id", "contig", "position"]].assign(
+                        mag_id=mag_id, allele=allele
+                    ),
+                    got,
+                ],
+                axis=1,
+            )
+        )
+    return pd.concat(frames, ignore_index=True)[columns]
+
+
+# What "absent at baseline" is judged against (spec 2.2), narrowest first:
+#   individual  the carrier mice's own earlier samples
+#   own_group   every earlier sample of the site's own group (within-group tests)
+#   comparison  every earlier sample of both groups
+#   cohort      (default) every QC-passing sample of the run, any group, any timepoint,
+#               collected before the first carrier sample (calendar order via
+#               the metadata's collection_date; timepoint-label order without it)
+BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+BASELINE_SCOPE_DEFAULT = "cohort"  # user decision 2026-10-22 (spec 2.2 had comparison)
+
+
+def check_baseline_scope(family: str, scope: str) -> None:
+    """Refuse ``own_group`` for a between-group test family, before any work.
+
+    ``own_group`` judges a site on the mice of the ONE group it was significant
+    in.  A between-group site (two_sample_paired, two_sample_unpaired, lmm) was
+    significant in the DIFFERENCE between two groups, so it has no own group;
+    rather than quietly falling back to both groups, the run stops.
+
+    Examples: ("single_sample", "own_group") -> ok; ("lmm_across_time",
+    "own_group") -> ok; ("two_sample_paired", "own_group") -> ValueError;
+    any family with "comparison" -> ok.
+    """
+    if scope == "own_group" and family not in WITHIN_GROUP_FAMILIES:
+        raise ValueError(
+            f"--baseline_scope own_group only applies to within-group tests "
+            f"(--summary {' or '.join(WITHIN_GROUP_FAMILIES)}); {family} compares "
+            f"two groups, so its sites have no own group. Use --baseline_scope comparison."
+        )
+
+
+def restrict_to_own_group(long: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the samples of the group each site was significant in.
+
+    ``long`` has one row per site x allele x sample, with the site's
+    ``group_analyzed`` and the sample's ``group``.  A row survives if the sample
+    belongs to the site's group.  Applied to BOTH timepoints, so the baseline,
+    the later timepoint, the same-mouse labels and the pooled reads all describe
+    one group.  Only within-group sites may arrive (``check_baseline_scope``
+    refuses the other families first); a blank ``group_analyzed`` raises.
+
+    Example: site significant within ``fat`` (group_analyzed "fat"): rows for
+    fat mice at pre and end stay, control mice's rows go.  Group names compare
+    as text, so a group called ``40`` matches ``"40"``.
+    """
+    analyzed = long["group_analyzed"].fillna("").astype(str)
+    # A blank here is a between-group site that slipped past check_baseline_scope:
+    # filtering it would drop all its rows ("" matches no mouse), so stop loudly.
+    if (analyzed == "").any():
+        raise ValueError(
+            f"{int((analyzed == '').sum()):,} rows have a blank group_analyzed "
+            f"(between-group sites); own_group needs within-group sites only"
+        )
+    own = long["group"].astype(str) == analyzed
+    return long[own].reset_index(drop=True)
+
+
+def chase_the_ancestors(args: argparse.Namespace) -> int:
+    """Orchestrator: summary -> candidate alleles -> every sample's verdict -> two files."""
+    # First, before reading or writing anything: a wrong scope/family pair stops here.
+    check_baseline_scope(args.summary, args.baseline_scope)
+    os.makedirs(args.output_dir, exist_ok=True)
+    earlier, later, group_a, group_b = parse_comparison(args.comparison)
+    tps = Timepoints(earlier, later)  # spells every timepoint-bearing name from here on
+    groups = (group_a, group_b)
+
+    # ---- 1. The samples of this comparison: both groups, both timepoints.
+    meta = pd.read_csv(args.metadata, sep="\t", dtype=str)
+    if "replicate" not in meta.columns:
+        meta["replicate"] = meta["subjectID"]  # same default as mag_metadata.py
+    # Optional columns (collection_date, cohort): blank when absent.  Dates are
+    # checked over the WHOLE metadata, before any sample is dropped, so a bad
+    # spelling anywhere in the file stops the run (every comparison would hit it).
+    for col in META_OPTIONAL:
+        if col not in meta.columns:
+            meta[col] = np.nan
+    validate_collection_dates(meta)
+    # The comparison's own samples: both groups, both timepoints.  Every scope
+    # but cohort loads only those; cohort loads EVERY sample of the sheet as
+    # potential baseline and flags the comparison's, so the later-timepoint
+    # counts, the frequency change and the rising table stay the comparison's.
+    in_comparison = meta["group"].isin(groups) & meta["time"].isin((earlier, later))
+    if args.baseline_scope != "cohort":
+        meta = meta[in_comparison]
+    meta = meta.copy()
+    meta["is_comparison_sample"] = in_comparison[meta.index]
+    if not meta["is_comparison_sample"].any():
+        raise ValueError(
+            f"no samples in {args.metadata} for groups {groups} at {earlier}/{later}"
+        )
+    logger.info(
+        f"{int(meta['is_comparison_sample'].sum())} comparison samples: "
+        + ", ".join(
+            f"{g}/{t}={int(((meta.group == g) & (meta.time == t)).sum())}"
+            for g in groups
+            for t in (earlier, later)
+        )
+    )
+    # Timepoints the per-MAG workers read from the cache, and the sheet's
+    # timepoint order (the cohort fallback when dates cannot order the baseline).
+    label_order = list(dict.fromkeys(meta["time"]))
+    timepoints = label_order if args.baseline_scope == "cohort" else [earlier, later]
+    if args.baseline_scope == "cohort":
+        extra = meta[~meta["is_comparison_sample"]]
+        logger.info(
+            f"cohort scope: {len(extra)} samples outside the comparison loaded "
+            f"(groups {sorted(extra['group'].unique())}, timepoints "
+            f"{sorted(extra['time'].unique())}); which of ALL loaded samples count as "
+            f"baseline is decided per site: those dated before that site's first "
+            f"carrier sample"
+        )
+        # Dates decide the baseline, so they are all-or-nothing (user decision
+        # 2026-10-22, superseding the spec's warn-and-fall-back for partial
+        # dates).  No dates at all = a study that never recorded them: fall
+        # back to the sheet's timepoint order, warn once.  SOME dates = a data
+        # error: ordering by label while some samples are dated would silently
+        # change the baseline, so stop and name every undated sample.
+        dated = meta["collection_date"].notna() & (
+            meta["collection_date"].astype(str).str.strip() != ""
+        )
+        if dated.any() and not dated.all():
+            missing = sorted(meta.loc[~dated, "sample_id"])
+            raise ValueError(
+                f"--baseline_scope cohort needs a collection_date (YYYY-MM-DD) for "
+                f"every sample or for none; {len(missing)} of {len(meta)} are blank: "
+                f"{missing}"
+            )
+        if not dated.any():
+            logger.warning(
+                f"cohort scope: no collection_date in the metadata; 'before' means an "
+                f"earlier timepoint label in the sheet's timepoint order {label_order} "
+                f"(staggered designs are not handled)"
+            )
+
+    # ---- 2. Significant sites of the chosen test, then their candidate alleles per MAG.
+    summary_dir = os.path.join(args.run_dir, "p_value_summary", args.comparison)
+    sites = load_significant_sites(
+        find_summary_file(summary_dir, args.summary, f"{earlier}_{later}"),
+        args.test_type,
+        args.threshold_column,
+        args.threshold,
+    )
+    test_type = args.test_type  # names the output files and the p-value columns
+    column_of = allele_p_column(args.summary, test_type)
+    # The significance line per group: the largest raw p among the sites that
+    # passed the threshold, over the WHOLE comparison (before any --mags filter),
+    # because the q-values were computed over all of them.  candidate_alleles
+    # uses it at sites with three or four tested bases; see its docstring.
+    line_by_group = (
+        sites.groupby(sites["group_analyzed"].fillna("").astype(str))["min_p_value"]
+        .max()
+        .to_dict()
+    )
+    logger.info(
+        "significance line (largest raw p with "
+        f"{args.threshold_column} <= {args.threshold}) per group: {line_by_group}"
+    )
+    if args.mags:
+        sites = sites[sites["mag_id"].isin(args.mags)]
+    tests_dir = os.path.join(
+        args.run_dir, "significance_tests", f"{args.summary}_{args.comparison}"
+    )
+    candidates_by_mag = {}
+    for mag_id, mag_sites in sites.groupby("mag_id", sort=True):
+        frames = []
+        for source_file, chunk in mag_sites.groupby(
+            "source_file"
+        ):  # single-sample: one file per group
+            source = pd.read_csv(
+                os.path.join(tests_dir, source_file),
+                sep="\t",
+                dtype={"contig": str, "gene_id": str},
+            )
+            frames.append(
+                candidate_alleles(
+                    chunk.drop(columns="source_file"), source, column_of, line_by_group
+                )
+            )
+        candidates_by_mag[mag_id] = pd.concat(frames, ignore_index=True)
+    n_cand = sum(len(c) for c in candidates_by_mag.values())
+    logger.info(
+        f"{n_cand:,} (site, allele) candidates across {len(candidates_by_mag)} MAGs"
+    )
+
+    # ---- 3. One job per MAG; every job reads the MAG's cache files once, at the
+    # candidate sites only.  The cache is the single per-site source after QC:
+    # already site-filtered, and holding QC-passing samples only, so which
+    # samples are assessed is decided there (spec 2.1).
+    model = build_error_model(min_base_quality=args.min_base_quality, fdr=args.fdr)
+    sample_ids = list(meta["sample_id"])
+    jobs = [
+        (
+            mag_id,
+            args.cache_dir,
+            timepoints,
+            sample_ids,
+            cand[["contig", "position", "allele"]].drop_duplicates(),
+            model,
+            args.min_freq,
+            args.min_cov,
+        )
+        for mag_id, cand in candidates_by_mag.items()
+    ]
+    logger.info(
+        f"assessing {len(jobs)} MAGs from the cache at {args.cache_dir} with {args.cpus} workers"
+    )
+    if not jobs:
+        # No significant site for this test / threshold / MAG selection: a legitimate
+        # outcome (Wilcoxon at n=8 cannot reach q<0.05, for instance).  Write the
+        # three files with headers only so a pipeline over many comparisons never trips.
+        stem = os.path.join(
+            args.output_dir,
+            f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",
+        )
+        pd.DataFrame(columns=LONG_COLUMNS).to_csv(
+            f"{stem}.tsv.gz", sep="\t", index=False, compression="gzip"
+        )
+        pd.DataFrame(columns=summary_columns(tps)).to_csv(
+            f"{stem}_summary.tsv", sep="\t", index=False
+        )
+        pd.DataFrame(columns=rising_columns(tps)).to_csv(
+            f"{stem}_rising.tsv", sep="\t", index=False
+        )
+        logger.info(f"no sites: wrote header-only outputs to {stem}*")
+        return 0
+    with multiprocessing.Pool(processes=args.cpus) as pool:
+        verdicts = pd.concat(
+            pool.imap_unordered(_assess_one_mag, jobs), ignore_index=True
+        )
+    n_assessed = verdicts["sample_id"].nunique()
+    if n_assessed < len(sample_ids):
+        logger.info(
+            f"{len(sample_ids) - n_assessed} of {len(sample_ids)} metadata samples have "
+            f"no cache rows for any MAG with candidates (failed QC there): not assessed"
+        )
+    # ---- 4. Long table: verdicts + site context + sample context (+ optional joins).
+    site_ctx = pd.concat(candidates_by_mag.values(), ignore_index=True)
+    long = verdicts.merge(
+        site_ctx, on=["mag_id", "contig", "position", "allele"], how="left"
+    )
+    long = long.merge(
+        meta[
+            [
+                "sample_id",
+                "subjectID",
+                "replicate",
+                "group",
+                "time",
+                *META_OPTIONAL,
+                "is_comparison_sample",
+            ]
+        ],
+        on="sample_id",
+        how="left",
+    )
+    # Baseline scope: drop other groups' samples from within-group sites BEFORE
+    # anything is labelled or counted, so every downstream number sees one group.
+    if args.baseline_scope == "own_group":
+        n_before = len(long)
+        long = restrict_to_own_group(long)
+        logger.info(
+            f"baseline scope own_group: within-group sites judged on their own group's "
+            f"samples only ({n_before - len(long):,} other-group rows dropped)"
+        )
+    long["strain_background"] = np.nan
+    if args.turnover_dir:
+        # Per (MAG, mouse) background for THIS period, from alleleflux-strain-turnover.
+        files = glob.glob(os.path.join(args.turnover_dir, "*_strain_turnover.tsv"))
+        turn = pd.concat(
+            [pd.read_csv(f, sep="\t", dtype=str) for f in files], ignore_index=True
+        )
+        turn = turn[turn["transition"] == f"{earlier}_{later}"][
+            ["MAG_ID", "subjectID", "background"]
+        ]
+        long = long.drop(columns="strain_background").merge(
+            turn.rename(
+                columns={"MAG_ID": "mag_id", "background": "strain_background"}
+            ),
+            on=["mag_id", "subjectID"],
+            how="left",
+        )
+    long = label_origin_in_own_mouse(long, tps)
+    long["min_cov"] = args.min_cov
+    long["min_freq"] = args.min_freq
+    # Earlier timepoint before later within a site: an ordered categorical sorts
+    # by comparison order, not alphabetically ("end" < "pre" would flip them).
+    # Other timepoints (cohort scope) follow, in the sheet's order; a label
+    # missing from the categories would turn into NaN, so every label is listed.
+    long["time"] = pd.Categorical(
+        long["time"],
+        categories=[earlier, later]
+        + [t for t in label_order if t not in (earlier, later)],
+        ordered=True,
+    )
+    long = long[LONG_COLUMNS].sort_values(
+        ["mag_id", "contig", "position", "allele", "time", "group", "sample_id"]
+    )
+    long["time"] = long["time"].astype(str)
+
+    # ---- 5. Summary (every reported allele) and rising table (only the allele
+    # that rose, per group, judged on that group's later samples); write all three.
+    scope = args.baseline_scope
+    summary = summarise_sites(long, tps, scope, label_order)
+    # The change is the comparison's (both timepoints, its mice): cohort rows
+    # of other groups are baseline material only.
+    change = frequency_change_by_group(long[_comparison_mask(long)], tps)
+    rising = summarise_rising(long, change, tps, scope, label_order)
+    stem = os.path.join(
+        args.output_dir,
+        f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",
+    )
+    long.to_csv(f"{stem}.tsv.gz", sep="\t", index=False, compression="gzip")
+    summary.to_csv(f"{stem}_summary.tsv", sep="\t", index=False)
+    rising.to_csv(f"{stem}_rising.tsv", sep="\t", index=False)
+    logger.info(
+        f"wrote {len(long):,} long rows, {len(summary):,} summary rows and "
+        f"{len(rising):,} rising rows to {stem}*"
+    )
+    if len(summary):
+        logger.info(
+            f"origin_any_mouse: {summary['origin_any_mouse'].value_counts().to_dict()}"
+        )
+        # Rows whose allele fell or stayed flat in every candidate group have no
+        # rising row; candidates with an unknown change are counted by
+        # summarise_rising itself.
+        ident = [c for c in SITE_KEYS if c != "test_type"]  # outputs carry no test_type
+        n_rose = rising[ident].drop_duplicates().shape[0]
+        logger.info(
+            f"{n_rose:,} of {len(summary):,} site x allele rows rose in at least one group"
+        )
+        if len(rising):
+            logger.info(
+                f"rising origin_any_mouse: "
+                f"{rising['origin_any_mouse'].value_counts().to_dict()}"
+            )
+    return 0
+
+
+def main():
+    setup_logging()
+    parser = argparse.ArgumentParser(
+        description="For each significant site: was the allele already present at the baseline timepoint?",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--run_dir",
+        required=True,
+        help="AlleleFlux run root holding p_value_summary/ and significance_tests/",
+    )
+    parser.add_argument(
+        "--comparison", required=True, help="Comparison label, e.g. pre_end-fat_control"
+    )
+    parser.add_argument(
+        "--summary",
+        choices=list(SUMMARY_FAMILIES),
+        default="two_sample_paired",
+        help="Which p_value_summary family (divergence: two_sample_*; parallelism: single_sample; lmm*)",
+    )
+    parser.add_argument(
+        "--test_type",
+        required=True,
+        help="Row filter within the summary, spelled exactly as the file does "
+        "(two_sample_paired_tTest, two_sample_paired_Wilcoxon, LMM_abs, ...)",
+    )
+    parser.add_argument(
+        "--threshold_column", choices=("q_value", "min_p_value"), default="q_value"
+    )
+    parser.add_argument("--threshold", type=float, default=0.05)
+    parser.add_argument(
+        "--cache_dir",
+        required=True,
+        help="The run's allele_freq_cache/ directory: {timepoint}/{mag}_{timepoint}_allele_frequency.parquet. "
+        "Verdicts are read from the cache (QC-passing samples, site-filtered), never from raw profiles.",
+    )
+    parser.add_argument(
+        "--metadata",
+        required=True,
+        help="Sample metadata TSV (sample_id, subjectID, group, time[, replicate])",
+    )
+    parser.add_argument("--output_dir", required=True)
+    parser.add_argument(
+        "--turnover_dir",
+        default=None,
+        help="alleleflux-strain-turnover outputs, for a strain_background column",
+    )
+    parser.add_argument(
+        "--mags", nargs="*", default=None, help="Restrict to these MAG ids"
+    )
+    parser.add_argument(
+        "--baseline_scope",
+        choices=BASELINE_SCOPES,
+        default=BASELINE_SCOPE_DEFAULT,
+        help=(
+            "What 'absent at baseline' is judged against.  individual = the "
+            "carrier mice's own earlier samples only (isolated populations); "
+            "own_group = every earlier sample of the site's own group (groups "
+            "housed apart; within-group tests only, --summary single_sample or "
+            "lmm_across_time, an error otherwise); comparison = every earlier "
+            "sample of both groups (one population split across groups); "
+            "cohort = every QC-passing sample of the whole run, any group, any "
+            "timepoint, collected before the first carrier sample (shared "
+            "facility; needs a collection_date column, YYYY-MM-DD, for every "
+            "sample: a partly dated sheet is an error; with no dates at all "
+            "'before' means an earlier timepoint label and a warning is logged)."
+        ),
+    )
+    parser.add_argument(
+        "--min_cov",
+        type=int,
+        default=5,
+        help="Reads at a position before any verdict (1 = off)",
+    )
+    parser.add_argument(
+        "--min_freq", type=float, default=0.05, help="Presence frequency floor"
+    )
+    parser.add_argument(
+        "--fdr", type=float, default=1e-6, help="Null-model false-discovery rate"
+    )
+    parser.add_argument(
+        "--min_base_quality",
+        type=int,
+        default=30,
+        help="Base quality assumed by the null model",
+    )
+    parser.add_argument("--cpus", type=int, default=multiprocessing.cpu_count())
+    args = parser.parse_args()
+    return chase_the_ancestors(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

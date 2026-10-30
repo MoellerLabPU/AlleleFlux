@@ -1,0 +1,17 @@
+comparison	period	group_pair	test_type	group_analyzed	mag_id	n_sig_sites
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	67
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	54
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	70
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	54
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	2
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_002	1
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	11
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	10
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	9
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	9
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	11
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	9
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	10
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	9
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	11
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	9

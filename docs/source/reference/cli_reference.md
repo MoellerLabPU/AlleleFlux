@@ -165,10 +165,11 @@ Creates `{output_dir}/{sampleID}/{sampleID}_{mag_id}_profiled.tsv.gz` with colum
 - `contig`: Contig identifier
 - `position`: 0-based genomic position
 - `ref_base`: Reference base at position
-- `total_coverage`: Total read coverage
-- `A`, `C`, `G`, `T`, `N`: Base counts
-- `mapq_scores`: MAPQ scores for reads
+- `total_coverage`: Read coverage, equal to `A + C + G + T`
+- `A`, `C`, `G`, `T`: Base counts (ambiguous `N` calls are not counted; positions with no A/C/G/T read are not written)
 - `gene_id`: Overlapping gene identifier (if any)
+
+Profiles written by earlier versions carried an extra `N` column summed into `total_coverage`; they are not supported by this version. Re-profile.
 
 #### Examples
 
@@ -306,12 +307,19 @@ alleleflux-qc --root-dir PROFILES --mag-id MAG --output-dir DIR [options]
 | `--fasta` | None | Path to reference FASTA (optional). |
 | `--mag-mapping-file` | None | Contig-to-MAG mapping file (optional). |
 | `--breadth-threshold` | 0.1 | Minimum breadth of coverage (0-1). |
-| `--coverage-threshold` | 1.0 | Minimum average coverage depth. |
+| `--coverage-threshold` | 1.0 | Minimum `average_coverage_including_zeros` (summed depth / genome size). |
 | `--data-type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
 
 #### Output
 
-Creates `{mag_id}_QC.tsv` with QC results including `breadth_threshold_passed` column.
+Creates `{mag_id}_QC.tsv`, one row per sample, with the sample metadata, `genome_size`, and:
+
+- `breadth`, `breadth_threshold_passed`, `breadth_fail_reason`: fraction of the genome with at least one read, and the breadth check
+- `average_coverage`: mean depth over the **covered** positions only (summed depth / number of positions with at least one read). This is the reference the per-site depth filter divides by (see `quality_control.site_depth_filter` in the config); it is computed once here and read from this table downstream.
+- `average_coverage_including_zeros`: summed depth / genome size, with uncovered positions counted as zero. This is the number `--coverage-threshold` tests (`coverage_threshold_passed`, `coverage_fail_reason`).
+- `median_coverage`, `median_coverage_including_zeros`, `coverage_std`, `coverage_std_including_zeros`, `length_weighted_coverage`: further depth statistics (the `_including_zeros` ones treat uncovered positions as zero)
+
+The two averages answer different questions: a genome with a handful of very deep positions can have a high `average_coverage` and a near-zero `average_coverage_including_zeros`, and it is the latter that decides whether the sample is kept.
 
 #### Examples
 
@@ -590,6 +598,28 @@ alleleflux-list-mags --input-dir DIR [--output-file FILE]
 
 ---
 
+### Site-depth filter flags
+
+Only `alleleflux-cache-allele-freq` reads raw profiles after QC, so it alone takes the per-site depth filter flags; the workflow passes them from the `quality_control.site_depth_filter` config block. Every other per-site consumer (pairwise ANI, baseline presence, dN/dS, the plotting tools) reads the cache that command writes, so the filter is applied exactly once.
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--disable_site_depth_filter` | off | Do not apply the filter; profiles are used as-is. |
+| `--site_depth` | 0 | Minimum depth at a position after counting; 0 = no floor (MIDAS2 uses 5). |
+| `--site_ratio` | 3.0 | Drop a position when its depth divided by the sample's mean coverage over covered positions (QC's `average_coverage`) exceeds this. |
+| `--min_allele_reads` | 0 | A base count must exceed this to count toward the position's depth; 0 = every read counts (MIDAS2 uses 2). |
+| `--zero_low_counts` | off | MIDAS2 behaviour: at kept positions, base counts not exceeding `--min_allele_reads` are set to zero for everything downstream. Off = kept positions keep their original counts. |
+
+### `alleleflux-site-filter-summary` — what the site-depth filter removed, run-wide
+
+```bash
+alleleflux-site-filter-summary --cache_dir RUN/allele_freq_cache --output site_depth_filter_summary.tsv
+```
+
+Run automatically by the workflow once every cache job has finished (local rule `site_depth_filter_summary`, outputs under `site_depth_filter/`); also usable by hand. Stacks every `*_site_depth_filter.tsv` sidecar the cache jobs wrote into one table (one row per sample × MAG × timepoint) and writes a per-MAG × timepoint rollup next to it as `<output stem>_by_mag.tsv` with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high`. Fails loudly when the directory holds no sidecars.
+
+---
+
 ### Additional accessory tools
 
 - `alleleflux-positions-qc` — Position-level QC filtering
@@ -684,7 +714,8 @@ alleleflux-track-alleles --mag-id MAG --anchor-file FILE \
 |----------|-------------|
 | `--mag-id` | MAG identifier to process. |
 | `--anchor-file` | Path to terminal nucleotides file (from `alleleflux-terminal-nucleotide`). |
-| `--metadata` | Enhanced metadata file with `sample_profile_dir` column. |
+| `--cache-dir` | The run's `allele_freq_cache/` directory (per-sample counts are read from the cache, never from raw profiles). |
+| `--metadata` | Metadata file with `sample_id`, `group`, `time`, `subjectID`. |
 | `--output-dir` | Output directory. |
 
 #### Optional Arguments
@@ -742,7 +773,7 @@ Find dominant terminal alleles at significant genomic sites.
 
 ```bash
 alleleflux-terminal-nucleotide --significant-sites SITES \
-  --profile-dir DIR --metadata META --group GROUP \
+  --cache_dir DIR --metadata META --group GROUP \
   --timepoint TP --output DIR [options]
 ```
 
@@ -751,7 +782,7 @@ alleleflux-terminal-nucleotide --significant-sites SITES \
 | Argument | Description |
 |----------|-------------|
 | `--significant-sites` | Path to significant sites table (from p-value summary). |
-| `--profile-dir` | Directory containing sample profile subdirectories. |
+| `--cache_dir` | The run's `allele_freq_cache/` directory (per-sample counts at the significant sites are read from the cache, never from raw profiles). |
 | `--metadata` | Sample metadata file. |
 | `--group` | Target group name for terminal nucleotide calculation. |
 | `--timepoint` | Target timepoint (typically endpoint). |
@@ -776,6 +807,77 @@ alleleflux-terminal-nucleotide --significant-sites SITES \
 
 ---
 
+### `alleleflux-plot-scores` — score heatmaps and boxplots for one comparison
+
+Draw, per test family present, a MAG × cell heatmap and two boxplots from a finished run's combined MAG score tables and significant-sites summary. Run by the workflow once per comparison (local rule `plot_scores`); see the [Score Figures and Run Report guide](../usage/figures_and_report.md).
+
+```bash
+alleleflux-plot-scores --run_dir DIR --comparison LABEL --groups GROUP_A GROUP_B \
+  --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | The run's data-type directory (holds `scores/` and `p_value_summary/`). |
+| `--comparison` | Comparison label, e.g. `pre_post-treatment_control`. |
+| `--groups` | The comparison's two group labels, in configuration order (`treatment control`). |
+| `--output_dir` | Where the figures and `score_figures.done` are written. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--families` | every family with a score table | Families to draw: any of `ttest`, `ttest_unpaired`, `wilcoxon`, `mannwhitney`, `lmm`, `cmh`. `ttest`/`wilcoxon` use the paired divergence test, `ttest_unpaired`/`mannwhitney` the unpaired one (the one to read when samples cannot be paired across timepoints). |
+| `--tree` | None | Newick tree with MAG ids as tips; heatmap rows follow its tip order, MAGs absent from the tree are drawn below a divider. |
+| `--format` | `png` | `png`: PNG only; `pdf` (or `both`): PNG plus a PDF copy of every figure. |
+| `--q_threshold` | 0.05 | q below which a tile gets a star (the run's `p_value_threshold`). |
+| `--min_mags_per_phylum` | 3 | By-phylum boxplot: smaller phyla are pooled into one `other` panel. |
+| `--data_type` | `longitudinal` | `longitudinal` or `single`; `single` draws the divergence cell only (no within-group test). |
+| `--run_name` | `""` | Shown in figure titles. |
+
+#### Output
+
+`score_heatmap_{family}.{format}`, `score_boxplot_{family}.{format}` and `score_boxplot_{family}_by_phylum.{format}` per family, plus `score_figures.done` listing them. Grey tiles = the MAG was not tested in that cell; a column labelled `(no eligible MAGs)` had no score table at all. Stops with an error when a score table lacks its `total_sites_per_group_*` column or its tested MAGs differ from the summary's.
+
+---
+
+### `alleleflux-run-report` — one self-contained HTML report for a finished run
+
+Fold a run's bookkeeping tables and figures into one HTML page (inline CSS, images embedded, no scripts). Run by the workflow once, after every comparison's figures (local rule `run_report`); see the [Score Figures and Run Report guide](../usage/figures_and_report.md).
+
+```bash
+alleleflux-run-report --run_dir DIR --figures_dir DIR --output FILE \
+  --comparisons LABEL [LABEL ...] [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | The run's data-type directory. |
+| `--figures_dir` | Where `alleleflux-plot-scores` wrote `figures/<comparison>/`. |
+| `--output` | The HTML file to write. |
+| `--comparisons` | One or more comparison labels, e.g. `pre_post-treatment_control`. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--metadata_dir` | `<reuse_from or run_dir>/inputMetadata` | The `inputMetadata/` directory (the "MAGs with profiles" funnel row). |
+| `--metadata_path` | `input.metadata_path` of the runtime config | The sample sheet (the "samples in the metadata sheet" funnel rows). |
+| `--config` | newest `config_runtime_*.yml` in the run root | Runtime config YAML: shown on the page and read for `reuse_from`, `metadata_path` and the permutation settings. |
+| `--q_threshold` | 0.05 | A MAG counts as having a significant site when its smallest q is below this. |
+| `--data_type` | `longitudinal` | `longitudinal` or `single`; shown on the page. |
+| `--permuted` | off | Mark the report as a permuted (null) run (also set automatically from the config's `permutation` settings). |
+
+#### Output
+
+The HTML file: run and QC settings, the sample-and-MAG funnel per comparison, MAGs tested and MAGs with a significant site per test cell, the site-depth filter per timepoint, and every `score_*.png` under `figures_dir/<comparison>/` embedded with a caption. A section whose input is missing reads "not available in this run".
+
+---
+
 ## Getting help
 
 View detailed help for any tool:
@@ -795,3 +897,157 @@ alleleflux-plot-trajectories --help
 ```
 
 For configuration details, see [Configuration Reference](configuration.md). For how to run the workflow end to end, see [Running the Workflow](../usage/running_workflow.md).
+
+## Strain turnover and baseline presence tools
+
+See the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md) for what these compute and how they chain.
+
+### `alleleflux-pairwise-ani` — conANI / popANI between sample pairs of one MAG
+
+```bash
+alleleflux-pairwise-ani --mag MAG --cache_dir DIR --qc_files QC [QC ...] \
+  --fasta FASTA --mag_mapping MAPPING --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--mag` | MAG identifier. |
+| `--cache_dir` | The run's `allele_freq_cache/` directory. Per-sample counts are read from the cache (QC-passing samples, site-depth-filtered), never from raw profiles. A QC-passing sample missing from an existing cache file stops the run; one whose timepoint has no cache file is skipped with a warning. |
+| `--qc_files` | Per-MAG QC TSV(s), one per timepoint combination; samples that passed anywhere are compared. |
+| `--fasta` | Reference FASTA. |
+| `--mag_mapping` | MAG-to-contig mapping TSV (`mag_id`, `contig_id`). |
+| `--output_dir` | Output directory. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--min_cov` | 5 | Reads required in **both** samples for a position to be compared; 1 disables the depth gate. |
+| `--min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI only). |
+| `--fdr` | 1e-6 | Tolerated per-position probability that sequencing error explains an allele (popANI only). |
+| `--min_base_quality` | 30 | Phred floor the profiles were built with; sets the error model. |
+| `--pairs` | `within_subject` | `all`, `within_subject` (every same-mouse pair) or `transitions` (same-mouse pairs matching `--transitions`). |
+| `--transitions` | — | `EARLIER:LATER` pairs for `--pairs transitions`, e.g. `pre:end`. |
+| `--store_snp_locations` | `within_subject` | Which pairs also get per-position SNP rows: `none`, `within_subject`, `all`. |
+
+#### Output
+
+`{mag}_pairwise_ani.tsv` (one row per pair: `compared_bases_count`, `percent_genome_compared`, `consensus_SNPs`, `population_SNPs`, `conANI`, `popANI`, `min_cov`, and each sample's subject, group, time and replicate) and `{mag}_pairwise_ani_samples.tsv`.
+
+---
+
+### `alleleflux-strain-turnover` — per-mouse strain verdicts for one MAG
+
+```bash
+alleleflux-strain-turnover --mag MAG --pair_table TSV --output_dir DIR \
+  --transitions EARLIER:LATER [EARLIER:LATER ...] [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--mag` | MAG identifier. |
+| `--pair_table` | This MAG's `{mag}_pairwise_ani.tsv`. |
+| `--output_dir` | Output directory. |
+| `--transitions` | Transitions to call, e.g. `pre:end` or `5mo:10mo 5mo:22mo`. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--min_compared` | 0.1 | Minimum fraction of the genome compared for a verdict; below it both verdicts are `<NA>`. |
+| `--pop_threshold` | 0.99999 | popANI below this = `strain_replacement`. |
+| `--con_threshold` | 0.999 | conANI below this = `dominant_strain_change`. |
+
+#### Output
+
+`{mag}_strain_turnover.tsv` (one row per mouse × transition) and `{mag}_turnover_rollup.tsv` (counts per group × transition).
+
+---
+
+### `alleleflux-replacement-classification` — roll strain verdicts up to one row per MAG
+
+```bash
+alleleflux-replacement-classification --turnover_dir DIR --output_path TSV \
+  [--min_voters 8] [--vote_rule majority] [--tie not_replaced] [--replicate_rule average]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `--turnover_dir` | Directory of `{mag}_strain_turnover.tsv` files. |
+| `--output_path` | Output TSV: one row per MAG × transition × metric, mouse block and replicate block side by side. |
+| `--min_voters` | Fewest mice (or replicates) with a verdict needed for any yes/no call (default 8). Below it the flags are blank and `strain_status` reads `too_few_voters` or `no_voters`. |
+| `--vote_rule` | When a checked key counts as replaced: `majority` (default), `any`, or `all`. |
+| `--tie` | With `--vote_rule majority`, what exactly half the voters changing means for `strain_status`: `not_replaced` (default), `replaced`, or `unresolved`. |
+| `--replicate_rule` | How the subjects of one replicate become its single vote in the replicate block: `average` (default: mean conANI / popANI of the subjects with a verdict, against the metric's threshold), `any`, or `majority`. |
+
+---
+
+### `alleleflux-rising-origin` — standing vs de novo for the alleles that rose
+
+```bash
+alleleflux-rising-origin --rising_dir DIR --output_dir DIR \
+  [--classification TABLE [TABLE ...]] [--strain_metric METRIC] [--status_column COLUMN]
+```
+
+Reads every `*_baseline_presence_rising.tsv` in `--rising_dir` and counts, per comparison × group, the rising alleles in each origin category.
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--rising_dir` | required | Folder of rising tables (`baseline_presence/`). |
+| `--output_dir` | required | Output directory. |
+| `--classification` | — | `replacement_classification.tsv` table(s), one per voter floor (`min_voters`). When given, de novo in a replaced MAG becomes `new_strain` and the summary is split by floor and strain class. |
+| `--strain_metric` | `dominant_strain_change` | Classification metric (`dominant_strain_change` = conANI; `strain_replacement` = popANI, stricter). |
+| `--status_column` | `strain_status_replicates` | Verdict column: replicates vote, or `strain_status` for mice. |
+| `--cluster_window_bp` | `1000` | Cluster rule: two de novo alleles on the same contig that rose in the same group are neighbours when at most this many bp apart (any age); neighbours chain into blocks. |
+| `--max_de_novo_neighbours` | `0` | Cluster rule: a de novo allele with more than this many de novo neighbours becomes a `block_event`, never an independent de novo mutation; 0 keeps only lone alleles as de novo. |
+| `--turnover_dir` | — | Folder of `{mag}_strain_turnover.tsv` tables (`alleleflux-strain-turnover`): the per-mouse strain verdicts the carrier gate reads for each allele's carriers. |
+| `--strain_gate` | `carrier` | Which strain verdict decides whether a de novo allele stands: `carrier` = the allele's own carriers (needs `--turnover_dir`); `group` = the across-cage vote (needs `--classification`); `both` = the stricter of the two (needs both inputs); `none` = no strain gate. See [Outputs](outputs.md#rising-origin). |
+| `--min_determined_carriers` | `3` | Carrier gate: carriers with a per-mouse verdict needed before their strain is called; fewer → `strain_undetermined`. |
+
+Outputs `rising_origin_alleles.tsv` and `rising_origin_summary.tsv`; see [Outputs](outputs.md).
+
+---
+
+### `alleleflux-baseline-presence` — was each significant allele present at baseline?
+
+```bash
+alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
+  --cache_dir DIR --metadata TSV --output_dir DIR [options]
+```
+
+#### Required Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--run_dir` | Run root holding `p_value_summary/` and `significance_tests/`. |
+| `--comparison` | Comparison label, e.g. `pre_end-fat_control`. |
+| `--test_type` | Row filter within the summary, spelled exactly as the file does (`two_sample_paired_tTest`, `LMM_abs`, ...). |
+| `--cache_dir` | The run's `allele_freq_cache/` directory. Verdicts are read from the cache (QC-passing samples only, site-filtered), never from raw profiles; a sample with no rows in a MAG's cache did not pass QC for that MAG and gets no rows. |
+| `--metadata` | Sample metadata TSV (`sample_id`, `subjectID`, `group`, `time`[, `replicate`]). |
+| `--output_dir` | Output directory. |
+
+#### Optional Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--summary` | `two_sample_paired` | Summary family: `two_sample_paired`, `two_sample_unpaired`, `single_sample`, `lmm`, `lmm_across_time`. CMH is not offered (no per-base p-value). |
+| `--threshold_column` | `q_value` | `q_value` or `min_p_value`. |
+| `--threshold` | 0.05 | Significance cutoff. |
+| `--baseline_scope` | `cohort` | What "absent at baseline" is judged against: `individual` = the carrier mice's own earlier samples; `own_group` = every earlier sample of the site's own group (within-group tests only: `single_sample`, `lmm_across_time`; an error with any other family); `comparison` = every earlier sample of both groups; `cohort` = every QC-passing sample of the run, any group, any timepoint, collected before the first carrier sample (needs `collection_date`, `YYYY-MM-DD`, for every sample in the metadata: a partly dated sheet is an error; with no dates at all "before" means an earlier timepoint label and a warning is logged). |
+| `--turnover_dir` | — | Strain-turnover outputs; adds a `strain_background` column. |
+| `--mags` | all | Restrict to these MAG ids. |
+| `--min_cov` | 5 | Reads at a position before any verdict (1 = off). |
+| `--min_freq` | 0.05 | Presence frequency floor. |
+| `--fdr` | 1e-6 | Null-model false-discovery rate. |
+| `--min_base_quality` | 30 | Base quality assumed by the null model. |
+| `--disable_site_depth_filter`, `--site_depth`, `--site_ratio`, `--min_allele_reads`, `--zero_low_counts` | see below | The per-site depth filter, applied to each profile as it is loaded; a removed position reads as `not_covered` for that sample (see [Site-depth filter flags](#site-depth-filter-flags)). |
+| `--cpus` | all | Worker processes (one profile load per MAG × sample). |
+
+#### Output
+
+`{comparison}_{family}_{statistic}_baseline_presence.tsv.gz` (long: one row per site × allele × sample) `..._summary.tsv` (one row per site × allele) and `..._rising.tsv` (one row per site × allele × group the allele rose in; see [Outputs](outputs.md)). Column names use the comparison's own timepoint labels.
+

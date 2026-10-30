@@ -143,7 +143,6 @@ def read_profile(sample_file: str) -> pd.DataFrame:
     dtype.update({allele: float for allele in ALLELES})
 
     df = pd.read_csv(sample_file, sep="\t", usecols=usecols, dtype=dtype)
-
     if df.empty:
         logger.warning(
             f"Profile file empty; sample excluded from present-only statistics: {sample_file}"

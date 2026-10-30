@@ -1,0 +1,17 @@
+mag_id	contig	position	gene_id	test_type	min_p_value	q_value
+MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	720		two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_001	MAG_001.fa_contig2	1772		two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	77		two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	166		two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig2	53		two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	two_sample_paired_tTest	1.00e-06	1.00e-05
+MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	two_sample_paired_tTest	1.00e-06	1.00e-05

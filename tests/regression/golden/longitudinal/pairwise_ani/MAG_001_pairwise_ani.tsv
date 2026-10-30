@@ -1,0 +1,9 @@
+MAG_ID	sample1	sample2	compared_bases_count	percent_genome_compared	coverage_overlap	consensus_SNPs	population_SNPs	conANI	popANI	min_cov	subjectID_1	group_1	time_1	replicate_1	subjectID_2	group_2	time_2	replicate_2
+MAG_001	control_subj1_post	control_subj1_pre	2900	0.9863945578231292	0.9863945578231292	0	0	1.0	1.0	5	subj1	control	post	A	subj1	control	pre	A
+MAG_001	control_subj2_post	control_subj2_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj2	control	post	B	subj2	control	pre	B
+MAG_001	control_subj3_post	control_subj3_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj3	control	post	C	subj3	control	pre	C
+MAG_001	control_subj4_post	control_subj4_pre	2900	0.9863945578231292	0.9863945578231292	0	0	1.0	1.0	5	subj4	control	post	D	subj4	control	pre	D
+MAG_001	treatment_subj5_post	treatment_subj5_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj5	treatment	post	A	subj5	treatment	pre	A
+MAG_001	treatment_subj6_post	treatment_subj6_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj6	treatment	post	B	subj6	treatment	pre	B
+MAG_001	treatment_subj7_post	treatment_subj7_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj7	treatment	post	C	subj7	treatment	pre	C
+MAG_001	treatment_subj8_post	treatment_subj8_pre	2940	1.0	1.0	59	56	0.9799319727891157	0.9809523809523809	5	subj8	treatment	post	D	subj8	treatment	pre	D

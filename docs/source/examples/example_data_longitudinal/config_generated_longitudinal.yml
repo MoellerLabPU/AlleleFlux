@@ -1,0 +1,146 @@
+# AlleleFlux Configuration (Generated)
+# =====================================
+# Paths are RELATIVE to this config's directory (example_data_<dt>/).
+# Run the pipeline from inside example_data_<dt>/ so they resolve correctly:
+#   cd docs/source/examples/example_data_longitudinal
+#   alleleflux run --config config_generated_longitudinal.yml
+
+run_name: "generated_test"
+
+input:
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/sample_metadata.tsv"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
+  # Use the pre-generated profiles directly — skips the profiling step.
+  profiles_path: "profiles"
+
+output:
+  root_dir: "./output"
+
+log_level: "INFO"
+
+analysis:
+  data_type: "longitudinal"
+  allele_analysis_only: False
+  # Every feature the data type supports is ON (the bundled dataset is the
+  # regression test's input; planted_truth.json says what each should find),
+  # with one exception: LMM.  On this 4-mice-per-group design it took ~58
+  # CPU-minutes for two 5 kb genomes (every other step together: ~10) and
+  # called a third of all positions significant, so it is off here; its own
+  # unit tests cover it.  The within-group across-time tests run
+  # (run_within_group_tests default).
+  use_lmm: False
+  use_significance_tests: True
+  use_cmh: True
+  use_gene_scores: True
+  use_outlier_detection: True
+  use_dnds: True
+  # Regional contrast is experimental (not in the publication): stays off.
+  use_regional_contrast: False
+  # Pairwise conANI/popANI between each mouse's pre and post sample; the
+  # strain-swapped mouse (planted_truth.json: strain_swap) is the one pair
+  # whose conANI falls below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "within_subject"
+    store_snp_locations: "within_subject"
+  use_strain_turnover: True
+  strain_turnover:
+    min_compared: 0.1
+    pop_threshold: 0.99999
+    con_threshold: 0.999
+    # 4 mice per group: the real-cohort floor of 8 voters would leave every
+    # verdict blank (too_few_voters), so the test data votes with 2.
+    min_voters: 2
+    vote_rule: "majority"
+    tie: "not_replaced"
+    replicate_rule: "average"
+  # Standing vs de novo for every significant site of the paired t-test, judged
+  # against every sample dated before the first carrier (cohort scope; the
+  # metadata carries collection_date), with the carrier-level strain gate.
+  use_baseline_presence: True
+  baseline_presence:
+    summary: "two_sample_paired"
+    test_type: "two_sample_paired_tTest"
+    threshold_column: "q_value"
+    threshold: 0.05
+    baseline_scope: "cohort"
+    cluster_window_bp: 1000
+    max_de_novo_neighbours: 0
+    strain_gate: "carrier"
+    # The planted de novo alleles have 4 carriers, but a lone allele carried by
+    # fewer than 3 determined mice would be strain_undetermined at the house
+    # default; 1 keeps every carried allele judgeable on this small design.
+    min_determined_carriers: 1
+  # Score heatmaps, boxplots and the HTML run report (images; excluded from
+  # the regression comparison, but the rules run).
+  figures:
+    enabled: True
+
+  taxa_score_levels:
+    - phylum
+    - genus
+
+  timepoints_combinations:
+    - timepoint: ['pre', 'post']
+      focus: "post"
+
+  groups_combinations:
+    - treatment: "treatment"
+      control: "control"
+
+quality_control:
+  min_sample_num: 2
+  breadth_threshold: 0.1
+  coverage_threshold: 1
+  disable_zero_diff_filtering: False
+  # MIDAS2's per-site depth rule.  The two planted depth spikes
+  # (planted_truth.json: depth_spikes) sit at 10x the sample mean, so the
+  # 3.0x ceiling must remove exactly those positions for those samples.
+  site_depth_filter:
+    enabled: True
+    site_depth: 0
+    site_ratio: 3.0
+    min_allele_reads: 0
+    keep_original_counts: True
+
+profiling:
+  ignore_orphans: True
+  min_base_quality: 30
+  min_mapping_quality: 2
+  ignore_overlaps: True
+
+statistics:
+  filter_type: "t-test"
+  preprocess_between_groups: True
+  preprocess_within_groups: True
+  max_zero_count: 2
+  p_value_threshold: 0.05
+  fdr_group_by_mag_id: False
+  min_positions_after_preprocess: 1
+
+dnds:
+  p_value_column: "q_value"
+  # dN/dS is only run when data_type == "longitudinal"; ignored for single mode.
+  dn_ds_test_type: "two_sample_paired_tTest"
+
+regional_contrast:
+  mode: "both"
+  window_size: 500
+  agg_method: "median"
+  min_informative_sites: 2
+  min_informative_fraction: 0.0
+  use_fisher: True
+
+resources:
+  threads_per_job: 4
+  mem_per_job: "4G"
+  time: "01:00:00"
+  retries: 1
+  mem_step: "2G"
+  time_step: "0:30:00"

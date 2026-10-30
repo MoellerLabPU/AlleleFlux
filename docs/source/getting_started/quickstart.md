@@ -200,7 +200,7 @@ alleleflux-dnds-from-timepoints \
     --input p_value_summary.tsv \
     --output dnds/ \
     --mag_id Bacteroides_001 \
-    --profiles_dir profiles/ \
+    --cache_dir allele_freq_cache/ \
     --prodigal_fasta genes.fna \
     --fasta reference.fa \
     --ancestral_timepoint pre \

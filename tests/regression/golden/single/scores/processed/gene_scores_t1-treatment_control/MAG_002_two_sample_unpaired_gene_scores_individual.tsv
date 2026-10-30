@@ -1,0 +1,8 @@
+gene_id	total_sites_per_group_tTest	significant_sites_per_group_tTest	score_tTest (%)	total_sites_per_group_MannWhitney	significant_sites_per_group_MannWhitney	score_MannWhitney (%)
+MAG_002.fa_contig1_gene1	223	29	13.004484304932735	223	22	9.865470852017937
+MAG_002.fa_contig1_gene2	200	25	12.5	200	17	8.5
+MAG_002.fa_contig1_gene3	257	27	10.505836575875486	257	24	9.33852140077821
+MAG_002.fa_contig2_gene1	203	20	9.852216748768473	203	21	10.344827586206897
+MAG_002.fa_contig2_gene2	266	29	10.902255639097744	266	23	8.646616541353383
+MAG_002.fa_contig2_gene3	211	25	11.848341232227488	211	17	8.056872037914692
+	763	101	13.237221494102227	763	65	8.51900393184797

@@ -1,0 +1,126 @@
+# AlleleFlux Configuration (Generated, BAM mode)
+# =================================================
+# Paths are RELATIVE to this config's directory (example_data_<dt>/).
+# This config runs the FULL pipeline starting from BAM files — the
+# profiling step is NOT skipped. Generate the BAMs first with:
+#
+#   bash generate_bams.sh --data-dir example_data_single
+#
+# Then run the pipeline from inside example_data_<dt>/:
+#   cd docs/source/examples/example_data_single
+#   alleleflux run --config config_with_bams_single.yml
+
+run_name: "generated_test_bams"
+
+input:
+  fasta_path: "reference/combined_mags.fasta"
+  prodigal_path: "reference/prodigal_genes.fna"
+  metadata_path: "metadata/sample_metadata_bams.tsv"
+  gtdb_path: "reference/gtdbtk_taxonomy.tsv"
+  mag_mapping_path: "reference/mag_mapping.tsv"
+  # profiles_path intentionally omitted — pipeline profiles directly from BAMs.
+
+output:
+  root_dir: "./output_bams"
+
+log_level: "INFO"
+
+analysis:
+  data_type: "single"
+  allele_analysis_only: False
+  # Every feature the data type supports is ON (the bundled dataset is the
+  # regression test's input; planted_truth.json says what each should find),
+  # with one exception: LMM.  On this 4-mice-per-group design it took ~58
+  # CPU-minutes for two 5 kb genomes (every other step together: ~10) and
+  # called a third of all positions significant, so it is off here; its own
+  # unit tests cover it.  The within-group across-time tests run
+  # (run_within_group_tests default).
+  use_lmm: False
+  use_significance_tests: True
+  use_cmh: True
+  use_gene_scores: True
+  use_outlier_detection: True
+  # Longitudinal-only features: single data has no earlier timepoint.
+  use_dnds: False
+  use_regional_contrast: False
+  use_baseline_presence: False
+  use_strain_turnover: False
+  # Pairwise conANI/popANI between EVERY pair of samples (the between-mouse
+  # strain-sharing question; the only mode with a meaning on one timepoint).
+  # The planted divergent sample (planted_truth.json: strain_swap) is the one
+  # whose pairs all fall below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "all"
+    store_snp_locations: "none"
+  # Off until the score-figure loader handles a single-timepoint CMH table
+  # (it reports a score/summary MAG mismatch for cmh at t1).
+  figures:
+    enabled: False
+
+  taxa_score_levels:
+    - phylum
+    - genus
+
+  timepoints_combinations:
+    - timepoint: ['t1']
+      focus: "t1"
+
+  groups_combinations:
+    - treatment: "treatment"
+      control: "control"
+
+quality_control:
+  min_sample_num: 2
+  breadth_threshold: 0.1
+  coverage_threshold: 1
+  disable_zero_diff_filtering: False
+  # MIDAS2's per-site depth rule.  The two planted depth spikes
+  # (planted_truth.json: depth_spikes) sit at 10x the sample mean, so the
+  # 3.0x ceiling must remove exactly those positions for those samples.
+  site_depth_filter:
+    enabled: True
+    site_depth: 0
+    site_ratio: 3.0
+    min_allele_reads: 0
+    keep_original_counts: True
+
+profiling:
+  ignore_orphans: True
+  # wgsim writes Phred ~23 to every base; raise to ≥20 for real data.
+  min_base_quality: 0
+  min_mapping_quality: 2
+  ignore_overlaps: True
+
+statistics:
+  filter_type: "t-test"
+  preprocess_between_groups: True
+  preprocess_within_groups: True
+  max_zero_count: 2
+  p_value_threshold: 0.05
+  fdr_group_by_mag_id: False
+  min_positions_after_preprocess: 1
+
+dnds:
+  p_value_column: "q_value"
+  # dN/dS is only run when data_type == "longitudinal"; ignored for single mode.
+  dn_ds_test_type: "two_sample_unpaired_tTest"
+
+regional_contrast:
+  mode: "both"
+  window_size: 500
+  agg_method: "median"
+  min_informative_sites: 2
+  min_informative_fraction: 0.0
+  use_fisher: True
+
+resources:
+  threads_per_job: 4
+  mem_per_job: "4G"
+  time: "01:00:00"
+  retries: 1
+  mem_step: "2G"
+  time_step: "0:30:00"

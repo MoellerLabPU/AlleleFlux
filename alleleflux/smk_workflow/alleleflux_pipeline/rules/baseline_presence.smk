@@ -1,0 +1,162 @@
+"""Was each significant allele already present at the baseline timepoint?
+
+``baseline_presence`` runs ONCE per {timepoints}-{groups} comparison, on the
+p_value_summary file of the configured test family (analysis.baseline_presence.summary)
+and the per-MAG significance-test files behind it, and reads every sample's
+profile once (both groups, both timepoints).  It therefore sits AFTER the
+statistics stage: its targets are generated inside get_final_pipeline_outputs
+(checkpoint-aware), only where the family's summary target itself exists.
+
+Writes three files: the long table, the summary, and the rising table (only
+the allele that rose, per group, judged on that group's later samples).
+
+When use_strain_turnover is on, the turnover tables are joined in for the
+strain_background column and become an input dependency.
+"""
+
+
+def _baseline_presence_turnover_inputs(wildcards):
+    """Turnover tables as inputs only when the strain column is requested."""
+    if config["analysis"].get("use_strain_turnover", False):
+        return generate_strain_turnover_targets()
+    return []
+
+
+rule baseline_presence:
+    input:
+        summary=os.path.join(
+            OUTDIR,
+            "p_value_summary",
+            "{timepoints}-{groups}",
+            "p_value_summary_" + BASELINE_PRESENCE_FAMILY + "_{timepoints}-{groups}.tsv",
+        ),
+        turnover=_baseline_presence_turnover_inputs,
+        # The comparison's cache files (every QC-eligible MAG at both timepoints,
+        # a superset of the MAGs with candidates): declared so a missing or stale
+        # cache re-runs the cache job rather than failing inside this command.
+        # The CLI still resolves per-MAG files from the cache_dir param.
+        caches=lambda wildcards: allele_freq_cache_files_for_comparison(
+            wildcards.timepoints, wildcards.groups
+        ),
+        metadata=config["input"]["metadata_path"],
+    output:
+        long=get_baseline_presence_stem() + ".tsv.gz",
+        summary=get_baseline_presence_stem() + "_summary.tsv",
+        rising=get_baseline_presence_stem() + "_rising.tsv",
+    retries: get_retries("baseline_presence")
+    threads: get_threads("baseline_presence")
+    resources:
+        mem_mb=get_mem_mb("baseline_presence"),
+        time=get_time("baseline_presence"),
+        runtime=get_runtime("baseline_presence"),
+    params:
+        run_dir=OUTDIR,
+        # The allele-frequency cache: the single per-site source after QC
+        # (QC-passing samples only, site-filtered).  Baseline presence reads
+        # verdict counts from it, never from raw profiles.
+        cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
+        output_dir=os.path.join(OUTDIR, "baseline_presence"),
+        summary_family=BASELINE_PRESENCE_FAMILY,
+        # the shared constant (common.smk), not a direct config read: params are
+        # evaluated for every config, including ones without a baseline_presence block
+        test_type=BASELINE_PRESENCE_TEST_TYPE,
+        threshold_column=config["analysis"].get("baseline_presence", {}).get("threshold_column", "q_value"),
+        threshold=config["analysis"].get("baseline_presence", {}).get("threshold", 0.05),
+        # what "absent at baseline" is judged against (individual | own_group |
+        # comparison | cohort); cohort is the CLI's own default when the config
+        # does not say (needs collection_date in the metadata).  own_group needs a
+        # within-group summary family (single_sample / lmm_across_time); the CLI
+        # refuses the rest.
+        baseline_scope=(DE_NOVO_RULE_PARAMS or {}).get("baseline_scope", "cohort"),
+        # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
+        # "present" means one thing across the ANI table and this one.
+        min_cov=PRESENCE_RULE["min_cov"],
+        min_freq=PRESENCE_RULE["min_freq"],
+        fdr=PRESENCE_RULE["fdr"],
+        min_base_quality=PRESENCE_RULE["min_base_quality"],
+        turnover_arg=(
+            f"--turnover_dir {os.path.join(OUTDIR, 'strain_turnover')}"
+            if config["analysis"].get("use_strain_turnover", False)
+            else ""
+        ),
+    shell:
+        """
+        alleleflux-baseline-presence \
+            --run_dir {params.run_dir} \
+            --comparison {wildcards.timepoints}-{wildcards.groups} \
+            --summary {params.summary_family} \
+            --test_type {params.test_type} \
+            --threshold_column {params.threshold_column} \
+            --threshold {params.threshold} \
+            --baseline_scope {params.baseline_scope} \
+            --cache_dir {params.cache_dir} \
+            --metadata {input.metadata} \
+            --output_dir {params.output_dir} \
+            --min_cov {params.min_cov} \
+            --min_freq {params.min_freq} \
+            --fdr {params.fdr} \
+            --min_base_quality {params.min_base_quality} \
+            {params.turnover_arg} \
+            --cpus {threads}
+        """
+
+
+def _rising_origin_inputs(wildcards):
+    """Every comparison's rising table, plus the strain-turnover outputs it reads.
+
+    Reads the same list generate_rising_origin_targets gates on, so the rule is
+    only ever scheduled with at least one rising table to read.  With strain
+    turnover on, the classification table (the group verdict) and the per-MAG
+    turnover tables (the carrier verdict) are inputs too, so the count waits
+    for them; de_novo_rule_params already refused any gate but none without
+    use_strain_turnover.
+    """
+    return (
+        generate_rising_table_targets()
+        + generate_replacement_classification_targets()
+        + generate_strain_turnover_targets()
+    )
+
+
+# Seconds of pandas over small tables: not worth a cluster job.
+localrules:
+    rising_origin,
+
+
+rule rising_origin:
+    """Standing vs de novo for the alleles that rose, over every comparison: one
+    tidy summary.  Applies the cluster rule (block events) and the strain gate
+    (analysis.baseline_presence.strain_gate: the carriers' own turnover
+    verdicts by default, the group's classification vote, both, or none); both
+    verdicts are written to every row whenever strain turnover is on."""
+    input:
+        _rising_origin_inputs,
+    output:
+        alleles=os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_alleles.tsv"),
+        summary=os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_summary.tsv"),
+    params:
+        rising_dir=os.path.join(OUTDIR, "baseline_presence"),
+        output_dir=os.path.join(OUTDIR, "baseline_presence", "rising_origin"),
+        # The cluster rule + strain gate flags, one string for the whole run
+        # (common.smk); the strain inputs ride along whenever turnover is on,
+        # so every row carries both verdicts whatever the gate reads.
+        de_novo_rule_args=DE_NOVO_RULE_ARGS,
+        classification_arg=(
+            f"--classification {get_replacement_classification_path()}"
+            if config["analysis"].get("use_strain_turnover", False)
+            else ""
+        ),
+        turnover_arg=(
+            f"--turnover_dir {os.path.join(OUTDIR, 'strain_turnover')}"
+            if config["analysis"].get("use_strain_turnover", False)
+            else ""
+        ),
+    shell:
+        """
+        alleleflux-rising-origin \
+            --rising_dir {params.rising_dir} \
+            --output_dir {params.output_dir} \
+            {params.de_novo_rule_args} \
+            {params.classification_arg} \
+            {params.turnover_arg}
+        """

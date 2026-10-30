@@ -1,0 +1,111 @@
+# End-to-end regression suite for the AlleleFlux pipeline.
+#
+# Runs the bundled synthetic datasets (longitudinal + single scenarios) in
+# profiles mode with every applicable feature on, then (a) diffs the whole
+# output tree against the committed golden snapshot and (b) checks the facts
+# the data generator planted (planted_truth.json) are found.
+#
+# Inputs (all committed to the repo):
+#   * docs/source/examples/example_data_longitudinal/  — reference, profiles, configs, card
+#   * docs/source/examples/example_data_single/        — same for the single-timepoint design
+#   * tests/regression/golden/<scenario>/              — captured from this repo
+#
+# Refresh the golden after an intentional output change:
+#   pytest tests/regression/ --update-golden --regression-scenario all
+#   git add tests/regression/golden && git commit
+#
+# See tests/regression/README.md.
+#
+name: Regression Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/instructions/**'
+      - 'docs/source/_static/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.github/instructions/**'
+      - 'docs/source/_static/**'
+  # Manual trigger — fire from any branch via:
+  #   conda run -n alleleflux gh workflow run regression.yml --ref <branch>
+  # Useful for testing the workflow itself without polluting git history.
+  workflow_dispatch:
+
+# Cancel any superseded runs on the same ref — we only care about the latest
+# commit of an open PR; older in-flight runs are wasted compute.
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Regression suite (longitudinal + single)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        # Login shell (-l) so `conda activate` works in subsequent steps;
+        # errexit (-e) so a failing command actually fails the workflow.
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Miniforge + alleleflux env
+        # Mamba solver makes env resolution ~10x faster than classic conda
+        # for our heavy environment.yml (samtools, snakemake, R, rpy2).
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: alleleflux
+          auto-activate-base: false
+          use-mamba: true
+
+      - name: Install AlleleFlux + test extras
+        # The `[test]` extra (defined in pyproject.toml's optional-dependencies)
+        # pulls in pytest + pytest-cov.  Belt-and-suspenders reinstall since
+        # environment.yml already does `pip install -e .` via its pip block —
+        # but a missing `alleleflux` on PATH manifests as a confusing pipeline
+        # crash, not a clean failure, so we make sure here.
+        run: pip install -e ".[test]"
+
+      - name: Confirm tooling
+        # NOTE: avoid piping CLI output through `head` here.  GHA's default
+        # bash runs with `pipefail`, and Python CLIs (alleleflux) treat a
+        # closed pipe as an uncaught BrokenPipeError → exit 1 → step fails.
+        # Plain `which` / `--version` are safer: no pipes, no SIGPIPE drama.
+        run: |
+          which alleleflux
+          alleleflux --version
+          which samtools
+          python --version
+
+      - name: Run regression suite (both scenarios)
+        # --regression-scenario all runs longitudinal AND single
+        # --tb=short keeps failure output readable in the GHA logs
+        # --junit-xml writes a structured report for the GHA UI
+        # -m regression is redundant under tests/regression/ but explicit
+        # is better than implicit — guards against future test additions.
+        run: |
+          pytest tests/regression/ \
+            --regression-scenario all \
+            -v --tb=short \
+            -m regression \
+            --junit-xml=regression-report.xml
+
+      - name: Upload junit report
+        # always() ensures we upload even on test failure for post-mortem.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-junit-report
+          path: regression-report.xml
+          retention-days: 30

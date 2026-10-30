@@ -1,0 +1,3 @@
+mag_id	t1-treatment_control|CMH	t1-treatment_control|two_sample_paired_Wilcoxon	t1-treatment_control|two_sample_paired_tTest	t1-treatment_control|two_sample_unpaired_MannWhitney	t1-treatment_control|two_sample_unpaired_tTest
+MAG_001	59	0	4	0	4
+MAG_002	52	0	10	0	10

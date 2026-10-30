@@ -2,9 +2,10 @@
 """
 Prepare and combine metadata tables for the allele tracking workflow.
 
-This script reads an input metadata table, standardizes its columns
-(e.g., 'order' -> 'day'), and adds a 'sample_profile_dir' column
-based on a provided base directory.
+This script reads an input metadata table and standardizes its columns
+(e.g., 'order' -> 'day', a run-specific sample column -> 'sample_id').
+Per-site counts are read from the allele-frequency cache by the tools
+downstream, so no per-sample profile path is recorded here.
 
 It safely appends the cleaned data to an output metadata file,
 allowing you to combine multiple disparate metadata tables into one
@@ -93,23 +94,6 @@ def validate_and_rename_columns(
     return df
 
 
-def add_sample_profile_dir(df, base_profile_dir):
-    """Add the sample_profile_dir column.
-
-    Args:
-        df (pd.DataFrame): Input metadata DataFrame.
-        base_profile_dir (str): Base directory path for sample profiles.
-
-    Returns:
-        pd.DataFrame: DataFrame with added sample_profile_dir column.
-    """
-    # Ensure no trailing slash
-    base_dir = base_profile_dir.rstrip("/")
-    df["sample_profile_dir"] = df["sample_id"].apply(lambda s: f"{base_dir}/{s}")
-    logger.info(f"Added 'sample_profile_dir' column for {len(df)} samples.")
-    return df
-
-
 def load_existing_output(output_path, final_cols):
     """Load existing output file if it exists.
 
@@ -195,15 +179,6 @@ def main():
         required=True,
     )
     parser.add_argument(
-        "--base-profile-dir",
-        help=(
-            "The base directory containing sample profile subdirectories "
-            "(e.g., '/scratch/gpfs/AMOELLER/diet_manip/.../profiles')."
-        ),
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
         "--sample-col",
         help="The name of the sample ID column in the input file.",
         default="sample_id",
@@ -261,15 +236,11 @@ def main():
         final_cols.append("day")
     if "replicate" in df.columns:
         final_cols.append("replicate")
-    final_cols.append("sample_profile_dir")  # Always last
 
-    # 3. Add sample_profile_dir column
-    df = add_sample_profile_dir(df, args.base_profile_dir)
-
-    # 4. Load existing output file
+    # 3. Load existing output file
     existing_df = load_existing_output(args.metadata_out, final_cols)
 
-    # 5. Combine and save metadata
+    # 4. Combine and save metadata
     combine_and_save_metadata(existing_df, df, args.metadata_out, final_cols)
 
 

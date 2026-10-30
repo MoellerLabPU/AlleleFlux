@@ -1,0 +1,3 @@
+MAG_ID	domain	phylum	class	order	family	genus	species	total_sites_per_group_CMH	significant_sites_per_group_CMH	score_CMH (%)	grouped_by
+MAG_002	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides fragilis	2132	197	9.24015009380863	MAG_ID
+MAG_001	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides vulgatus	2940	277	9.421768707482991	MAG_ID

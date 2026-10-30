@@ -1,0 +1,17 @@
+sample_id	bam_path	subjectID	group	replicate	time	collection_date
+control_subj1_pre	bams/control_subj1_pre.bam	subj1	control	A	pre	2024-01-15
+control_subj1_post	bams/control_subj1_post.bam	subj1	control	A	post	2024-04-15
+control_subj2_pre	bams/control_subj2_pre.bam	subj2	control	B	pre	2024-01-15
+control_subj2_post	bams/control_subj2_post.bam	subj2	control	B	post	2024-04-15
+control_subj3_pre	bams/control_subj3_pre.bam	subj3	control	C	pre	2024-01-15
+control_subj3_post	bams/control_subj3_post.bam	subj3	control	C	post	2024-04-15
+control_subj4_pre	bams/control_subj4_pre.bam	subj4	control	D	pre	2024-01-15
+control_subj4_post	bams/control_subj4_post.bam	subj4	control	D	post	2024-04-15
+treatment_subj5_pre	bams/treatment_subj5_pre.bam	subj5	treatment	A	pre	2024-01-15
+treatment_subj5_post	bams/treatment_subj5_post.bam	subj5	treatment	A	post	2024-04-15
+treatment_subj6_pre	bams/treatment_subj6_pre.bam	subj6	treatment	B	pre	2024-01-15
+treatment_subj6_post	bams/treatment_subj6_post.bam	subj6	treatment	B	post	2024-04-15
+treatment_subj7_pre	bams/treatment_subj7_pre.bam	subj7	treatment	C	pre	2024-01-15
+treatment_subj7_post	bams/treatment_subj7_post.bam	subj7	treatment	C	post	2024-04-15
+treatment_subj8_pre	bams/treatment_subj8_pre.bam	subj8	treatment	D	pre	2024-01-15
+treatment_subj8_post	bams/treatment_subj8_post.bam	subj8	treatment	D	post	2024-04-15

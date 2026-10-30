@@ -64,6 +64,13 @@ Tab-separated file with sample information.
 | `replicate` | Replicate identifier within group (for CMH stratification) |
 | `time` | Timepoint (longitudinal only; e.g., `pre`, `post`) |
 
+**Optional columns** (read by `alleleflux-baseline-presence`; ignored elsewhere):
+
+| Column | Description |
+|--------|-------------|
+| `collection_date` | Calendar date the sample was collected, **ISO `YYYY-MM-DD` only** (four-digit year, two-digit month, two-digit day, hyphens; e.g. `2017-01-10`). Blank means unknown. Any other spelling (`10/01/2017`, `2017-1-10`, `20170110`, a date with a time) stops the run at its first step (`alleleflux-metadata`) with an error listing the offending samples: dates are never guessed, because day/month ambiguity would silently reorder a calendar-based baseline. |
+| `cohort` | Enrollment batch label, free text; copied into the baseline-presence outputs as is. |
+
 **Example:**
 
 ```text

@@ -1,0 +1,2 @@
+domain	phylum	class	order	family	genus	total_sites_per_group_CMH	significant_sites_per_group_CMH	unique_MAGs	score_CMH (%)	grouped_by
+Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	5071	397	2	7.828830605403274	genus

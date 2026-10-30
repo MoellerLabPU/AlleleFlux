@@ -23,74 +23,150 @@ from typing import Dict, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.csv as pacsv
 
 logger = logging.getLogger(__name__)
 
 
 def load_and_validate_profile(
-    profile_path: str, mag_id: str, sample_id: str, contig_to_mag: dict
+    profile_path: str,
+    mag_id: str,
+    sample_id: str,
+    contig_to_mag: dict,
+    usecols: Optional[list] = None,
+    mag_contigs: Optional[set] = None,
 ) -> pd.DataFrame:
     """
-    Load profile CSV and filter to MAG's contigs only.
+    Load profile TSV (optionally gzip-compressed) and filter to MAG's contigs only.
 
-    This function reads a coverage profile file and ensures it only contains
-    data for contigs belonging to the specified MAG. Rows belonging to other
-    MAGs are filtered out.
+    Uses pyarrow for fast columnar reads — ~7–9× faster than pandas read_csv on
+    gzipped TSVs.  When ``usecols`` is supplied only those columns are read off
+    disk; when ``mag_contigs`` is supplied a cheap unique-contig pre-check avoids
+    the per-row contig map on the common case where all rows already belong to the
+    correct MAG.
 
     Parameters
     ----------
     profile_path : str
-        Path to the profile TSV file containing coverage data
+        Path to the profile TSV (or .tsv.gz / .gz) file.
     mag_id : str
-        MAG identifier to filter for
+        MAG identifier to filter for.
     sample_id : str
-        Sample identifier (for error messages)
+        Sample identifier (for error messages).
     contig_to_mag : dict
-        Mapping of contig_id -> mag_id for filtering
+        Mapping of contig_id -> mag_id.  Used as fallback when *mag_contigs* is
+        not provided.
+    usecols : list of str, optional
+        Columns to read.  Defaults to all columns.  Pass
+        ``["contig", "total_coverage"]`` from quality_control.py to cut I/O by ~8×.
+    mag_contigs : set, optional
+        Pre-inverted set of contigs that belong to *mag_id*.  When provided the
+        function skips the per-row ``map`` call on the common fast path (all rows
+        match) and uses ``pc.is_in`` only when a foreign contig is actually found.
 
     Returns
     -------
     pd.DataFrame
-        Validated profile containing only rows for the specified MAG
+        Validated profile containing only rows for the specified MAG.
 
     Raises
     ------
     ValueError
-        If no rows remain after filtering to the MAG's contigs
-
-    Notes
-    -----
-    - Logs a warning if rows are dropped during contig filtering
-    - gene_id column is read as string to preserve formatting
+        If no rows remain after filtering to the MAG's contigs.
     """
-    # Load profile with gene_id as string to preserve formatting
-    df = pd.read_csv(profile_path, sep="\t", dtype={"gene_id": str})
+    # Explicit types for columns that can be misidentified by the inference engine.
+    # total_coverage is left to inference (int64 from real data, float64 from tests).
+    # gene_id must be forced to string because values like "001" would otherwise
+    # be inferred as the integer 1, silently losing the leading zero.
+    _type_map: dict = {
+        "contig": pa.string(),
+        "gene_id": pa.string(),
+    }
+    convert_opts = pacsv.ConvertOptions(
+        include_columns=usecols,  # None → read all columns
+        column_types=_type_map,
+    )
 
-    # Filter to only include contigs for this MAG
-    if "contig" in df.columns:
-        before_rows = len(df)
-        # Map contigs to MAG; unknown contigs map to None and will be excluded
-        mag_lookup = df["contig"].map(contig_to_mag)
-        mask = mag_lookup == mag_id
-        dropped = int(before_rows - mask.sum())
+    # pa.input_stream handles .gz/.tsv.gz decompression robustly regardless of
+    # the double extension — unlike pandas which requires explicit engine choice.
+    # The whole decompressed file is read into memory ONCE so that the line
+    # count below and the parser see the very same bytes.
+    with pa.input_stream(profile_path) as stream:
+        raw = stream.read()
 
-        if dropped > 0:
+    # The number of data rows the file holds, from the bytes themselves: one
+    # per newline, minus the header, plus one if the last line has no newline.
+    expected_rows = raw.count(b"\n") - 1 + (0 if raw.endswith(b"\n") or not raw else 1)
+
+    # use_threads=False: pyarrow's multithreaded chunk conversion is the stage
+    # that raised "a chunk failed converting for an unknown reason" on this data,
+    # and once returned a table missing its last chunk WITHOUT raising (2026-09,
+    # a ~3.6 M-row profile came back 12,330 rows short and QC recorded a wrong
+    # breadth).  Single-threaded parsing costs ~0.2 s more per large profile.
+    tbl = pacsv.read_csv(
+        pa.BufferReader(raw),
+        read_options=pacsv.ReadOptions(use_threads=False),
+        parse_options=pacsv.ParseOptions(delimiter="\t"),
+        convert_options=convert_opts,
+    )
+
+    # A short read must never pass silently: every downstream number (breadth,
+    # coverage, the pass/fail decision) would be quietly wrong.  Raising here
+    # fails the QC job loudly, and the workflow's retries take it from there.
+    if tbl.num_rows != expected_rows:
+        msg = (
+            f"Short read of profile for MAG {mag_id}, sample {sample_id}: parsed "
+            f"{tbl.num_rows} rows but the file holds {expected_rows}. file={profile_path}"
+        )
+        logger.error(msg)
+        raise ValueError(msg)
+
+    if tbl.num_rows == 0:
+        msg = f"Empty profile for MAG {mag_id}. file={profile_path}"
+        logger.error(msg)
+        raise ValueError(msg)
+
+    # Filter rows to the MAG's contigs only when a 'contig' column was read.
+    if "contig" in tbl.schema.names:
+        contig_col = tbl.column("contig")
+
+        # Cheap pre-check: collect unique contig names and test membership.
+        # On the normal path every contig already belongs to this MAG, so
+        # the expensive pc.is_in row filter never fires.
+        unique_contigs = pc.unique(contig_col).to_pylist()
+
+        if mag_contigs is not None:
+            foreign = [c for c in unique_contigs if c not in mag_contigs]
+        else:
+            foreign = [c for c in unique_contigs if contig_to_mag.get(c) != mag_id]
+
+        if foreign:
+            # At least one foreign contig — filter row-by-row via Arrow kernel.
+            if mag_contigs is not None:
+                allowed = pa.array(list(mag_contigs), type=pa.string())
+            else:
+                allowed = pa.array(
+                    [c for c in unique_contigs if c not in set(foreign)],
+                    type=pa.string(),
+                )
+            before = tbl.num_rows
+            tbl = tbl.filter(pc.is_in(contig_col, value_set=allowed))
+            dropped = before - tbl.num_rows
             logger.warning(
-                f"Profile contains {dropped} rows not belonging to MAG {mag_id}; filtering them out. "
-                f"file={profile_path} sample={sample_id}"
+                f"Profile contains {dropped} rows not belonging to MAG {mag_id}; "
+                f"filtering them out. file={profile_path} sample={sample_id}"
             )
+            if tbl.num_rows == 0:
+                msg = (
+                    f"No rows remain after filtering profile to MAG {mag_id}. "
+                    f"file={profile_path}"
+                )
+                logger.error(msg)
+                raise ValueError(msg)
 
-        df = df.loc[mask].copy()
-
-        if df.empty:
-            msg = (
-                f"No rows remain after filtering profile to MAG {mag_id}. "
-                f"file={profile_path}"
-            )
-            logger.error(msg)
-            raise ValueError(msg)
-
-    return df
+    return tbl.to_pandas()
 
 
 def calculate_breadth_metrics(
@@ -163,12 +239,26 @@ def calculate_coverage_metrics(
     total_coverage_sum_genome: Optional[float] = None,
 ) -> Dict[str, Optional[float]]:
     """
-    Calculate average_coverage and optionally average_coverage_genome.
+    Calculate the two average-coverage numbers (and average_coverage_genome under a filter).
 
-    Average coverage is calculated as the sum of all coverage values divided by
-    the denominator. When using a position filter, two metrics are calculated:
-    - average_coverage: based on filtered positions (denominator depends on mode)
-    - average_coverage_genome: based on entire genome (always uses genome size)
+    Two numbers, two jobs (decision 2026-10-15, agreed with the collaborator):
+
+    - average_coverage: mean depth over the COVERED positions of ``df``
+      (sum of total_coverage / number of rows with total_coverage > 0).  This
+      is MIDAS2's "mean genome coverage" and the ONLY reference the per-site
+      depth filter divides by; it is computed once here and read from the QC
+      table by every consumer.  0.0 when no position is covered.
+    - average_coverage_including_zeros: sum of total_coverage / ``denom``, i.e.
+      the mean over every position of the genome (absent positions count as
+      zero).  This is the number the QC coverage threshold tests.
+
+    When using a position filter a third number is added:
+    - average_coverage_genome: genome-wide sum / genome size (always uses genome size)
+
+    Worked example: depths 10, 20, 30 at three positions of a 1 Mb genome ->
+    average_coverage = 60 / 3 = 20.0 (the sample sits at ~20x where it is
+    covered), average_coverage_including_zeros = 60 / 1,000,000 = 0.00006
+    (the genome is essentially absent from the sample).
 
     Parameters
     ----------
@@ -188,21 +278,32 @@ def calculate_coverage_metrics(
     -------
     dict
         Dictionary with keys:
-        - 'average_coverage': Average coverage for filtered positions
+        - 'average_coverage': mean over covered positions of ``df``
+        - 'average_coverage_including_zeros': sum(total_coverage) / denom
         - 'average_coverage_genome': Average coverage across entire genome
           (only when using_filter=True)
 
     Notes
     -----
-    - Average coverage = sum(total_coverage) / denominator
-    - Returns np.nan if denominator is 0
+    - average_coverage_including_zeros is np.nan if the denominator is 0;
+      average_coverage does not use the denominator and is 0.0 when no row
+      has coverage > 0
     - average_coverage_genome is None when not using a filter
     """
-    # Calculate average coverage for filtered positions
     total_coverage_sum = df["total_coverage"].sum()
-    avg_cov = total_coverage_sum / denom if denom > 0 else np.nan
+    # Covered-sites mean, as in MIDAS2: only rows with depth > 0 count.  The
+    # profiler never writes a zero-depth row, so n_covered is normally len(df);
+    # the guard keeps the mean well defined on a hand-made or empty frame.
+    n_covered = int((df["total_coverage"] > 0).sum())
+    avg_cov_covered = float(total_coverage_sum / n_covered) if n_covered > 0 else 0.0
+    # Genome-size mean: the number the QC threshold tests.
+    avg_cov_including_zeros = total_coverage_sum / denom if denom > 0 else np.nan
 
-    result = {"average_coverage": avg_cov, "average_coverage_genome": None}
+    result = {
+        "average_coverage": avg_cov_covered,
+        "average_coverage_including_zeros": avg_cov_including_zeros,
+        "average_coverage_genome": None,
+    }
 
     # Calculate genome-wide average coverage when using position filter
     if using_filter:
@@ -219,7 +320,7 @@ def calculate_coverage_metrics(
 
 
 def calculate_median_and_std_metrics(
-    df: pd.DataFrame, denom: int, avg_cov: float
+    df: pd.DataFrame, denom: int, avg_cov_including_zeros: float
 ) -> Dict[str, float]:
     """
     Calculate median and standard deviation metrics.
@@ -236,8 +337,11 @@ def calculate_median_and_std_metrics(
         Profile dataframe with 'total_coverage' column
     denom : int
         Total number of positions (for including zeros calculations)
-    avg_cov : float
-        Average coverage (pre-calculated, used for std calculation)
+    avg_cov_including_zeros : float
+        The INCLUDING-ZEROS average (sum of coverage / denom), pre-calculated.
+        It is the mean of the whole-genome series whose population std is
+        computed here, so the covered-sites ``average_coverage`` must not be
+        passed: E[X^2] - E[X]^2 only holds with the matching mean.
 
     Returns
     -------
@@ -291,9 +395,9 @@ def calculate_median_and_std_metrics(
 
     # Population std including zeros across entire genome length
     # Uses formula: Var(X) = E[X²] - E[X]²
-    if denom > 0 and np.isfinite(avg_cov):
+    if denom > 0 and np.isfinite(avg_cov_including_zeros):
         ex2 = float((df["total_coverage"] ** 2).sum()) / denom
-        var = max(ex2 - (avg_cov * avg_cov), 0.0)
+        var = max(ex2 - (avg_cov_including_zeros * avg_cov_including_zeros), 0.0)
         result["coverage_std_including_zeros"] = float(np.sqrt(var))
 
     return result
@@ -455,7 +559,7 @@ def check_breadth_threshold(
 
 
 def check_coverage_threshold(
-    avg_cov: float,
+    avg_cov_including_zeros: float,
     avg_cov_genome: Optional[float],
     threshold: float,
     breadth_passed: bool,
@@ -471,13 +575,14 @@ def check_coverage_threshold(
     2. If breadth check passed, then evaluate coverage threshold
 
     The coverage metric checked depends on whether a positions filter is active:
-    - No filter: checks avg_cov against threshold
+    - No filter: checks avg_cov_including_zeros against threshold
     - With filter: ALWAYS checks avg_cov_genome against threshold
 
     Parameters
     ----------
-    avg_cov : float
-        Average coverage value (filtered or full, depending on context)
+    avg_cov_including_zeros : float
+        The including-zeros average coverage (sum over the genome size), the
+        number the threshold is defined on
     avg_cov_genome : float or None
         Genome-wide average coverage (only available when using filter)
     threshold : float
@@ -515,9 +620,11 @@ def check_coverage_threshold(
         cov_to_check = avg_cov_genome
         metric_name = "Average coverage (genome)"
     else:
-        # No filter: check regular average coverage
-        cov_to_check = avg_cov
-        metric_name = "Average coverage"
+        # No filter: the genome-size mean (absent positions as zero).  The
+        # covered-sites average_coverage is NOT a QC criterion: a genome with
+        # a handful of deep positions would pass any threshold on it.
+        cov_to_check = avg_cov_including_zeros
+        metric_name = "Average coverage (including zeros)"
 
     # Breadth passed, now check coverage threshold
     if cov_to_check < threshold:
@@ -572,7 +679,7 @@ def aggregate_mag_stats(
     Metrics aggregated (when present in input):
     - subjects_per_group, replicates_per_group, paired_replicates_per_group
     - breadth, breadth_genome
-    - average_coverage, average_coverage_genome
+    - average_coverage, average_coverage_including_zeros, average_coverage_genome
     - median_coverage, median_coverage_including_zeros
     - length_weighted_coverage
     - coverage_std, coverage_std_including_zeros
@@ -589,8 +696,14 @@ def aggregate_mag_stats(
         passing = df_results.copy()
 
     if passing.empty:
+        # Documented behaviour (see docstring): when no samples pass the
+        # coverage threshold, fall back to aggregating across ALL samples so
+        # the MAG still appears in the summary table — otherwise downstream
+        # rules would silently drop MAGs that had borderline coverage in
+        # every sample.  Warn so this fallback is visible in the log.
         logger.warning(
-            f"No passing samples for {mag_id}; summarizing all samples instead."
+            f"No samples passed coverage threshold for {mag_id}; "
+            "falling back to aggregating across all samples."
         )
         passing = df_results.copy()
 
@@ -604,6 +717,7 @@ def aggregate_mag_stats(
             "breadth_genome",
             # Coverage metrics (grouped together)
             "average_coverage",
+            "average_coverage_including_zeros",
             "average_coverage_genome",
             # Additional coverage statistics
             "median_coverage",

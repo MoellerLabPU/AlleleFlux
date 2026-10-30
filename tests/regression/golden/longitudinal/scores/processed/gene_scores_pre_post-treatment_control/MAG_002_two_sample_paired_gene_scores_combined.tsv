@@ -1,0 +1,8 @@
+gene_id	total_sites_per_group_tTest	significant_sites_per_group_tTest	score_tTest (%)	total_sites_per_group_Wilcoxon	significant_sites_per_group_Wilcoxon	score_Wilcoxon (%)	total_sites_per_group_tTest_abs	significant_sites_per_group_tTest_abs	score_tTest_abs (%)	total_sites_per_group_Wilcoxon_abs	significant_sites_per_group_Wilcoxon_abs	score_Wilcoxon_abs (%)
+MAG_002.fa_contig1_gene1	225	44	19.555555555555557	225	0	0.0	225	38	16.88888888888889	225	0	0.0
+MAG_002.fa_contig1_gene2	201	43	21.393034825870647	201	0	0.0	201	33	16.417910447761194	201	0	0.0
+MAG_002.fa_contig1_gene3	258	44	17.05426356589147	258	0	0.0	258	39	15.11627906976744	258	0	0.0
+MAG_002.fa_contig2_gene1	204	39	19.11764705882353	204	0	0.0	204	24	11.76470588235294	204	0	0.0
+MAG_002.fa_contig2_gene2	267	52	19.475655430711612	267	0	0.0	267	37	13.857677902621724	267	0	0.0
+MAG_002.fa_contig2_gene3	213	41	19.248826291079812	213	0	0.0	213	31	14.553990610328638	213	0	0.0
+	764	129	16.8848167539267	764	0	0.0	764	113	14.790575916230367	764	0	0.0
