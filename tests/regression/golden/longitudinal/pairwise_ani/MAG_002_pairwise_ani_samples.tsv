@@ -1,0 +1,17 @@
+MAG_ID	sample_id	subjectID	group	time	replicate	n_positions	breadth	breadth_minCov
+MAG_002	control_subj3_post	subj3	control	post	C	2132	1.0	1.0
+MAG_002	control_subj3_pre	subj3	control	pre	C	2132	1.0	1.0
+MAG_002	control_subj4_post	subj4	control	post	D	2132	1.0	1.0
+MAG_002	control_subj4_pre	subj4	control	pre	D	2132	1.0	1.0
+MAG_002	control_subj1_post	subj1	control	post	A	2132	1.0	1.0
+MAG_002	control_subj1_pre	subj1	control	pre	A	2132	1.0	1.0
+MAG_002	control_subj2_post	subj2	control	post	B	2132	1.0	1.0
+MAG_002	control_subj2_pre	subj2	control	pre	B	2132	1.0	1.0
+MAG_002	treatment_subj5_post	subj5	treatment	post	A	2132	1.0	1.0
+MAG_002	treatment_subj5_pre	subj5	treatment	pre	A	2132	1.0	1.0
+MAG_002	treatment_subj6_post	subj6	treatment	post	B	2132	1.0	1.0
+MAG_002	treatment_subj6_pre	subj6	treatment	pre	B	2132	1.0	1.0
+MAG_002	treatment_subj7_post	subj7	treatment	post	C	2132	1.0	1.0
+MAG_002	treatment_subj7_pre	subj7	treatment	pre	C	2132	1.0	1.0
+MAG_002	treatment_subj8_post	subj8	treatment	post	D	2132	1.0	1.0
+MAG_002	treatment_subj8_pre	subj8	treatment	pre	D	2132	1.0	1.0

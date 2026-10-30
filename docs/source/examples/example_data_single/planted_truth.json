@@ -1,0 +1,275 @@
+{
+  "block_spacing_bp": 300,
+  "carrier_samples": [
+    "treatment_sample5",
+    "treatment_sample6",
+    "treatment_sample7",
+    "treatment_sample8"
+  ],
+  "collection_dates": {
+    "t1": "2024-01-15"
+  },
+  "data_type": "single",
+  "depth_spikes": [
+    {
+      "contig": "MAG_001.fa_contig1",
+      "depth": 500,
+      "end": 803,
+      "mag": "MAG_001",
+      "sample_id": "control_sample1",
+      "start": 763
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "depth": 500,
+      "end": 489,
+      "mag": "MAG_001",
+      "sample_id": "control_sample4",
+      "start": 449
+    }
+  ],
+  "groups": {
+    "control": "control",
+    "treatment": "treatment"
+  },
+  "n_standing": 12,
+  "rising_allele_rule": "the next base after ref_base in the A,T,G,C cycle",
+  "seed": 42,
+  "shift_rising_fraction": 0.48,
+  "significant_sites": [
+    {
+      "contig": "MAG_001.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_001",
+      "position": 638,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_001",
+      "position": 1435,
+      "ref_base": "C",
+      "rising_allele": "A"
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_001",
+      "position": 1440,
+      "ref_base": "T",
+      "rising_allele": "G"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 74,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 163,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 513,
+      "ref_base": "C",
+      "rising_allele": "A"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 516,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 523,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 770,
+      "ref_base": "T",
+      "rising_allele": "G"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 1188,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig2",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 495,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig2",
+      "kind": "shift",
+      "label": "shift",
+      "mag": "MAG_002",
+      "position": 659,
+      "ref_base": "A",
+      "rising_allele": "T"
+    }
+  ],
+  "strain_swap": {
+    "fraction": 0.02,
+    "n_positions": 102,
+    "positions": {
+      "MAG_001": {
+        "MAG_001.fa_contig1": [
+          18,
+          110,
+          199,
+          208,
+          268,
+          281,
+          296,
+          302,
+          335,
+          400,
+          429,
+          446,
+          596,
+          622,
+          663,
+          742,
+          772,
+          807,
+          905,
+          938,
+          989
+        ],
+        "MAG_001.fa_contig2": [
+          69,
+          107,
+          115,
+          196,
+          240,
+          243,
+          304,
+          344,
+          353,
+          367,
+          493,
+          501,
+          619,
+          693,
+          728,
+          768,
+          812,
+          827,
+          874,
+          888,
+          970,
+          1000,
+          1055,
+          1215,
+          1220,
+          1284,
+          1331,
+          1336,
+          1373,
+          1391,
+          1408,
+          1416,
+          1481,
+          1528,
+          1590,
+          1630,
+          1725,
+          1898
+        ]
+      },
+      "MAG_002": {
+        "MAG_002.fa_contig1": [
+          23,
+          47,
+          171,
+          185,
+          195,
+          240,
+          247,
+          251,
+          372,
+          462,
+          565,
+          568,
+          757,
+          788,
+          792,
+          917,
+          955,
+          988,
+          997,
+          1007,
+          1049,
+          1178,
+          1179,
+          1208,
+          1221
+        ],
+        "MAG_002.fa_contig2": [
+          20,
+          65,
+          101,
+          128,
+          189,
+          305,
+          333,
+          415,
+          444,
+          551,
+          586,
+          662,
+          719,
+          721,
+          732,
+          816,
+          834,
+          884
+        ]
+      }
+    },
+    "sample_id": "treatment_sample8",
+    "subjectID": "subj8",
+    "timepoint": "t1"
+  },
+  "timepoints": [
+    "t1"
+  ]
+}

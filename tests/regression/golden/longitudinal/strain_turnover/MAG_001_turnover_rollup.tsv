@@ -1,0 +1,3 @@
+MAG_ID	group	transition	n_pairs	n_undetermined	n_stable	n_strain_replacement	n_dominant_strain_change	n_both	median_percent_genome_compared
+MAG_001	control	pre_post	4	0	4	0	0	0	0.9931972789115646
+MAG_001	treatment	pre_post	4	0	3	0	0	1	1.0

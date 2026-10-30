@@ -1,0 +1,7 @@
+comparison	period	group_pair	test_type	group_analyzed	mag_id	n_sig_sites
+t1-treatment_control	t1	treatment_control	CMH		MAG_001	59
+t1-treatment_control	t1	treatment_control	CMH		MAG_002	52
+t1-treatment_control	t1	treatment_control	two_sample_paired_tTest		MAG_002	10
+t1-treatment_control	t1	treatment_control	two_sample_paired_tTest		MAG_001	4
+t1-treatment_control	t1	treatment_control	two_sample_unpaired_tTest		MAG_002	10
+t1-treatment_control	t1	treatment_control	two_sample_unpaired_tTest		MAG_001	4

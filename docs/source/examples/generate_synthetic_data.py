@@ -42,10 +42,11 @@ Usage:
 
 import argparse
 import gzip
+import json
 import logging
 import random
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from Bio import SeqIO
@@ -64,6 +65,33 @@ logger = logging.getLogger(__name__)
 # The ORDER matters: the treatment effect shifts each position's dominant
 # allele one step forward in this cycle (A→T→G→C→A).
 BASES = ["A", "T", "G", "C"]
+
+# ---- Planted-truth knobs ----------------------------------------------------
+# Every fact the regression test asserts is planted with these numbers and
+# written to planted_truth.json, so a test never has to guess them.
+DEFAULT_COVERAGE_RANGE = (20, 80)  # per-position depth draw, uniform
+N_STANDING = 12  # significant sites whose rising allele already exists at baseline
+SHIFT_RISING_FRACTION = 0.48  # rising allele's read share in a carrier sample: large
+#   enough for a paired t-test on 4 vs 4 mice, but BELOW one half so the
+#   consensus base stays the reference and the shift is NOT a strain change
+#   in the ANI step (conANI counts consensus differences only)
+STANDING_FRACTION = 0.15  # rising allele's read share in the ONE control mouse that
+#   carries each standing allele, at pre AND post alike: present at baseline
+#   (far above min_freq 0.05 and the per-depth error bar), and unchanged over
+#   time in that mouse, so the control group's pre-to-post change stays ~0 and
+#   the paired tests keep their power (a pre-only carrier cost 11 of 12
+#   standing sites their significance at 4 mice per group)
+STANDING_MIN_COVERAGE = 40  # that mouse's depth floor at standing sites: >= 6 reads
+BLOCK_SPACING_BP = 300  # three de novo alleles this far apart: one cluster at
+#   the default 1000 bp window, so they must become one block_event
+SWAP_FRACTION = 0.02  # share of positions whose CONSENSUS rotates in the one
+#   strain-swapped sample: conANI ~0.98 against its own earlier sample, far
+#   below the 0.999 same-strain line, while every other mouse stays above it
+SPIKE_LENGTH = 40  # positions per depth spike
+SPIKE_FACTOR = 10  # spike depth = this x the mean of the coverage range: the
+#   site-depth filter's default ceiling is 3 x the sample mean, so every
+#   spike position must be removed for that sample
+MIN_PLANT_MARGIN = 50  # keep plants this far from contig ends
 
 
 def generate_random_sequence(length: int) -> str:
@@ -412,11 +440,237 @@ def generate_sample_structure(
     return samples
 
 
+def collection_dates_for(timepoints: List[str]) -> Dict[str, str]:
+    """One ISO calendar date per timepoint label, three months apart.
+
+    The pipeline's cohort baseline scope orders samples by ``collection_date``
+    (``YYYY-MM-DD``); without dates it falls back to label order with a
+    warning, so the bundled dataset carries real dates.  Example:
+    ``["pre", "post"]`` -> ``{"pre": "2024-01-15", "post": "2024-04-15"}``.
+    """
+    dates = {}
+    for i, tp in enumerate(timepoints):
+        month_index = 3 * i  # 0, 3, 6, ... months after January 2024
+        dates[tp] = f"{2024 + month_index // 12}-{month_index % 12 + 1:02d}-15"
+    return dates
+
+
+def _ordered_unique(values):
+    """Unique values in first-seen order (``dict.fromkeys`` idiom)."""
+    return list(dict.fromkeys(values))
+
+
+def _all_positions(mags: List[Dict]):
+    """Every (mag_id, contig_id, position) at least MIN_PLANT_MARGIN from a contig end."""
+    for mag in mags:
+        for contig in mag["contigs"]:
+            for pos in range(MIN_PLANT_MARGIN, contig["length"] - MIN_PLANT_MARGIN):
+                yield mag["mag_id"], contig["contig_id"], pos
+
+
+def plan_the_plants(
+    mags: List[Dict],
+    samples: List[Dict],
+    data_type: str,
+    *,
+    n_standing: int = N_STANDING,
+    coverage_range: Tuple[int, int] = DEFAULT_COVERAGE_RANGE,
+) -> Dict:
+    """Decide every planted fact up front and return the card that records them.
+
+    The card is what ``generate_profile_data`` reads while writing counts and
+    what ``generate_dataset`` saves as ``planted_truth.json``; the regression
+    test reads the same card, so a fact exists in exactly one place.  Nothing
+    in it depends on the profiles: it is pure bookkeeping over the MAG
+    structures and the sample sheet, deterministic under the module's seed.
+
+    What gets planted
+    -----------------
+    * ``significant_sites``: positions where the treatment group's LATER samples
+      (the ``carrier_samples``) carry the ``rising_allele`` -- the next base in
+      the A->T->G->C cycle after the reference -- at ``shift_rising_fraction``
+      of their reads.  Longitudinal sites come in two kinds: ``standing``
+      (``n_standing`` of them; the rising allele is also present at baseline,
+      as a stable minority in ONE control mouse at every timepoint, see
+      ``standing_mouse``) and ``de_novo`` (the
+      rising allele has zero reads in every non-carrier sample).  The de novo
+      sites are one ``lone`` allele and a ``block`` of three alleles
+      ``block_spacing_bp`` apart on one contig; the lone one sits on a
+      different contig so no cluster window can reach it.  A single-timepoint
+      design has no baseline, so its sites are all kind ``shift``.
+    * ``strain_swap``: the last treatment mouse's later sample rotates its
+      CONSENSUS at ``swap_fraction`` of each contig's positions (never at a
+      planted site).
+    * ``depth_spikes``: two control samples each get one ``SPIKE_LENGTH``
+      stretch at ``SPIKE_FACTOR`` x the mean depth, placed clear of every
+      planted site.
+
+    Example (longitudinal, 16 samples, two MAGs of two contigs): 12 standing
+    sites, 1 lone + 3 block de novo sites, carrier_samples = the four
+    ``treatment_subj*_post`` ids, standing_mouse = ``subj1`` (its pre and post
+    samples, 15 % of reads), strain_swap on ``treatment_subj8_post``, spikes in
+    ``control_subj1_pre`` and ``control_subj2_post``.
+    """
+    if data_type not in ("single", "longitudinal"):
+        raise ValueError(f"data_type must be single or longitudinal, got {data_type!r}")
+    groups = _ordered_unique(s["group"] for s in samples)
+    if len(groups) != 2:
+        raise ValueError(f"the plan needs exactly two groups, got {groups}")
+    control, treatment = groups
+    timepoints = _ordered_unique(s["time"] for s in samples)
+    later = timepoints[-1]
+
+    # Which samples carry the rising allele: the treatment group at the later
+    # timepoint (longitudinal) or simply the treatment group (single).
+    carriers = [s for s in samples if s["group"] == treatment and s["time"] == later]
+    controls = [s for s in samples if s["group"] == control]
+    if not carriers or len(controls) < 2:
+        raise ValueError(
+            "the plan needs treatment samples at the later timepoint and two control samples"
+        )
+
+    seq_of = {
+        (mag["mag_id"], contig["contig_id"]): contig["sequence"]
+        for mag in mags
+        for contig in mag["contigs"]
+    }
+    len_of = {key: len(seq) for key, seq in seq_of.items()}
+
+    def site(mag_id, contig_id, pos, kind, label, **extra):
+        ref = seq_of[(mag_id, contig_id)][pos]
+        return {
+            "mag": mag_id,
+            "contig": contig_id,
+            "position": pos,
+            "ref_base": ref,
+            "rising_allele": BASES[(BASES.index(ref) + 1) % 4],
+            "kind": kind,
+            "label": label,
+            **extra,
+        }
+
+    taken = set()  # (mag, contig, pos) already used by a plant
+    sites = []
+
+    if data_type == "longitudinal":
+        # The block goes on the longest contig (it needs 2 x spacing of room);
+        # the lone allele on the longest OTHER contig, so they can never share
+        # a cluster key (MAG x contig).
+        by_length = sorted(len_of, key=lambda k: len_of[k], reverse=True)
+        if len(by_length) < 2:
+            raise ValueError("the longitudinal plan needs at least two contigs")
+        (block_mag, block_contig), (lone_mag, lone_contig) = by_length[0], by_length[1]
+        block_len = len_of[(block_mag, block_contig)]
+        room = block_len - 2 * MIN_PLANT_MARGIN - 2 * BLOCK_SPACING_BP
+        if room < 1:
+            raise ValueError(
+                f"contig {block_contig} ({block_len} bp) is too short for a "
+                f"block of three sites {BLOCK_SPACING_BP} bp apart"
+            )
+        start = random.randint(MIN_PLANT_MARGIN, MIN_PLANT_MARGIN + room - 1)
+        for k in range(3):
+            pos = start + k * BLOCK_SPACING_BP
+            sites.append(
+                site(block_mag, block_contig, pos, "de_novo", "block", block_index=k)
+            )
+            taken.add((block_mag, block_contig, pos))
+        lone_len = len_of[(lone_mag, lone_contig)]
+        lone_pos = random.randint(MIN_PLANT_MARGIN, lone_len - MIN_PLANT_MARGIN - 1)
+        sites.append(site(lone_mag, lone_contig, lone_pos, "de_novo", "lone"))
+        taken.add((lone_mag, lone_contig, lone_pos))
+        standing_kind = "standing"
+    else:
+        standing_kind = "shift"
+
+    # The remaining listed sites, spread over every contig.
+    free = [p for p in _all_positions(mags) if p not in taken]
+    for key in sorted(random.sample(free, n_standing)):
+        sites.append(site(*key, standing_kind, standing_kind))
+        taken.add(key)
+    # Stable order for the card: by MAG, contig, position.
+    sites.sort(key=lambda s: (s["mag"], s["contig"], s["position"]))
+
+    # Depth spikes: two control samples, each one stretch clear of every plant.
+    spike_samples = [controls[0]["sample_id"], controls[-1]["sample_id"]]
+    spike_depth = SPIKE_FACTOR * (coverage_range[0] + coverage_range[1]) // 2
+    spikes = []
+    for sample_id, (mag_id, contig_id) in zip(spike_samples, sorted(len_of)):
+        length = len_of[(mag_id, contig_id)]
+        for _ in range(1000):  # placement attempts
+            start = random.randint(
+                MIN_PLANT_MARGIN, length - MIN_PLANT_MARGIN - SPIKE_LENGTH
+            )
+            stretch = range(start, start + SPIKE_LENGTH)
+            if not any((mag_id, contig_id, p) in taken for p in stretch):
+                break
+        else:
+            raise ValueError(
+                f"could not place a depth spike on {contig_id} clear of the plants"
+            )
+        spikes.append(
+            {
+                "sample_id": sample_id,
+                "mag": mag_id,
+                "contig": contig_id,
+                "start": start,
+                "end": start + SPIKE_LENGTH,  # half-open, like gene coordinates
+                "depth": spike_depth,
+            }
+        )
+
+    # Strain swap: the last carrier's consensus rotates at SWAP_FRACTION of each
+    # contig's positions, never at a planted site.
+    swap_sample = carriers[-1]
+    swap_positions: Dict[str, Dict[str, List[int]]] = {}
+    n_swap = 0
+    for (mag_id, contig_id), length in sorted(len_of.items()):
+        candidates = [p for p in range(length) if (mag_id, contig_id, p) not in taken]
+        n = round(SWAP_FRACTION * length)
+        chosen = sorted(random.sample(candidates, n))
+        swap_positions.setdefault(mag_id, {})[contig_id] = chosen
+        n_swap += n
+
+    truth = {
+        "data_type": data_type,
+        "groups": {"control": control, "treatment": treatment},
+        "timepoints": timepoints,
+        "collection_dates": collection_dates_for(timepoints),
+        "rising_allele_rule": "the next base after ref_base in the A,T,G,C cycle",
+        "shift_rising_fraction": SHIFT_RISING_FRACTION,
+        "n_standing": n_standing,
+        "block_spacing_bp": BLOCK_SPACING_BP,
+        "carrier_samples": [s["sample_id"] for s in carriers],
+        "significant_sites": sites,
+        "strain_swap": {
+            "sample_id": swap_sample["sample_id"],
+            "subjectID": swap_sample["subjectID"],
+            "timepoint": swap_sample["time"],
+            "fraction": SWAP_FRACTION,
+            "n_positions": n_swap,
+            "positions": swap_positions,
+        },
+        "depth_spikes": spikes,
+    }
+    if data_type == "longitudinal":
+        # The first control mouse, every one of its samples: the standing
+        # allele is a stable minority there, not a pre-only visitor.
+        subject = controls[0]["subjectID"]
+        truth["standing_mouse"] = {
+            "subjectID": subject,
+            "sample_ids": [
+                s["sample_id"] for s in controls if s["subjectID"] == subject
+            ],
+            "fraction": STANDING_FRACTION,
+        }
+    return truth
+
+
 def write_metadata(
     samples: List[Dict],
     output_path: Path,
     *,
     path_resolver: Callable[[Dict], Path],
+    collection_dates: Dict[str, str],
 ) -> None:
     """Write the sample metadata TSV that AlleleFlux reads at startup.
 
@@ -444,85 +698,121 @@ def write_metadata(
     laptops, HPC clusters) without re-running the generator — which the
     earlier absolute-path design forbade.
     """
+    # collection_date is one of the pipeline's optional metadata columns
+    # (ISO YYYY-MM-DD, validated at alleleflux-metadata); every sample of a
+    # timepoint shares that timepoint's date, see collection_dates_for.
     with open(output_path, "w") as f:
-        f.write("sample_id\tbam_path\tsubjectID\tgroup\treplicate\ttime\n")
+        f.write(
+            "sample_id\tbam_path\tsubjectID\tgroup\treplicate\ttime\tcollection_date\n"
+        )
         for sample in samples:
             bam_path = path_resolver(sample)
             f.write(
                 f"{sample['sample_id']}\t{bam_path}\t{sample['subjectID']}\t"
-                f"{sample['group']}\t{sample['replicate']}\t{sample['time']}\n"
+                f"{sample['group']}\t{sample['replicate']}\t{sample['time']}\t"
+                f"{collection_dates[sample['time']]}\n"
             )
     logger.info(f"Wrote metadata: {output_path}")
+
+
+def _background_counts(
+    dominant_base: str, coverage: int, noise_bases: List[str]
+) -> Dict[str, int]:
+    """Monomorphic-with-noise counts: the dominant base takes 85-98 % of the
+    reads, the leftover is scattered over ``noise_bases`` at <= 3 reads each.
+
+    random.uniform(0.85, 0.98) keeps every position below a variant caller's
+    minor-allele threshold but leaves a sliver of background reads.  The
+    3-read cap keeps each minor count below the usual polymorphism threshold
+    so it reads as sequencer noise.  The realised depth can fall a few reads
+    short of ``coverage`` when the minor rolls land on 0; total_coverage is
+    recomputed from the counts downstream, so the row stays consistent.
+
+    Example: dominant A, coverage 50, noise over T/G/C -> A=46 T=2 G=1 C=0.
+    """
+    counts = {"A": 0, "T": 0, "G": 0, "C": 0}
+    dominant_count = int(coverage * random.uniform(0.85, 0.98))
+    counts[dominant_base] = dominant_count
+    remaining = coverage - dominant_count
+    for b in noise_bases:
+        if remaining > 0:
+            c = random.randint(0, min(remaining, 3))
+            counts[b] = c
+            remaining -= c
+    return counts
 
 
 def generate_profile_data(
     sample: Dict,
     mags: List[Dict],
-    coverage_range: Tuple[int, int] = (20, 80),
-    treatment_effect_rate: float = 0.08,
+    coverage_range: Tuple[int, int] = DEFAULT_COVERAGE_RANGE,
+    *,
+    truth: Dict,
 ) -> Dict[str, List[str]]:
     """Simulate the per-position allele count table for one sample.
 
     This is the core function. It mimics what alleleflux-profile produces from
-    a BAM file, but without any reads or alignment. For each genomic position
-    it directly constructs the counts (A, C, G, T) that a pileup would return.
+    a BAM file, but without any reads or alignment: for each genomic position
+    it constructs the counts (A, C, G, T) a pileup would return.  What happens
+    at a position is decided by the planted-truth card from ``plan_the_plants``
+    -- nothing significant is left to a coin flip, so every fact the card
+    records is really in the profiles and nothing else is.
 
-    Reference base assignment
-    -------------------------
-    The reference base at each position is read directly from the contig's
-    forward-strand sequence (see create_mag_structure): intergenic positions
-    carry the random background; positions inside a gene carry the embedded
-    gene-derived bases (reverse-complemented where strand == -1).
+    Reference base: read from the contig's forward-strand sequence built once
+    in create_mag_structure, so every sample shares the same ref_base and the
+    profiles agree with prodigal_genes.fna (no dN/dS mismatch warnings).
 
-    Because contig.sequence is built once and reused across every sample, the
-    same position always gets the same ref_base across all samples — which is
-    what AlleleFlux expects (the reference genome doesn't change between
-    samples). This also keeps ref_base consistent with prodigal_genes.fna, so
-    dN/dS reconstruction does not see a mismatch warning at every variable site.
+    Per position, in this order of precedence:
 
-    Allele count model
-    ------------------
-    For each position, one allele is designated "dominant". It receives
-    85–98% of the coverage; the remaining 2–15% reads are distributed randomly
-    among the other three bases (capped at 3 reads each to simulate low-level
-    sequencing noise rather than real polymorphism).
+    1. **Planted significant site** (``truth["significant_sites"]``):
+       - in a *carrier sample* (treatment at the later timepoint) the
+         ``rising_allele`` takes ``shift_rising_fraction`` (0.48) of the reads
+         and the reference the rest, no noise: ref A, coverage 50 ->
+         A=26 T=24.  The consensus stays A, so the ANI step sees no strain
+         change; the frequency change (about -0.4 against the ~0.9 baseline)
+         is what the paired tests detect;
+       - in the ``standing_mouse`` samples (one control mouse, pre and post),
+         at a *standing* site, the rising allele gets ``fraction`` (0.15) of at
+         least 40 reads and the reference the rest: A=34 T=6 -> present at
+         baseline unambiguously, and unchanged in that mouse over time;
+       - in every other sample the reference is dominant with the usual noise
+         on the two bases that are NEITHER ref NOR rising, and the rising
+         allele has exactly 0 reads: a de novo allele is absent everywhere it
+         should be, and a standing one is present in exactly one baseline mouse.
+    2. **Strain swap** (``truth["strain_swap"]``, that sample only): at the
+       listed positions the dominant base is rotated one step in the BASES
+       cycle (ref A -> dominant T) with the usual noise -- a consensus change,
+       which is what conANI counts.
+    3. **Depth spike** (``truth["depth_spikes"]``, that sample only): coverage
+       is the planted ``depth`` instead of a draw from ``coverage_range``;
+       counts are otherwise background.
+    4. **Background** everywhere else: reference dominant, noise on the other
+       three bases.
 
-    Treatment effect — the allele shift
-    ------------------------------------
-    ONLY in samples where group == "treatment" AND time == "post" does the
-    dominant allele have a chance of shifting.
-
-    At each position, a Bernoulli draw with p = treatment_effect_rate (default
-    0.08, i.e. 8%) decides whether the shift happens:
-
-      if is_treatment and is_post and random.random() < 0.08:
-          ref_idx = BASES.index(ref_base)
-          dominant_base = BASES[(ref_idx + 1) % 4]   # rotate one step forward
-
-    The rotation mapping (in the BASES = [A, T, G, C] cycle):
-      ref A → dominant becomes T
-      ref T → dominant becomes G
-      ref G → dominant becomes C
-      ref C → dominant becomes A  (wraps around)
-
-    Concrete example — position with ref_base = A, coverage = 50:
-      All other samples:               A=44  T=2  G=1  C=0   (A frequency ≈ 0.88)
-      treatment_subj3_post (shifted):  T=46  A=2  G=1  C=0   (A frequency ≈ 0.04)
-
-    AlleleFlux computes Δ = post_freq − pre_freq per subject, then tests
-    whether those deltas differ between groups. At this position, the treatment
-    group has Δ_A ≈ 0.04 − 0.88 = −0.84, while the control group has
-    Δ_A ≈ 0.88 − 0.88 = 0 → a large, detectable difference.
-
-    The shift is applied independently and randomly at each position, so ~8%
-    of all positions in treatment post-timepoint samples carry this signal.
-
-    Returns
-    -------
-    dict mapping mag_id → list of tab-separated row strings (one per position)
+    Returns dict mapping mag_id -> list of tab-separated row strings.
     """
-    is_treatment = sample["group"] == "treatment"
-    is_post = sample["time"] == "post"
+    sample_id = sample["sample_id"]
+    is_carrier = sample_id in truth["carrier_samples"]
+    standing = truth.get("standing_mouse") or {}
+    is_standing_mouse = sample_id in standing.get("sample_ids", ())
+    standing_fraction = standing.get("fraction", 0.0)
+
+    # Lookups for this sample, built once per call (a few hundred entries).
+    site_at = {(s["contig"], s["position"]): s for s in truth["significant_sites"]}
+    swap = truth["strain_swap"]
+    swap_at = set()
+    if swap["sample_id"] == sample_id:
+        swap_at = {
+            (contig, pos)
+            for contigs in swap["positions"].values()
+            for contig, positions in contigs.items()
+            for pos in positions
+        }
+    spike_depth_at = {}
+    for spike in truth["depth_spikes"]:
+        if spike["sample_id"] == sample_id:
+            for pos in range(spike["start"], spike["end"]):
+                spike_depth_at[(spike["contig"], pos)] = spike["depth"]
 
     profiles = {}
 
@@ -531,6 +821,7 @@ def generate_profile_data(
 
         for contig in mag["contigs"]:
             contig_seq = contig["sequence"]
+            contig_id = contig["contig_id"]
             # Pre-build a flat list of (start, end, gene_id) for O(n) gene lookup.
             # end is the half-open upper bound: gene occupies [start, end).
             gene_ranges = [
@@ -539,73 +830,53 @@ def generate_profile_data(
             ]
 
             for pos in range(contig["length"]):
-                coverage = random.randint(*coverage_range)
-
-                # Reference base is whatever was baked into the contig sequence
-                # at this position by create_mag_structure (random background
-                # for intergenic, embedded gene bases for genic positions).
+                key = (contig_id, pos)
+                coverage = spike_depth_at.get(key) or random.randint(*coverage_range)
                 ref_base = contig_seq[pos]
-                dominant_base = ref_base
+                site = site_at.get(key)
 
-                # ---- Treatment effect ----------------------------------------
-                # Independently for each position, flip a biased coin. If it
-                # lands heads (prob = treatment_effect_rate), rotate the dominant
-                # allele one step forward in the BASES cycle relative to ref_base.
-                # This only fires for treatment post-timepoint samples.
-                #
-                # Why `< treatment_effect_rate`:
-                #   random.random() returns a uniform float in [0.0, 1.0). The
-                #   fraction of that range below `p` is exactly `p`, so the
-                #   probability of `random.random() < p` being True is `p`.
-                #   With p = 0.08, ~8% of positions in treatment-post samples
-                #   get the shift; ~92% pass through unchanged. The threshold
-                #   IS the probability — never use `>` here, that's 1 - p.
-                #
-                # Why `(ref_idx + 1) % 4`:
-                #   BASES has 4 elements (indices 0..3). The `+1` walks one step
-                #   forward in the cycle; `% 4` wraps C (index 3) → A (index 0)
-                #   instead of crashing with IndexError on `BASES[4]`. This
-                #   is the standard "circular index" idiom.
-                if is_treatment and is_post and random.random() < treatment_effect_rate:
-                    ref_idx = BASES.index(ref_base)
-                    dominant_base = BASES[(ref_idx + 1) % 4]
-                # --------------------------------------------------------------
+                if site is not None:
+                    rising = site["rising_allele"]
+                    if is_carrier:
+                        # Rising allele just under half, reference the rest, no
+                        # noise.  The cap keeps rising STRICTLY below ref: at
+                        # even depths <= 24, round(0.48 x depth) equals half the
+                        # depth and the consensus would be a tie.
+                        rising_n = min(
+                            round(coverage * truth["shift_rising_fraction"]),
+                            (coverage - 1) // 2,
+                        )
+                        counts = {"A": 0, "T": 0, "G": 0, "C": 0}
+                        counts[rising] = rising_n
+                        counts[ref_base] = coverage - rising_n
+                    elif is_standing_mouse and site["kind"] == "standing":
+                        coverage = max(coverage, STANDING_MIN_COVERAGE)
+                        standing_n = round(coverage * standing_fraction)
+                        counts = {"A": 0, "T": 0, "G": 0, "C": 0}
+                        counts[rising] = standing_n
+                        counts[ref_base] = coverage - standing_n
+                    else:
+                        # Reference dominant; noise only on the bases that are
+                        # neither ref nor rising, so the rising allele is 0.
+                        noise_bases = [b for b in BASES if b not in (ref_base, rising)]
+                        counts = _background_counts(ref_base, coverage, noise_bases)
+                elif key in swap_at:
+                    dominant_base = BASES[(BASES.index(ref_base) + 1) % 4]
+                    counts = _background_counts(
+                        dominant_base,
+                        coverage,
+                        [b for b in BASES if b != dominant_base],
+                    )
+                else:
+                    counts = _background_counts(
+                        ref_base, coverage, [b for b in BASES if b != ref_base]
+                    )
+                    if key in spike_depth_at:
+                        # A spike must realise EXACTLY the planted depth (the
+                        # test and the site filter both read it), so the reads
+                        # the noise rounding dropped go back to the reference.
+                        counts[ref_base] += coverage - sum(counts.values())
 
-                counts = {"A": 0, "T": 0, "G": 0, "C": 0}
-
-                # The dominant allele captures the vast majority of reads.
-                # random.uniform(0.85, 0.98) is a uniform float draw on [0.85, 0.98]
-                # — every value in that band is equally likely. The band is chosen
-                # to land below typical variant-caller minor-allele thresholds
-                # (so positions look monomorphic-with-noise, not bi-allelic) but
-                # above ~99% so a sliver of reads remains for realistic background.
-                dominant_count = int(coverage * random.uniform(0.85, 0.98))
-                counts[dominant_base] = dominant_count
-                remaining = coverage - dominant_count
-
-                # Distribute leftover reads among the three non-dominant bases.
-                # min(remaining, 3) is a TWO-JOB ceiling:
-                #   - the `3` is a biological cap — keeps each minor allele count
-                #     below the typical 3-read polymorphism threshold so they
-                #     read as sequencer noise, not a real variant.
-                #   - the `remaining` is arithmetic safety — never roll more
-                #     than the unspent budget. Whichever is smaller wins.
-                other_bases = [b for b in BASES if b != dominant_base]
-                for b in other_bases:
-                    if remaining > 0:
-                        c = random.randint(0, min(remaining, 3))
-                        counts[b] = c
-                        remaining -= c
-
-                # NOTE: total_coverage may be < `coverage`. Each minor roll can
-                # land on 0, so unspent budget can leak; in the worst case all
-                # three minor bases roll 0 and `coverage - dominant_count` reads
-                # are "lost". The profile remains internally consistent because
-                # we compute total_coverage from the counts (not from the input
-                # `coverage`), but the realized depth can be a few reads below
-                # what was drawn. Tolerated as realistic noise; fix by adding
-                # `counts[dominant_base] += remaining` before the sum if exact
-                # depth preservation is needed.
                 total_coverage = counts["A"] + counts["C"] + counts["G"] + counts["T"]
 
                 # Find which gene (if any) this position falls inside.
@@ -650,32 +921,36 @@ def write_profiles(
 
 
 def generate_significant_sites(
-    mags: List[Dict], output_path: Path, num_sites_per_gene: int = 5
+    truth: Dict, mags: List[Dict], output_path: Path
 ) -> None:
     """Write a mock significant-sites table for visualisation testing.
 
-    These sites are randomly sampled from gene bodies with fabricated p-values.
-    They are NOT derived from running statistical tests — they exist solely so
-    that visualisation tools (e.g. alleleflux-terminal-nuc-analysis) have
-    something to display without requiring a full pipeline run first.
+    One row per planted significant site from the card, with a fixed
+    placeholder p-value.  The rows are NOT derived from running statistical
+    tests -- they exist so that visualisation tools (e.g.
+    alleleflux-terminal-nuc-analysis) have something to display without a
+    full pipeline run first -- but they now name the positions that really
+    ARE significant in the generated data, instead of random gene positions.
     """
+    gene_at = {}
+    for mag in mags:
+        for contig in mag["contigs"]:
+            for gene in contig["genes"]:
+                for pos in range(gene["start"], gene["end"]):
+                    gene_at[(contig["contig_id"], pos)] = gene["gene_id"]
+    test_type = (
+        "two_sample_paired_tTest"
+        if truth["data_type"] == "longitudinal"
+        else "two_sample_unpaired_tTest"
+    )
     with open(output_path, "w") as f:
         f.write("mag_id\tcontig\tposition\tgene_id\ttest_type\tmin_p_value\tq_value\n")
-        for mag in mags:
-            for contig in mag["contigs"]:
-                for gene in contig["genes"]:
-                    n = min(num_sites_per_gene, gene["end"] - gene["start"])
-                    positions = sorted(
-                        random.sample(range(gene["start"], gene["end"]), n)
-                    )
-                    for pos in positions:
-                        p_val = random.uniform(1e-7, 1e-4)
-                        q_val = p_val * random.uniform(5, 20)
-                        f.write(
-                            f"{mag['mag_id']}\t{contig['contig_id']}\t{pos}\t"
-                            f"{gene['gene_id']}\ttwo_sample_paired_tTest\t"
-                            f"{p_val:.2e}\t{q_val:.2e}\n"
-                        )
+        for site in truth["significant_sites"]:
+            gene_id = gene_at.get((site["contig"], site["position"]), "")
+            f.write(
+                f"{site['mag']}\t{site['contig']}\t{site['position']}\t"
+                f"{gene_id}\t{test_type}\t1.00e-06\t1.00e-05\n"
+            )
     logger.info(f"Wrote significant sites: {output_path}")
 
 
@@ -724,6 +999,81 @@ def write_config(
         dnds_test_type = "two_sample_unpaired_tTest"
     else:
         dnds_test_type = "two_sample_paired_tTest"
+
+    # ---- data-type-specific feature block ------------------------------------
+    # Every feature the data type supports is switched ON, so the regression
+    # run exercises the whole surface and the planted facts have somewhere to
+    # surface.  The four longitudinal-only features (dN/dS, regional contrast,
+    # baseline presence, strain turnover) are written as explicit False on
+    # single data: the workflow refuses an explicit True there at parse time,
+    # and an explicit False reads clearer than a missing key.
+    if data_type == "longitudinal":
+        longitudinal_block = """  use_dnds: True
+  # Regional contrast is experimental (not in the publication): stays off.
+  use_regional_contrast: False
+  # Pairwise conANI/popANI between each mouse's pre and post sample; the
+  # strain-swapped mouse (planted_truth.json: strain_swap) is the one pair
+  # whose conANI falls below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "within_subject"
+    store_snp_locations: "within_subject"
+  use_strain_turnover: True
+  strain_turnover:
+    min_compared: 0.1
+    pop_threshold: 0.99999
+    con_threshold: 0.999
+    # 4 mice per group: the real-cohort floor of 8 voters would leave every
+    # verdict blank (too_few_voters), so the test data votes with 2.
+    min_voters: 2
+    vote_rule: "majority"
+    tie: "not_replaced"
+    replicate_rule: "average"
+  # Standing vs de novo for every significant site of the paired t-test, judged
+  # against every sample dated before the first carrier (cohort scope; the
+  # metadata carries collection_date), with the carrier-level strain gate.
+  use_baseline_presence: True
+  baseline_presence:
+    summary: "two_sample_paired"
+    test_type: "two_sample_paired_tTest"
+    threshold_column: "q_value"
+    threshold: 0.05
+    baseline_scope: "cohort"
+    cluster_window_bp: 1000
+    max_de_novo_neighbours: 0
+    strain_gate: "carrier"
+    # The planted de novo alleles have 4 carriers, but a lone allele carried by
+    # fewer than 3 determined mice would be strain_undetermined at the house
+    # default; 1 keeps every carried allele judgeable on this small design.
+    min_determined_carriers: 1
+  # Score heatmaps, boxplots and the HTML run report (images; excluded from
+  # the regression comparison, but the rules run).
+  figures:
+    enabled: True"""
+    else:
+        longitudinal_block = """  # Longitudinal-only features: single data has no earlier timepoint.
+  use_dnds: False
+  use_regional_contrast: False
+  use_baseline_presence: False
+  use_strain_turnover: False
+  # Pairwise conANI/popANI between EVERY pair of samples (the between-mouse
+  # strain-sharing question; the only mode with a meaning on one timepoint).
+  # The planted divergent sample (planted_truth.json: strain_swap) is the one
+  # whose pairs all fall below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "all"
+    store_snp_locations: "none"
+  # Off until the score-figure loader handles a single-timepoint CMH table
+  # (it reports a score/summary MAG mismatch for cmh at t1).
+  figures:
+    enabled: False"""
 
     # ---- mode-specific overrides --------------------------------------------
     # Everything else in the YAML is shared. Tweak just these five values plus
@@ -794,18 +1144,19 @@ log_level: "INFO"
 analysis:
   data_type: "{data_type}"
   allele_analysis_only: False
-  # LMM and CMH require more replicates than the small example provides.
-  # Enable them when you generate larger datasets.
+  # Every feature the data type supports is ON (the bundled dataset is the
+  # regression test's input; planted_truth.json says what each should find),
+  # with one exception: LMM.  On this 4-mice-per-group design it took ~58
+  # CPU-minutes for two 5 kb genomes (every other step together: ~10) and
+  # called a third of all positions significant, so it is off here; its own
+  # unit tests cover it.  The within-group across-time tests run
+  # (run_within_group_tests default).
   use_lmm: False
   use_significance_tests: True
-  use_cmh: False
-  # Regional contrast requires min_replicates per group (default 4). The small
-  # synthetic dataset has only 2 subjects per group by default, so this is
-  # off out of the box — enable it after generating a larger dataset
-  # (e.g. --num_samples 20 in longitudinal mode → 5 subjects per group).
-  use_regional_contrast: False
-  use_gene_scores: False
-  use_outlier_detection: False
+  use_cmh: True
+  use_gene_scores: True
+  use_outlier_detection: True
+{longitudinal_block}
 
   taxa_score_levels:
     - phylum
@@ -824,6 +1175,15 @@ quality_control:
   breadth_threshold: 0.1
   coverage_threshold: 1
   disable_zero_diff_filtering: False
+  # MIDAS2's per-site depth rule.  The two planted depth spikes
+  # (planted_truth.json: depth_spikes) sit at 10x the sample mean, so the
+  # 3.0x ceiling must remove exactly those positions for those samples.
+  site_depth_filter:
+    enabled: True
+    site_depth: 0
+    site_ratio: 3.0
+    min_allele_reads: 0
+    keep_original_counts: True
 
 profiling:
   ignore_orphans: True
@@ -866,6 +1226,172 @@ resources:
         f.write(config)
     logger.info(f"Wrote config ({mode} mode): {config_path}")
     return config_path
+
+
+def generate_dataset(
+    output_dir,
+    *,
+    data_type: str = "longitudinal",
+    num_mags: int = 2,
+    num_samples: int = 8,
+    num_contigs: int = 2,
+    genes_per_contig: int = 3,
+    contig_length_range: Tuple[int, int] = (800, 2000),
+    groups: Optional[List[str]] = None,
+    timepoints: Optional[List[str]] = None,
+    seed: int = 42,
+    coverage_range: Tuple[int, int] = DEFAULT_COVERAGE_RANGE,
+) -> Dict:
+    """Generate one complete dataset into ``output_dir`` and return its card.
+
+    This is ``main`` without the argument parsing, so tests and other scripts
+    can build a dataset in a temp folder.  Steps, in order: seed both RNGs
+    (every plant and every noise draw is reproducible from ``seed`` alone);
+    build the MAG structures and reference files; build the sample sheet; plan
+    the plants (the card); write both metadata files (profile mode and BAM
+    mode, each with ``collection_date``); write every sample's profiles from
+    the card; write the mock significant-sites table, the two configs, the
+    README and ``planted_truth.json``.
+
+    Example: ``generate_dataset(Path("ds"), data_type="longitudinal",
+    num_samples=16, seed=11)`` writes 16 sample folders under ``ds/profiles/``
+    and returns the same dict that ``ds/planted_truth.json`` holds.
+    """
+    if groups is None:
+        groups = ["control", "treatment"]
+    if timepoints is None:
+        timepoints = ["t1"] if data_type == "single" else ["pre", "post"]
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    # Resolve to absolute so the README's "cd" line points at a real location
+    # whatever the caller's cwd was; configs and metadata stay RELATIVE.
+    output_dir = Path(output_dir).resolve()
+    for subdir in ["reference", "metadata", "profiles", "significant_sites"]:
+        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Generating synthetic data in: {output_dir}")
+    logger.info(f"{num_mags} MAGs, {num_samples} samples, {data_type} design")
+
+    # --- MAG structures -------------------------------------------------
+    mags = []
+    for i in range(num_mags):
+        mag_id = f"MAG_{i+1:03d}"  # zero-padded: MAG_001, MAG_002, ...
+        mags.append(
+            create_mag_structure(
+                mag_id,
+                num_contigs=num_contigs,
+                contig_length_range=contig_length_range,
+                genes_per_contig=genes_per_contig,
+            )
+        )
+
+    # --- Reference files ------------------------------------------------
+    write_reference_fasta(mags, output_dir / "reference" / "combined_mags.fasta")
+    write_prodigal_genes(mags, output_dir / "reference" / "prodigal_genes.fna")
+    write_mag_mapping(mags, output_dir / "reference" / "mag_mapping.tsv")
+    write_gtdb_taxonomy(mags, output_dir / "reference" / "gtdbtk_taxonomy.tsv")
+
+    # --- Sample structure and the planted-truth card --------------------
+    samples = generate_sample_structure(
+        num_samples, groups=groups, timepoints=timepoints, data_type=data_type
+    )
+    truth = plan_the_plants(mags, samples, data_type, coverage_range=coverage_range)
+    truth["seed"] = seed
+
+    profiles_dir = output_dir / "profiles"
+    # Profile-mode metadata: bam_path points at the per-sample profile directory,
+    # written RELATIVE to example_dir so the dataset is portable.  Pipeline
+    # convention is to cd into example_dir before invoking, so "profiles/<id>"
+    # resolves correctly against cwd.
+    write_metadata(
+        samples,
+        output_dir / "metadata" / "sample_metadata.tsv",
+        path_resolver=lambda s: Path("profiles") / s["sample_id"],
+        collection_dates=truth["collection_dates"],
+    )
+    # BAM-mode metadata: bam_path points at bams/<sample>.bam, relative to
+    # example_dir (same convention as the profile-mode metadata above).  BAMs
+    # don't exist yet (user runs generate_bams.sh after this); the file is
+    # written eagerly so the BAM-mode config can reference it without a second
+    # invocation.  The pipeline validates BAM existence at runtime.  NOTE: the
+    # BAMs are simulated from the unmodified reference, so none of the planted
+    # facts reach them -- BAM mode exercises profiling, not the plants.
+    write_metadata(
+        samples,
+        output_dir / "metadata" / "sample_metadata_bams.tsv",
+        path_resolver=lambda s: Path("bams") / f"{s['sample_id']}.bam",
+        collection_dates=truth["collection_dates"],
+    )
+
+    # --- Profiles (the slow step for large datasets) --------------------
+    logger.info(f"Generating profiles for {len(samples)} samples...")
+    for i, sample in enumerate(samples):
+        # Throttle progress logs: every 10th sample plus the final one, so a
+        # 17-sample run logs "10/17" and then "17/17" instead of going silent.
+        if (i + 1) % 10 == 0 or i == len(samples) - 1:
+            logger.info(f"  {i+1}/{len(samples)}: {sample['sample_id']}")
+        profiles = generate_profile_data(
+            sample, mags, coverage_range=coverage_range, truth=truth
+        )
+        write_profiles(sample, profiles, profiles_dir)
+
+    # --- Ancillary files ------------------------------------------------
+    generate_significant_sites(
+        truth, mags, output_dir / "significant_sites" / "significant_sites.tsv"
+    )
+    config_path = write_config(
+        output_dir, data_type, groups, timepoints, mode="profiles"
+    )
+    config_bams_path = write_config(
+        output_dir, data_type, groups, timepoints, mode="bams"
+    )
+
+    # The card: the only writer is this function, the readers are the tests.
+    card_path = output_dir / "planted_truth.json"
+    card_path.write_text(json.dumps(truth, indent=2, sort_keys=True) + "\n")
+    logger.info(f"Wrote planted-truth card: {card_path}")
+
+    # Write a minimal README next to the generated data showing BOTH run paths.
+    # Configs use relative paths anchored at example_dir, so the pipeline must
+    # be invoked from inside this directory (or with cwd set to it).
+    config_basename = config_path.name
+    config_bams_basename = config_bams_path.name
+    readme = (
+        f"# Generated AlleleFlux Test Data\n\n"
+        f"Seed: {seed} | MAGs: {num_mags} | "
+        f"Samples: {len(samples)} ({data_type})\n\n"
+        f"All paths in the configs and metadata are RELATIVE to this directory.\n"
+        f"`cd` into this directory before running the pipeline.\n\n"
+        f"`planted_truth.json` lists every fact planted in the profiles\n"
+        f"(significant sites, standing / de novo alleles, the strain-swapped\n"
+        f"sample, the depth spikes); the regression test asserts them.\n\n"
+        f"## Option A — pre-generated profiles (fastest; carries the planted facts)\n\n"
+        f"```bash\n"
+        f"cd {output_dir}\n"
+        f"alleleflux run --config {config_basename}\n"
+        f"```\n\n"
+        f"## Option B — full pipeline from BAMs (requires wgsim + bwa)\n\n"
+        f"The BAMs are simulated from the unmodified reference, so this path\n"
+        f"exercises profiling but carries NONE of the planted facts.\n\n"
+        f"```bash\n"
+        f"# 1. Generate BAMs from the reference (one-time)\n"
+        f"bash generate_bams.sh --data-dir {output_dir}\n\n"
+        f"# 2. Run the pipeline (includes profiling step)\n"
+        f"cd {output_dir}\n"
+        f"alleleflux run --config {config_bams_basename}\n"
+        f"```\n"
+    )
+    (output_dir / "README.md").write_text(readme)
+
+    total_size = sum(f.stat().st_size for f in output_dir.rglob("*") if f.is_file())
+    logger.info(f"Done. Total size: {total_size / 1024:.1f} KB")
+    logger.info(
+        f"Run with pre-generated profiles: "
+        f"cd {output_dir} && alleleflux run --config {config_basename}"
+    )
+    return truth
 
 
 def main():
@@ -960,134 +1486,18 @@ def main():
             f"{len(args.timepoints)}: {args.timepoints}"
         )
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-
-    # Resolve to absolute so every path embedded in the generated configs and
-    # metadata is anchored to a real filesystem location, not the user's cwd at
-    # invocation time. Without this, configs like {output_dir}/reference/...
-    # would be relative ("my_bam_test/reference/...") and only resolve correctly
-    # if the pipeline is later invoked from the same cwd as the generator.
-    output_dir = Path(args.output_dir).resolve()
-    for subdir in ["reference", "metadata", "profiles", "significant_sites"]:
-        (output_dir / subdir).mkdir(parents=True, exist_ok=True)
-
-    logger.info(f"Generating synthetic data in: {output_dir}")
-    logger.info(
-        f"{args.num_mags} MAGs, {args.num_samples} samples, {args.data_type} design"
-    )
-
-    # --- MAG structures -------------------------------------------------
-    mags = []
-    for i in range(args.num_mags):
-        mag_id = f"MAG_{i+1:03d}"  # zero-padded: MAG_001, MAG_002, ...
-        mags.append(
-            create_mag_structure(
-                mag_id,
-                num_contigs=args.num_contigs_per_mag,
-                contig_length_range=(args.contig_length_min, args.contig_length_max),
-                genes_per_contig=args.genes_per_contig,
-            )
-        )
-
-    # --- Reference files ------------------------------------------------
-    write_reference_fasta(mags, output_dir / "reference" / "combined_mags.fasta")
-    write_prodigal_genes(mags, output_dir / "reference" / "prodigal_genes.fna")
-    write_mag_mapping(mags, output_dir / "reference" / "mag_mapping.tsv")
-    write_gtdb_taxonomy(mags, output_dir / "reference" / "gtdbtk_taxonomy.tsv")
-
-    # --- Sample structure -----------------------------------------------
-    samples = generate_sample_structure(
-        args.num_samples,
+    generate_dataset(
+        args.output_dir,
+        data_type=args.data_type,
+        num_mags=args.num_mags,
+        num_samples=args.num_samples,
+        num_contigs=args.num_contigs_per_mag,
+        genes_per_contig=args.genes_per_contig,
+        contig_length_range=(args.contig_length_min, args.contig_length_max),
         groups=args.groups,
         timepoints=args.timepoints,
-        data_type=args.data_type,
-    )
-
-    profiles_dir = output_dir / "profiles"
-    # Profile-mode metadata: bam_path points at the per-sample profile directory,
-    # written RELATIVE to example_dir so the dataset is portable.  Pipeline
-    # convention is to cd into example_dir before invoking, so "profiles/<id>"
-    # resolves correctly against cwd.
-    write_metadata(
-        samples,
-        output_dir / "metadata" / "sample_metadata.tsv",
-        path_resolver=lambda s: Path("profiles") / s["sample_id"],
-    )
-    # BAM-mode metadata: bam_path points at bams/<sample>.bam, relative to
-    # example_dir (same convention as the profile-mode metadata above).  BAMs
-    # don't exist yet (user runs generate_bams.sh after this); the file is
-    # written eagerly so the BAM-mode config can reference it without a second
-    # invocation.  The pipeline validates BAM existence at runtime.
-    write_metadata(
-        samples,
-        output_dir / "metadata" / "sample_metadata_bams.tsv",
-        path_resolver=lambda s: Path("bams") / f"{s['sample_id']}.bam",
-    )
-
-    # --- Profiles (the slow step for large datasets) --------------------
-    logger.info(f"Generating profiles for {len(samples)} samples...")
-    for i, sample in enumerate(samples):
-        # Throttle progress logs: print every 10th sample plus the final one.
-        # `(i + 1) % 10 == 0` fires at 1-indexed milestones 10, 20, 30, ...
-        # `i == len(samples) - 1` guarantees a final "N/N" line even when the
-        # total isn't a multiple of 10. Without the second clause a 17-sample
-        # run would log "10/17" and then go silent.
-        if (i + 1) % 10 == 0 or i == len(samples) - 1:
-            logger.info(f"  {i+1}/{len(samples)}: {sample['sample_id']}")
-        profiles = generate_profile_data(
-            sample, mags, coverage_range=(args.coverage_min, args.coverage_max)
-        )
-        write_profiles(sample, profiles, profiles_dir)
-
-    # --- Ancillary files ------------------------------------------------
-    generate_significant_sites(
-        mags, output_dir / "significant_sites" / "significant_sites.tsv"
-    )
-    config_path = write_config(
-        output_dir, args.data_type, args.groups, args.timepoints, mode="profiles"
-    )
-    config_bams_path = write_config(
-        output_dir, args.data_type, args.groups, args.timepoints, mode="bams"
-    )
-
-    # Write a minimal README next to the generated data showing BOTH run paths.
-    # Configs use relative paths anchored at example_dir, so the pipeline must
-    # be invoked from inside this directory (or with cwd set to it).
-    config_basename = config_path.name
-    config_bams_basename = config_bams_path.name
-    readme = (
-        f"# Generated AlleleFlux Test Data\n\n"
-        f"Seed: {args.seed} | MAGs: {args.num_mags} | "
-        f"Samples: {len(samples)} ({args.data_type})\n\n"
-        f"All paths in the configs and metadata are RELATIVE to this directory.\n"
-        f"`cd` into this directory before running the pipeline.\n\n"
-        f"## Option A — pre-generated profiles (fastest)\n\n"
-        f"```bash\n"
-        f"cd {output_dir}\n"
-        f"alleleflux run --config {config_basename}\n"
-        f"```\n\n"
-        f"## Option B — full pipeline from BAMs (requires wgsim + bwa)\n\n"
-        f"```bash\n"
-        f"# 1. Generate BAMs from the reference (one-time)\n"
-        f"bash generate_bams.sh --data-dir {output_dir}\n\n"
-        f"# 2. Run the pipeline (includes profiling step)\n"
-        f"cd {output_dir}\n"
-        f"alleleflux run --config {config_bams_basename}\n"
-        f"```\n"
-    )
-    (output_dir / "README.md").write_text(readme)
-
-    total_size = sum(f.stat().st_size for f in output_dir.rglob("*") if f.is_file())
-    logger.info(f"Done. Total size: {total_size / 1024:.1f} KB")
-    logger.info(
-        f"Run with pre-generated profiles: "
-        f"cd {output_dir} && alleleflux run --config {config_basename}"
-    )
-    logger.info(
-        f"Or generate BAMs + run full pipeline: "
-        f"bash generate_bams.sh --data-dir {output_dir} && "
-        f"cd {output_dir} && alleleflux run --config {config_bams_basename}"
+        seed=args.seed,
+        coverage_range=(args.coverage_min, args.coverage_max),
     )
 
 

@@ -16,6 +16,7 @@ Usage:
     For across_time mode:
     python cmh_test.py --input_df <input.tsv> --preprocessed_df <preprocessed.tsv> --mag_id <MAG> --output_dir <dir> --data_type across_time --group <group_name>
 """
+
 import argparse
 import logging
 import os
@@ -34,6 +35,7 @@ from tqdm import tqdm
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.utilities import (
+    input_has_column,
     load_allele_freq_inputs,
     load_and_filter_data,
     relabel_groups_from_metadata,
@@ -282,8 +284,7 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
     with localconverter(default_converter + pandas2ri.converter):
         ro.globalenv["r_df"] = pivoted_filtered
     # R code is generic: group names are parsed from column names
-    r(
-        f"""
+    r(f"""
         library(tidyr)
         # Convert wide to long format for R
         melted <- pivot_longer(
@@ -299,8 +300,7 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
         tab3d <- xtabs(count ~ group + nucleotide + replicate, data = melted)
         # Run CMH test
         cmh_result <- mantelhaen.test(tab3d, alternative = c("two.sided"), correct=FALSE)$p.value
-        """
-    )
+        """)
     # cmh_result is an R vector of length 1
     cmh_result = ro.globalenv["cmh_result"]
     return cmh_result[0]
@@ -533,14 +533,27 @@ def main() -> None:
         "replicate": "category",
         **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
-    # Permuted run: ensure the per-sample join key is read so the cache can be
-    # relabeled (the usecols-based loaders below would otherwise drop it).  Every
-    # CMH input is the raw allele-freq cache (single/longitudinal/across_time all
-    # read ``_cache_paths_for_combination``), which always carries sample_id, so
-    # this is unconditional — unlike the LMM loader, whose across_time input is
-    # the wide allele_analysis parquet that lacks sample_id and must be probed.
+    # Permuted run: read the join key so the loaded rows can be relabeled from
+    # the permuted sheet (the usecols-based loaders below would otherwise drop
+    # it).  Which key depends on the input: the allele-frequency cache carries
+    # sample_id, but the single-timepoint preprocessed between-groups table
+    # carries subjectID only -- and on single data one subject is one sample,
+    # so subjectID identifies the row just as well.  Probe the header rather
+    # than assume: demanding a column the file lacks fails the read outright
+    # (seen as "Usecols do not match columns ... ['sample_id']" in a null run
+    # on single data, 2026-10-30).
+    relabel_key = None
     if args.permuted_metadata:
-        dtype_map["sample_id"] = str
+        for candidate in ("sample_id", "subjectID"):
+            if input_has_column(args.input_df, candidate):
+                relabel_key = candidate
+                break
+        if relabel_key is None:
+            raise ValueError(
+                "--permuted_metadata needs a per-sample join key in the input "
+                f"(sample_id or subjectID); {args.input_df} has neither."
+            )
+        dtype_map[relabel_key] = str
 
     # Load and possibly filter data
     if args.data_type == "single":
@@ -553,7 +566,9 @@ def main() -> None:
             dtype=dtype_map,
         )
         if args.permuted_metadata:
-            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
             if "sample_id" in df.columns:
                 df = df.drop(columns=["sample_id"])
         if args.groups:
@@ -597,7 +612,9 @@ def main() -> None:
                 dtype=dtype_map,
             )
         if args.permuted_metadata:
-            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
             if "sample_id" in df.columns:
                 df = df.drop(columns=["sample_id"])
         if args.groups:
@@ -633,7 +650,9 @@ def main() -> None:
                 dtype=dtype_map,
             )
         if args.permuted_metadata:
-            df = relabel_groups_from_metadata(df, args.permuted_metadata)
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
             if "sample_id" in df.columns:
                 df = df.drop(columns=["sample_id"])
         if args.groups:

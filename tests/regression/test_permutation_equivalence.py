@@ -18,16 +18,19 @@ live** (no committed golden to maintain):
      ``permutation`` enabled, so the cache is reused and ``group`` is relabeled
      in memory.
 
-The statistical outputs of B must equal A within the same float32-aware scope
-the e2e uses (``_scope.STAT_*``).  A sanity assertion also confirms the
-permutation actually *changed* the result vs the normal run (so a no-op
-permutation can't make the gate pass trivially).
+The statistical outputs of B must equal A within the test's own scope
+(``_scope.PERMUTATION_COMPARE_PREFIXES``: the statistics folders, since the
+reuse path keeps label-stale QC summaries and the rebuild keeps the extras by
+design) at the comparator's strict default tolerance.  A
+sanity assertion also confirms the permutation actually *changed* the result
+vs the normal run (so a no-op permutation can't make the gate pass trivially).
 
-To exercise the full reuse-sensitive surface, every run turns on ``use_lmm`` and
-``run_within_group_tests`` (see ``write_cfg``).  This puts the across-time LMM —
-the one stat that relabels from a wide parquet lacking ``sample_id`` — under the
-gate; ``compare.py`` skips the non-deterministic LMM convergence-diagnostic
-columns (``*_warnings`` / ``*_converged_LMM``) so only the science is compared.
+Every run keeps ``run_within_group_tests`` on (see ``write_cfg``) so the
+across-time statistics -- the ones that relabel per-sample columns -- are under
+the gate through single_sample and cmh_across_time.  LMM stays OFF, as in the
+generated configs: on this dataset it costs ~12 minutes per run (three runs per
+scenario here), and the statsmodels optimizer is the one step whose numbers
+wobble between runs; with it off the gate is strict.
 
 Marked ``regression`` (≈3 pipeline runs per scenario, ~2-3 min each); deselected
 from the fast unit loop via ``-m "not regression"``.  Requires the ``alleleflux`` CLI in the
@@ -45,12 +48,7 @@ import yaml
 
 from tests.regression.compare import compare_trees
 from tests.regression.conftest import SCENARIOS
-from tests.regression._scope import (
-    STAT_ALLOW_GOLDEN_ONLY,
-    STAT_ATOL,
-    STAT_COMPARE_ONLY,
-    STAT_RTOL,
-)
+from tests.regression._scope import PERMUTATION_COMPARE_PREFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +93,14 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
 
     def write_cfg(name: str, mutate) -> Path:
         c = yaml.safe_load(yaml.safe_dump(cfg))  # deep copy
-        # Exercise the full reuse-sensitive stat surface in EVERY run
-        # (normal/rebuild/reuse must run the SAME tests to be comparable): turn
-        # on LMM and the within-group across-time tests so the reuse+relabel
-        # path is verified for the sample_id-sensitive across_time stats too —
-        # not just the two-sample path.  (CMH stays at the example default: off,
-        # because mantelhaen is unstable on the example's small replicate counts,
-        # a data constraint orthogonal to the reuse-path equivalence under test.)
+        # normal/rebuild/reuse must run the SAME tests to be comparable.  The
+        # within-group across-time tests stay on so the reuse+relabel path is
+        # verified for the sample_id-sensitive stats (single_sample,
+        # cmh_across_time), not just the two-sample path.  LMM stays off: ~12
+        # minutes per run on this dataset, three runs per scenario, and the
+        # only step whose numbers differ between runs (decision 2026-10-30).
         c.setdefault("analysis", {})
-        c["analysis"]["use_lmm"] = True
+        c["analysis"]["use_lmm"] = False
         c["analysis"]["run_within_group_tests"] = True
         mutate(c)
         p = tmp_path / name
@@ -116,7 +113,10 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
         "config_normal.yml",
         lambda c: c["output"].__setitem__("root_dir", str(normal_out)),
     )
-    _run(["alleleflux", "run", "--config", str(normal_cfg), "--threads", "4"], example_dir)
+    _run(
+        ["alleleflux", "run", "--config", str(normal_cfg), "--threads", "4"],
+        example_dir,
+    )
     normal_data = normal_out / bundle["pipeline_data_dir"]
     assert normal_data.exists(), f"normal run produced no output at {normal_data}"
 
@@ -130,13 +130,21 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
     _run(
         [
             "alleleflux-permute-metadata",
-            "--input", cfg["input"]["metadata_path"],
-            "--output", str(perm_sheet),
-            "--unit", "subjectID",
-            "--block", "replicate",
-            "--swaps", "1",
-            "--groups", treatment, control,
-            "--seed", "5",
+            "--input",
+            cfg["input"]["metadata_path"],
+            "--output",
+            str(perm_sheet),
+            "--unit",
+            "subjectID",
+            "--block",
+            "replicate",
+            "--swaps",
+            "1",
+            "--groups",
+            treatment,
+            control,
+            "--seed",
+            "5",
         ],
         example_dir,
     )
@@ -150,7 +158,10 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
             c["output"].__setitem__("root_dir", str(rebuild_out)),
         ),
     )
-    _run(["alleleflux", "run", "--config", str(rebuild_cfg), "--threads", "4"], example_dir)
+    _run(
+        ["alleleflux", "run", "--config", str(rebuild_cfg), "--threads", "4"],
+        example_dir,
+    )
     rebuild_data = rebuild_out / bundle["pipeline_data_dir"]
 
     # 4. Path B — reuse normal cache + relabel.  A *leaf* config (permuted_metadata_dir
@@ -166,7 +177,9 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
             ),
         ),
     )
-    _run(["alleleflux", "run", "--config", str(reuse_cfg), "--threads", "4"], example_dir)
+    _run(
+        ["alleleflux", "run", "--config", str(reuse_cfg), "--threads", "4"], example_dir
+    )
     reuse_data = reuse_out / bundle["pipeline_data_dir"]
 
     # Surface the three output trees so they can be inspected after the run.
@@ -178,12 +191,9 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
     logger.info(f"[{scenario}]   rebuild (ground truth) : {rebuild_data}")
     logger.info(f"[{scenario}]   reuse   (new way)      : {reuse_data}")
 
-    # GATE: reuse (B) must equal rebuild (A) on the scoped statistical outputs.
+    # GATE: reuse (B) must equal rebuild (A) on the statistical outputs.
     gate = compare_trees(
-        reuse_data, rebuild_data,
-        include_prefixes=STAT_COMPARE_ONLY,
-        allow_golden_only=STAT_ALLOW_GOLDEN_ONLY,
-        rtol=STAT_RTOL, atol=STAT_ATOL,
+        reuse_data, rebuild_data, include_prefixes=PERMUTATION_COMPARE_PREFIXES
     )
     assert not gate, (
         f"reuse+relabel diverged from full rebuild ({len(gate)} file(s)):\n\n"
@@ -193,10 +203,7 @@ def test_permutation_reuse_equals_rebuild(scenario, tmp_path):
     # SANITY: the permutation must actually change the result vs the normal run,
     # otherwise the gate could pass on a no-op permutation.
     sanity = compare_trees(
-        rebuild_data, normal_data,
-        include_prefixes=STAT_COMPARE_ONLY,
-        allow_golden_only=STAT_ALLOW_GOLDEN_ONLY,
-        rtol=STAT_RTOL, atol=STAT_ATOL,
+        rebuild_data, normal_data, include_prefixes=PERMUTATION_COMPARE_PREFIXES
     )
     assert sanity, (
         "permutation produced identical stats to the normal run — the gate "

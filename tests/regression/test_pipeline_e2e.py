@@ -6,47 +6,27 @@ compares every output file to a committed golden snapshot.  Catches any
 change in pipeline behaviour that affects downstream data — including
 silent numerical drift that unit tests cannot see.
 
-Relationship to ``diff_branches.sh``
-------------------------------------
-This file and ``tests/regression/diff_branches.sh`` are siblings, not
-duplicates.  They share the comparator (``compare.py``) and the golden-
-payload helper (``_copy_golden_payload``), but they answer different
-questions about pipeline behaviour.
+Siblings in this folder
+-----------------------
+* ``test_planted_truth.py`` asserts the facts the data generator planted
+  (``planted_truth.json``) are found -- the outputs are RIGHT, where this file
+  proves they did not CHANGE.  Both read the same run (``conftest.pipeline_run``).
+* ``diff_runs.py`` compares any two output trees you made yourself (two
+  branches, two commits) with the same comparator and contract.
 
-* **This file (``test_pipeline_e2e.py``)** — fast, snapshot-based check.
-  Runs the pipeline on the **working tree** (uncommitted changes are
-  visible) ONCE, then diffs against the **frozen** golden snapshot at
-  ``tests/regression/golden/<scenario>/``.  ~50 s per scenario.
-  CI-friendly; the daily inner-loop tool.
-
-* **``diff_branches.sh``** — slow, live cross-branch comparison.  Git-
-  worktrees two refs (default ``main`` vs ``HEAD``), installs each ref's
-  code into its own conda env, runs the pipeline TWICE, then diffs the
-  two output trees directly — no golden round-trip.  Only sees committed
-  code (uncommitted changes are invisible).  ~5 min per scenario.  The
-  canonical "is my refactor output-neutral vs main?" test.
-
-The two golden-capture flags answer different questions and live in
-different files:
-
-* ``--update-golden`` (this file, conftest.py) snapshots from the
-  **CURRENT branch's** outputs.  Use after intentional output changes.
-* ``--capture-golden`` (``diff_branches.sh``) snapshots from **``main``'s**
-  outputs.  Use to drift-correct the golden against the trusted baseline.
-
-See ``tests/regression/README.md`` § "Live vs snapshot" for the full
-side-by-side comparison and decision guide.
+``--update-golden`` snapshots the CURRENT branch's outputs as the new golden;
+use it after an intentional output change and commit the golden with the code.
+See ``tests/regression/README.md``.
 
 Two scenarios are parametrized over via ``conftest.SCENARIOS``:
 
   * ``longitudinal`` — pre/post timepoint design, ``example_data_longitudinal/``
   * ``single``       — single-timepoint design, ``example_data_single/``
 
-Both run the **BAM mode** (``config_with_bams_<dt>.yml``) which exercises
-the full pipeline from BAM profiling onward.  The profiles-mode configs
-(``config_generated_<dt>.yml``) exist as the tutorial's "Option A — skip
-profiling" fast path; they are NOT exercised by this test today.  If you
-want them covered, add the corresponding entries to ``conftest.SCENARIOS``.
+Both run in **profiles mode** (``config_generated_<dt>.yml``): the bundled
+profiles carry the planted facts recorded in ``planted_truth.json``, which
+the BAM-mode path (``config_with_bams_<dt>.yml``, the tutorial's Option B)
+cannot, because its BAMs are simulated from the unmodified reference.
 
 Run in place
 ------------
@@ -85,15 +65,13 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from pathlib import Path
+from typing import Iterable
 
 import pytest
-import yaml
 
-from tests.regression.compare import compare_trees
+from tests.regression.compare import compare_trees, forbidden_present
 from tests.regression.conftest import SCENARIOS
-
 
 logger = logging.getLogger(__name__)
 
@@ -102,52 +80,20 @@ logger = logging.getLogger(__name__)
 # and per-run metadata that varies even with deterministic inputs.
 _EXCLUDED_SUFFIXES = (".log", ".snakemake_timestamp")
 _EXCLUDED_PREFIXES = ("config_runtime_",)
-_TRACKED_SUFFIXES = (".tsv", ".tsv.gz", ".parquet", ".json")
+# .ffn = the dN/dS step's reconstructed per-subject gene sequences (text).
+_TRACKED_SUFFIXES = (".tsv", ".tsv.gz", ".parquet", ".json", ".ffn")
 
 
-# Directory names the pipeline writes inside the example_data_* dir that we
-# must wipe before each run (Snakemake reuses outputs based on timestamps,
-# so a leftover from a previous run could silently masquerade as a fresh one).
-_TRANSIENT_OUTPUT_DIRS = (
-    "output_bams",   # written by config_with_bams_<dt>.yml
-    "output",        # written by config_generated_<dt>.yml (profiles mode)
-    ".snakemake",    # Snakemake's own bookkeeping
-)
+def _copy_golden_payload(
+    src: Path, dst: Path, exclude_substrings: Iterable[str] = ()
+) -> None:
+    """Copy the subset of pipeline outputs we track in the snapshot.
 
-
-def _resolve_config_path(scenario: str, override: Path | None) -> Path:
-    """Pick the config the pipeline run will use for this scenario.
-
-    Precedence:
-      1. ``--regression-config`` override, when supplied.
-      2. The scenario's bundled config (config_name inside example_data_dir).
+    ``exclude_substrings`` is the scenario's comparison carve-out (the cache
+    parquet files, the profile copies); applying it here too keeps those
+    files out of the committed golden instead of merely skipping them.
     """
-    if override is not None:
-        return override
-    bundle = SCENARIOS[scenario]
-    return Path(bundle["example_data_dir"]) / bundle["config_name"]
-
-
-def _resolve_output_root(config_path: Path) -> Path:
-    """Parse the config to find where the pipeline will write outputs.
-
-    The generator embeds ``output.root_dir`` as an absolute path, so the
-    pipeline writes there regardless of cwd.  We read it once up front so the
-    test can both wipe the prior run's output AND know where to look for the
-    new one.
-    """
-    with config_path.open() as f:
-        cfg = yaml.safe_load(f)
-    root_dir = Path(cfg["output"]["root_dir"])
-    if not root_dir.is_absolute():
-        # Resolve against the config's own directory if it happens to be
-        # relative (a possible future generator change).
-        root_dir = (config_path.parent / root_dir).resolve()
-    return root_dir
-
-
-def _copy_golden_payload(src: Path, dst: Path) -> None:
-    """Copy the subset of pipeline outputs we track in the snapshot."""
+    excl = tuple(exclude_substrings)
     for f in src.rglob("*"):
         if not f.is_file():
             continue
@@ -158,28 +104,17 @@ def _copy_golden_payload(src: Path, dst: Path) -> None:
         if not f.name.endswith(_TRACKED_SUFFIXES):
             continue
         rel = f.relative_to(src)
+        if excl and any(s in rel.as_posix() for s in excl):
+            continue
         target = dst / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(f, target)
 
 
-def _wipe_transient_outputs(example_dir: Path, output_root: Path) -> None:
-    """Remove anything the pipeline might have left from a previous run."""
-    # output.root_dir may live anywhere the config points; clear it explicitly.
-    if output_root.exists():
-        shutil.rmtree(output_root)
-    # Also sweep the conventional transient locations inside the example dir
-    # in case a different config (e.g. the profiles-mode one) wrote there.
-    for name in _TRANSIENT_OUTPUT_DIRS:
-        p = example_dir / name
-        if p.exists():
-            shutil.rmtree(p)
-
-
 @pytest.mark.regression
 def test_pipeline_matches_golden(
     scenario,
-    regression_config_override,
+    pipeline_run,
     golden_root,
     update_golden,
 ):
@@ -195,54 +130,29 @@ def test_pipeline_matches_golden(
     * **Update mode** (``--update-golden``): snapshots the CURRENT branch's
       outputs into the golden directory.  Use this when your branch
       intentionally changes pipeline outputs and you want those outputs to
-      become the new baseline.
-
-      To refresh the golden from ``main`` instead (e.g. to verify your
-      branch matches main), run
-      ``tests/regression/diff_branches.sh --capture-golden`` directly —
-      it worktrees main, overlays the current example data, and snapshots.
+      become the new baseline, and commit the golden with the change.
 
     The pipeline must be installed in the active conda environment
     (``pip install -e .`` from the repo root, which is what the alleleflux
-    env already provides).
+    env already provides).  The run is the ``pipeline_run`` fixture
+    (``conftest.py``): one pipeline run per scenario per session, shared
+    with ``test_planted_truth.py``.
     """
     bundle = SCENARIOS[scenario]
-    config_path = _resolve_config_path(scenario, regression_config_override)
-    assert config_path.exists(), f"Regression config not found: {config_path}"
+    # The run itself lives in conftest.pipeline_run (one per scenario per
+    # session) so test_planted_truth.py can read the same outputs.
+    pipeline_data_dir = pipeline_run.pipeline_data_dir
 
-    example_dir = config_path.parent
-    output_root = _resolve_output_root(config_path)
-    pipeline_data_dir = output_root / bundle["pipeline_data_dir"]
-
-    # Clean slate — wipe any output_bams/, output/, .snakemake/ left behind by
-    # a previous run.  Without this, Snakemake would reuse those outputs and
-    # the test would validate stale data instead of a fresh run.
-    _wipe_transient_outputs(example_dir, output_root)
-
-    cmd = [
-        "alleleflux", "run",
-        "--config", str(config_path),
-        "--threads", "4",
-    ]
-    logger.info(
-        "Running pipeline for scenario=%s: %s (cwd=%s)",
-        scenario, " ".join(cmd), example_dir,
-    )
-    result = subprocess.run(
-        cmd, cwd=example_dir, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
+    # Trees this scenario must NOT produce (e.g. the longitudinal-only
+    # dN/dS / baseline-presence / strain-turnover outputs on single data).
+    # Checked before the golden diff and in update mode too: a golden must
+    # never be captured from a run that wrote a forbidden tree.
+    forbidden = forbidden_present(pipeline_data_dir, bundle.get("expected_absent", ()))
+    if forbidden:
         pytest.fail(
-            f"Pipeline failed (scenario={scenario}):\n"
-            f"  exit code: {result.returncode}\n"
-            f"  stdout (tail):\n{result.stdout[-2000:]}\n"
-            f"  stderr (tail):\n{result.stderr[-2000:]}"
+            f"[scenario={scenario}] outputs that must not exist were written:\n"
+            + "\n".join(forbidden)
         )
-
-    assert pipeline_data_dir.exists(), (
-        f"Pipeline data dir missing for scenario '{scenario}': {pipeline_data_dir}\n"
-        f"Expected the pipeline to write outputs under {output_root}/."
-    )
 
     golden_dir = golden_root / bundle["golden_subdir"]
 
@@ -254,11 +164,12 @@ def test_pipeline_matches_golden(
         if golden_dir.exists():
             shutil.rmtree(golden_dir)
         golden_dir.mkdir(parents=True)
-        _copy_golden_payload(pipeline_data_dir, golden_dir)
+        _copy_golden_payload(
+            pipeline_data_dir, golden_dir, bundle.get("exclude_substrings", ())
+        )
         pytest.skip(
-            f"Golden snapshot refreshed at {golden_dir} from CURRENT branch.  "
-            f"For a main-derived snapshot, run "
-            f"`tests/regression/diff_branches.sh --capture-golden` instead."
+            f"Golden snapshot refreshed at {golden_dir} from the CURRENT branch; "
+            f"review `git diff --stat tests/regression/golden` and commit it with the change."
         )
 
     assert golden_dir.exists(), (
@@ -266,14 +177,10 @@ def test_pipeline_matches_golden(
         f"Run `pytest tests/regression/ --update-golden --regression-scenario {scenario}` to create it."
     )
 
-    # The golden is captured from main; scope the diff to the scientifically
-    # meaningful, structurally-stable outputs so intended branch divergence
-    # (dropped columns, renamed/re-formatted files, disabled optional outputs)
-    # does not drown the real signal.  See SCENARIOS in conftest for rationale.
-    # float32 frequencies on this branch vs float64 in the main-derived golden
-    # mean ~1e-7 rounding is expected; bundle rtol/atol relax the strict default
-    # accordingly (see SCENARIOS).  Falls back to the strict comparator defaults
-    # when a scenario does not set them.
+    # The golden is captured from THIS branch, so the whole tracked tree is
+    # compared at the comparator's strict defaults (FULL contract, _scope.py);
+    # a scenario may still narrow the sweep or loosen the tolerance through
+    # its bundle, which is how the retired main-derived mode used to work.
     tol = {k: bundle[k] for k in ("rtol", "atol") if k in bundle}
     failures = compare_trees(
         pipeline_data_dir,

@@ -24,18 +24,63 @@ log_level: "INFO"
 analysis:
   data_type: "longitudinal"
   allele_analysis_only: False
-  # LMM and CMH require more replicates than the small example provides.
-  # Enable them when you generate larger datasets.
+  # Every feature the data type supports is ON (the bundled dataset is the
+  # regression test's input; planted_truth.json says what each should find),
+  # with one exception: LMM.  On this 4-mice-per-group design it took ~58
+  # CPU-minutes for two 5 kb genomes (every other step together: ~10) and
+  # called a third of all positions significant, so it is off here; its own
+  # unit tests cover it.  The within-group across-time tests run
+  # (run_within_group_tests default).
   use_lmm: False
   use_significance_tests: True
-  use_cmh: False
-  # Regional contrast requires min_replicates per group (default 4). The small
-  # synthetic dataset has only 2 subjects per group by default, so this is
-  # off out of the box — enable it after generating a larger dataset
-  # (e.g. --num_samples 20 in longitudinal mode → 5 subjects per group).
+  use_cmh: True
+  use_gene_scores: True
+  use_outlier_detection: True
+  use_dnds: True
+  # Regional contrast is experimental (not in the publication): stays off.
   use_regional_contrast: False
-  use_gene_scores: False
-  use_outlier_detection: False
+  # Pairwise conANI/popANI between each mouse's pre and post sample; the
+  # strain-swapped mouse (planted_truth.json: strain_swap) is the one pair
+  # whose conANI falls below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "within_subject"
+    store_snp_locations: "within_subject"
+  use_strain_turnover: True
+  strain_turnover:
+    min_compared: 0.1
+    pop_threshold: 0.99999
+    con_threshold: 0.999
+    # 4 mice per group: the real-cohort floor of 8 voters would leave every
+    # verdict blank (too_few_voters), so the test data votes with 2.
+    min_voters: 2
+    vote_rule: "majority"
+    tie: "not_replaced"
+    replicate_rule: "average"
+  # Standing vs de novo for every significant site of the paired t-test, judged
+  # against every sample dated before the first carrier (cohort scope; the
+  # metadata carries collection_date), with the carrier-level strain gate.
+  use_baseline_presence: True
+  baseline_presence:
+    summary: "two_sample_paired"
+    test_type: "two_sample_paired_tTest"
+    threshold_column: "q_value"
+    threshold: 0.05
+    baseline_scope: "cohort"
+    cluster_window_bp: 1000
+    max_de_novo_neighbours: 0
+    strain_gate: "carrier"
+    # The planted de novo alleles have 4 carriers, but a lone allele carried by
+    # fewer than 3 determined mice would be strain_undetermined at the house
+    # default; 1 keeps every carried allele judgeable on this small design.
+    min_determined_carriers: 1
+  # Score heatmaps, boxplots and the HTML run report (images; excluded from
+  # the regression comparison, but the rules run).
+  figures:
+    enabled: True
 
   taxa_score_levels:
     - phylum
@@ -54,6 +99,15 @@ quality_control:
   breadth_threshold: 0.1
   coverage_threshold: 1
   disable_zero_diff_filtering: False
+  # MIDAS2's per-site depth rule.  The two planted depth spikes
+  # (planted_truth.json: depth_spikes) sit at 10x the sample mean, so the
+  # 3.0x ceiling must remove exactly those positions for those samples.
+  site_depth_filter:
+    enabled: True
+    site_depth: 0
+    site_ratio: 3.0
+    min_allele_reads: 0
+    keep_original_counts: True
 
 profiling:
   ignore_orphans: True

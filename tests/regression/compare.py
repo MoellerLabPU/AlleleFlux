@@ -27,14 +27,11 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-# Column-level comparison rules (which columns are sign-insensitive, which are
-# non-deterministic diagnostics skipped on value) live in _scope.py alongside
-# the rest of the AlleleFlux comparison contract — imported here so this
-# mechanism carries no hard-coded AlleleFlux column names.
-from tests.regression._scope import (
-    IGNORE_VALUE_SUBSTRINGS,
-    SIGN_INSENSITIVE_SUBSTRINGS,
-)
+# The one column-level rule (which non-deterministic diagnostic columns are
+# skipped on value) lives in _scope.py with the rest of the AlleleFlux
+# comparison contract — imported here so this mechanism carries no hard-coded
+# AlleleFlux column names.
+from tests.regression._scope import IGNORE_VALUE_SUBSTRINGS
 
 logger = logging.getLogger(__name__)
 
@@ -79,35 +76,6 @@ def _is_ignored_value_column(col: str) -> bool:
     False
     """
     return any(s in col for s in IGNORE_VALUE_SUBSTRINGS)
-
-
-def _is_sign_insensitive(col: str) -> bool:
-    """Return True for columns whose sign is unstable across pipeline runs.
-
-    A column matches if its name contains any of ``SIGN_INSENSITIVE_SUBSTRINGS``
-    (defined in _scope.py: ``_change``, ``_diff_mean``, ``_diff``).  Matching
-    columns are compared on magnitude only — see _scope.py for the upstream
-    root cause.
-
-    Parameters
-    ----------
-    col : str
-        Column name to test.
-
-    Returns
-    -------
-    bool
-
-    Examples
-    --------
-    >>> _is_sign_insensitive("A_frequency_diff_mean")
-    True
-    >>> _is_sign_insensitive("A_change")
-    True
-    >>> _is_sign_insensitive("A_frequency")   # plain frequency — sign matters
-    False
-    """
-    return any(s in col for s in SIGN_INSENSITIVE_SUBSTRINGS)
 
 
 def _read_table(path: Path) -> pd.DataFrame:
@@ -182,9 +150,24 @@ def _sort_key_columns(df: pd.DataFrame) -> list[str]:
     ['weird_id', 'score']
     """
     preferred = [
-        "period", "mag_id", "contig", "position", "gene_id", "sample_id",
-        "group", "group_analyzed", "time", "nucleotide", "test", "test_type",
-        "feature", "rank", "taxon", "subjectID", "replicate", "source_file",
+        "period",
+        "mag_id",
+        "contig",
+        "position",
+        "gene_id",
+        "sample_id",
+        "group",
+        "group_analyzed",
+        "time",
+        "nucleotide",
+        "test",
+        "test_type",
+        "feature",
+        "rank",
+        "taxon",
+        "subjectID",
+        "replicate",
+        "source_file",
     ]
     keys = [c for c in preferred if c in df.columns]
     if keys:
@@ -193,6 +176,25 @@ def _sort_key_columns(df: pd.DataFrame) -> list[str]:
     # (capped at three to keep the sort cheap on wide tables).
     non_float = [c for c in df.columns if not pd.api.types.is_float_dtype(df[c])]
     return non_float[:3] if non_float else list(df.columns[:1])
+
+
+def _sort_by_key_values(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Sort ``df`` by the string VALUES of ``keys`` and renumber the index 0..N-1.
+
+    A categorical key column is compared by its codes under ``sort_values``,
+    and the codes follow the category order the writer happened to record, so
+    two files holding the same rows can sort differently.  The keys are cast
+    to ``str`` on a copy (the returned frame still carries the original
+    columns and dtypes), which makes the order depend on the values alone.
+    ``kind="stable"`` keeps rows that tie on every key in their original
+    relative order, so ties resolve the same way in both files.
+
+    Example: rows (pos 0, subj8), (pos 0, subj3) with categories
+    ['subj8', 'subj3'] -> sorted (pos 0, subj3), (pos 0, subj8), the same
+    order a file with categories ['subj3', 'subj8'] gives.
+    """
+    order = df[keys].astype(str).sort_values(keys, kind="stable").index
+    return df.loc[order].reset_index(drop=True)
 
 
 def _format_diff(diffs: pd.DataFrame, file_label: str) -> str:
@@ -246,7 +248,6 @@ def compare_tables(
         * Row *order* (both files sorted by identity columns first).
         * Tiny float drift within ``rtol`` / ``atol`` (BLAS / threading noise).
         * ``NaN`` in the same cell of both files.
-        * Sign flips on derivative columns (see ``_is_sign_insensitive``).
 
     Caught
         * Column added / removed / renamed (the column *set* differs).
@@ -279,8 +280,9 @@ def compare_tables(
     # returns None — files match within tolerance
 
     A golden value of 0.5 vs an actual of 0.5000000001 passes (float noise),
-    but 0.5 vs 0.6 raises AssertionError.  On an ``A_change`` column, 0.5 vs
-    -0.5 *passes* (sign-insensitive) while 0.5 vs 0.6 still fails.
+    but 0.5 vs 0.6 raises AssertionError, and so does 0.5 vs -0.5: the sign
+    is compared like any other digit (a former sign tolerance turned out to
+    be a row-alignment bug, see ``_sort_by_key_values``).
     """
     a = _read_table(actual)
     g = _read_table(golden)
@@ -323,8 +325,16 @@ def compare_tables(
     # reset, pandas would align by the shuffled original labels and silently
     # undo the sort.
     sort_keys = _sort_key_columns(g)
-    a_sorted = a.sort_values(sort_keys, kind="stable").reset_index(drop=True)
-    g_sorted = g.sort_values(sort_keys, kind="stable").reset_index(drop=True)
+    # Sort by the keys' VALUES, never by categorical codes: parquet keeps the
+    # pipeline's categorical dtypes, whose category order is the order the
+    # samples were processed in and so differs between two runs of the same
+    # data.  sort_values on such a column orders by code, which pairs row i
+    # of one file with a different subject in the other and reports the
+    # whole table as mismatched (seen on the per-subject allele-analysis
+    # tables: subjectID categories ['subj3','subj8',...] vs ['subj3','subj6',...]).
+    # Casting the key columns to str on BOTH sides gives one canonical order.
+    a_sorted = _sort_by_key_values(a, sort_keys)
+    g_sorted = _sort_by_key_values(g, sort_keys)
 
     # --- Value comparison, column by column --------------------------------
     # diff_mask[i] becomes True if ANY column disagrees in row i.
@@ -345,15 +355,13 @@ def compare_tables(
         if pd.api.types.is_float_dtype(g_col):
             a_vals = a_col.to_numpy(dtype=float)
             g_vals = g_col.to_numpy(dtype=float)
-            if _is_sign_insensitive(col):
-                # Fold sign away for derivative columns whose +/- is unstable
-                # upstream — magnitude must still match, so this is NOT
-                # magnitude-insensitive.  See SIGN_INSENSITIVE_SUBSTRINGS (_scope.py).
-                a_vals = np.abs(a_vals)
-                g_vals = np.abs(g_vals)
             # equal_nan=True so a NaN in the same cell of both files matches.
             mismatch = ~np.isclose(
-                a_vals, g_vals, rtol=rtol, atol=atol, equal_nan=True,
+                a_vals,
+                g_vals,
+                rtol=rtol,
+                atol=atol,
+                equal_nan=True,
             )
         else:
             # Non-float (strings, ints, categoricals): exact inequality, but
@@ -367,7 +375,9 @@ def compare_tables(
         # join keeps only the offending values, suffix the two sources, then
         # drop columns that are all-NA (i.e. columns that never mismatched).
         joined = a_sorted.where(diff_mask, other=pd.NA).join(
-            g_sorted.where(diff_mask, other=pd.NA), lsuffix="__actual", rsuffix="__golden"
+            g_sorted.where(diff_mask, other=pd.NA),
+            lsuffix="__actual",
+            rsuffix="__golden",
         )
         diffs = joined.loc[diff_mask].dropna(how="all", axis=1)
         raise AssertionError(_format_diff(diffs, rel))
@@ -463,6 +473,22 @@ def compare_file(
         with opener(actual, "rb") as fa, opener(golden, "rb") as fg:
             if fa.read() != fg.read():
                 raise AssertionError(f"{actual.name}: binary content differs")
+
+
+def forbidden_present(root: Path, rel_paths: Iterable[str]) -> list[str]:
+    """Report every ``rel_paths`` entry that EXISTS under ``root``.
+
+    The mirror image of ``MISSING``: a scenario may declare outputs that must
+    NOT appear (the single-timepoint run has no dN/dS, baseline-presence or
+    strain-turnover tree, since those need an earlier timepoint).  Each entry
+    is a path relative to ``root``, a directory or a file; an existing one is
+    a failure.
+
+    Example: with ``root/dnds_analysis/x.tsv`` on disk,
+    ``forbidden_present(root, ["dnds_analysis", "baseline_presence"])`` ->
+    ``["FORBIDDEN (exists): dnds_analysis"]``.
+    """
+    return [f"FORBIDDEN (exists): {rel}" for rel in rel_paths if (root / rel).exists()]
 
 
 def _rel_matches_prefix(rel: Path, prefixes: tuple[str, ...]) -> bool:
@@ -585,9 +611,7 @@ def compare_trees(
     allow = tuple(allow_golden_only) if allow_golden_only else ()
     excl = tuple(exclude_substrings) if exclude_substrings else ()
     # Sorted for deterministic, readable failure ordering.
-    golden_files = sorted(
-        p for p in golden_root.rglob("*") if p.is_file()
-    )
+    golden_files = sorted(p for p in golden_root.rglob("*") if p.is_file())
     for g in golden_files:
         rel = g.relative_to(golden_root)
         # Allowlist gate: outside the requested scope -> skip silently.

@@ -1,0 +1,324 @@
+{
+  "block_spacing_bp": 300,
+  "carrier_samples": [
+    "treatment_subj5_post",
+    "treatment_subj6_post",
+    "treatment_subj7_post",
+    "treatment_subj8_post"
+  ],
+  "collection_dates": {
+    "post": "2024-04-15",
+    "pre": "2024-01-15"
+  },
+  "data_type": "longitudinal",
+  "depth_spikes": [
+    {
+      "contig": "MAG_001.fa_contig1",
+      "depth": 500,
+      "end": 493,
+      "mag": "MAG_001",
+      "sample_id": "control_subj1_pre",
+      "start": 453
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "depth": 500,
+      "end": 289,
+      "mag": "MAG_001",
+      "sample_id": "control_subj4_post",
+      "start": 249
+    }
+  ],
+  "groups": {
+    "control": "control",
+    "treatment": "treatment"
+  },
+  "n_standing": 12,
+  "rising_allele_rule": "the next base after ref_base in the A,T,G,C cycle",
+  "seed": 42,
+  "shift_rising_fraction": 0.48,
+  "significant_sites": [
+    {
+      "contig": "MAG_001.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_001",
+      "position": 638,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_001",
+      "position": 720,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "block_index": 0,
+      "contig": "MAG_001.fa_contig2",
+      "kind": "de_novo",
+      "label": "block",
+      "mag": "MAG_001",
+      "position": 1172,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_001",
+      "position": 1436,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_001.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_001",
+      "position": 1441,
+      "ref_base": "C",
+      "rising_allele": "A"
+    },
+    {
+      "block_index": 1,
+      "contig": "MAG_001.fa_contig2",
+      "kind": "de_novo",
+      "label": "block",
+      "mag": "MAG_001",
+      "position": 1472,
+      "ref_base": "T",
+      "rising_allele": "G"
+    },
+    {
+      "block_index": 2,
+      "contig": "MAG_001.fa_contig2",
+      "kind": "de_novo",
+      "label": "block",
+      "mag": "MAG_001",
+      "position": 1772,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 77,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 166,
+      "ref_base": "C",
+      "rising_allele": "A"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 516,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 519,
+      "ref_base": "C",
+      "rising_allele": "A"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 773,
+      "ref_base": "T",
+      "rising_allele": "G"
+    },
+    {
+      "contig": "MAG_002.fa_contig1",
+      "kind": "de_novo",
+      "label": "lone",
+      "mag": "MAG_002",
+      "position": 853,
+      "ref_base": "G",
+      "rising_allele": "C"
+    },
+    {
+      "contig": "MAG_002.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 53,
+      "ref_base": "A",
+      "rising_allele": "T"
+    },
+    {
+      "contig": "MAG_002.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 499,
+      "ref_base": "T",
+      "rising_allele": "G"
+    },
+    {
+      "contig": "MAG_002.fa_contig2",
+      "kind": "standing",
+      "label": "standing",
+      "mag": "MAG_002",
+      "position": 664,
+      "ref_base": "C",
+      "rising_allele": "A"
+    }
+  ],
+  "standing_mouse": {
+    "fraction": 0.15,
+    "sample_ids": [
+      "control_subj1_pre",
+      "control_subj1_post"
+    ],
+    "subjectID": "subj1"
+  },
+  "strain_swap": {
+    "fraction": 0.02,
+    "n_positions": 102,
+    "positions": {
+      "MAG_001": {
+        "MAG_001.fa_contig1": [
+          18,
+          110,
+          208,
+          268,
+          281,
+          296,
+          302,
+          335,
+          344,
+          400,
+          429,
+          446,
+          596,
+          622,
+          663,
+          742,
+          772,
+          875,
+          905,
+          938,
+          989
+        ],
+        "MAG_001.fa_contig2": [
+          69,
+          107,
+          115,
+          183,
+          196,
+          240,
+          243,
+          304,
+          353,
+          367,
+          493,
+          501,
+          619,
+          693,
+          729,
+          769,
+          813,
+          828,
+          889,
+          950,
+          971,
+          1001,
+          1056,
+          1217,
+          1222,
+          1286,
+          1333,
+          1338,
+          1350,
+          1375,
+          1410,
+          1418,
+          1484,
+          1531,
+          1593,
+          1597,
+          1633,
+          1902
+        ]
+      },
+      "MAG_002": {
+        "MAG_002.fa_contig1": [
+          23,
+          47,
+          171,
+          195,
+          240,
+          247,
+          251,
+          372,
+          462,
+          564,
+          567,
+          615,
+          756,
+          787,
+          791,
+          894,
+          917,
+          988,
+          997,
+          1007,
+          1049,
+          1178,
+          1179,
+          1207,
+          1220
+        ],
+        "MAG_002.fa_contig2": [
+          20,
+          66,
+          102,
+          129,
+          190,
+          334,
+          404,
+          416,
+          551,
+          552,
+          571,
+          587,
+          720,
+          733,
+          817,
+          835,
+          840,
+          885
+        ]
+      }
+    },
+    "sample_id": "treatment_subj8_post",
+    "subjectID": "subj8",
+    "timepoint": "post"
+  },
+  "timepoints": [
+    "pre",
+    "post"
+  ]
+}

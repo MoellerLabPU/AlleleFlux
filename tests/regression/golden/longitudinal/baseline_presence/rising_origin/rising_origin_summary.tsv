@@ -1,0 +1,33 @@
+floor	comparison	period	age	test_type	rose_in	strain_class	origin	n_alleles	n_mags	n_rising	n_called	pct_of_all	pct_of_called
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	standing_variation	6	2	8	7	75.0	85.71428571428571
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	de_novo	0	0	8	7	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	de_novo_below_detection	1	1	8	7	12.5	14.285714285714286
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	new_strain	0	0	8	7	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	block_event	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	strain_undetermined	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	not_present_later	1	1	8	7	12.5	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	all	baseline_not_covered	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	standing_variation	6	2	8	7	75.0	85.71428571428571
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	de_novo	0	0	8	7	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	de_novo_below_detection	1	1	8	7	12.5	14.285714285714286
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	new_strain	0	0	8	7	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	block_event	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	strain_undetermined	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	not_present_later	1	1	8	7	12.5	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	control	not_replaced	baseline_not_covered	0	0	8	7	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	standing_variation	12	2	16	13	75.0	92.3076923076923
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	de_novo	1	1	16	13	6.25	7.6923076923076925
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	de_novo_below_detection	0	0	16	13	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	new_strain	0	0	16	13	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	block_event	3	1	16	13	18.75	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	strain_undetermined	0	0	16	13	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	not_present_later	0	0	16	13	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	all	baseline_not_covered	0	0	16	13	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	standing_variation	12	2	16	13	75.0	92.3076923076923
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	de_novo	1	1	16	13	6.25	7.6923076923076925
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	de_novo_below_detection	0	0	16	13	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	new_strain	0	0	16	13	0.0	0.0
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	block_event	3	1	16	13	18.75	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	strain_undetermined	0	0	16	13	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	not_present_later	0	0	16	13	0.0	
+2	pre_post-treatment_control	pre_post	post	two_sample_paired_tTest	treatment	not_replaced	baseline_not_covered	0	0	16	13	0.0	

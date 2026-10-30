@@ -28,18 +28,38 @@ log_level: "INFO"
 analysis:
   data_type: "single"
   allele_analysis_only: False
-  # LMM and CMH require more replicates than the small example provides.
-  # Enable them when you generate larger datasets.
+  # Every feature the data type supports is ON (the bundled dataset is the
+  # regression test's input; planted_truth.json says what each should find),
+  # with one exception: LMM.  On this 4-mice-per-group design it took ~58
+  # CPU-minutes for two 5 kb genomes (every other step together: ~10) and
+  # called a third of all positions significant, so it is off here; its own
+  # unit tests cover it.  The within-group across-time tests run
+  # (run_within_group_tests default).
   use_lmm: False
   use_significance_tests: True
-  use_cmh: False
-  # Regional contrast requires min_replicates per group (default 4). The small
-  # synthetic dataset has only 2 subjects per group by default, so this is
-  # off out of the box — enable it after generating a larger dataset
-  # (e.g. --num_samples 20 in longitudinal mode → 5 subjects per group).
+  use_cmh: True
+  use_gene_scores: True
+  use_outlier_detection: True
+  # Longitudinal-only features: single data has no earlier timepoint.
+  use_dnds: False
   use_regional_contrast: False
-  use_gene_scores: False
-  use_outlier_detection: False
+  use_baseline_presence: False
+  use_strain_turnover: False
+  # Pairwise conANI/popANI between EVERY pair of samples (the between-mouse
+  # strain-sharing question; the only mode with a meaning on one timepoint).
+  # The planted divergent sample (planted_truth.json: strain_swap) is the one
+  # whose pairs all fall below con_threshold.
+  use_pairwise_ani: True
+  pairwise_ani:
+    min_cov: 5
+    min_freq: 0.05
+    fdr: 1.0e-6
+    pairs: "all"
+    store_snp_locations: "none"
+  # Off until the score-figure loader handles a single-timepoint CMH table
+  # (it reports a score/summary MAG mismatch for cmh at t1).
+  figures:
+    enabled: False
 
   taxa_score_levels:
     - phylum
@@ -58,6 +78,15 @@ quality_control:
   breadth_threshold: 0.1
   coverage_threshold: 1
   disable_zero_diff_filtering: False
+  # MIDAS2's per-site depth rule.  The two planted depth spikes
+  # (planted_truth.json: depth_spikes) sit at 10x the sample mean, so the
+  # 3.0x ceiling must remove exactly those positions for those samples.
+  site_depth_filter:
+    enabled: True
+    site_depth: 0
+    site_ratio: 3.0
+    min_allele_reads: 0
+    keep_original_counts: True
 
 profiling:
   ignore_orphans: True

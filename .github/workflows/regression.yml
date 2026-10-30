@@ -1,25 +1,21 @@
 # End-to-end regression suite for the AlleleFlux pipeline.
 #
-# Runs the bundled example dataset (longitudinal + single scenarios) through
-# the full BAM-mode pipeline on every PR and every push to main, then diffs
-# every output file against the committed golden snapshot at
-# tests/regression/golden/.
+# Runs the bundled synthetic datasets (longitudinal + single scenarios) in
+# profiles mode with every applicable feature on, then (a) diffs the whole
+# output tree against the committed golden snapshot and (b) checks the facts
+# the data generator planted (planted_truth.json) are found.
 #
-# Prerequisites — MUST be committed to the repo for this workflow to pass:
-#   * docs/source/examples/example_data_longitudinal/  — reference, profiles, BAMs, configs
-#   * docs/source/examples/example_data_single/        — same for single-timepoint design
-#   * tests/regression/golden/longitudinal/            — captured from main
-#   * tests/regression/golden/single/                  — captured from main
+# Inputs (all committed to the repo):
+#   * docs/source/examples/example_data_longitudinal/  — reference, profiles, configs, card
+#   * docs/source/examples/example_data_single/        — same for the single-timepoint design
+#   * tests/regression/golden/<scenario>/              — captured from this repo
 #
-# Capture goldens locally before merging this workflow:
-#   tests/regression/diff_branches.sh --capture-golden                 # longitudinal (default)
-#   tests/regression/diff_branches.sh --capture-golden main HEAD single
-#   git add tests/regression/golden && git commit -m "Capture regression golden from main"
+# Refresh the golden after an intentional output change:
+#   pytest tests/regression/ --update-golden --regression-scenario all
+#   git add tests/regression/golden && git commit
 #
-# See tests/regression/README.md for the full operating manual and the
-# "Live vs snapshot" section for why this workflow is the snapshot-based
-# pytest path (not the live cross-branch diff_branches.sh path).
-
+# See tests/regression/README.md.
+#
 name: Regression Tests
 
 on:

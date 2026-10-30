@@ -40,7 +40,12 @@ def _write_tsv(path, df):
     df : pandas.DataFrame
         Data to write (no index column is written).
     """
-    df.to_csv(path, sep="\t", index=False, compression="gzip" if str(path).endswith(".gz") else None)
+    df.to_csv(
+        path,
+        sep="\t",
+        index=False,
+        compression="gzip" if str(path).endswith(".gz") else None,
+    )
 
 
 def test_identical_tables_match(tmp_path):
@@ -50,7 +55,9 @@ def test_identical_tables_match(tmp_path):
     other test result can be trusted.
     """
     # Arrange: write the same frame to both actual and golden.
-    df = pd.DataFrame({"contig": ["c1", "c2"], "position": [10, 20], "A_change": [0.1, -0.2]})
+    df = pd.DataFrame(
+        {"contig": ["c1", "c2"], "position": [10, 20], "A_change": [0.1, -0.2]}
+    )
     a, g = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a, df)
     _write_tsv(g, df)
@@ -66,7 +73,9 @@ def test_row_order_does_not_matter(tmp_path):
     order before comparing.
     """
     # Arrange: actual is golden with its rows reversed.
-    g = pd.DataFrame({"contig": ["c1", "c2"], "position": [10, 20], "A_change": [0.1, -0.2]})
+    g = pd.DataFrame(
+        {"contig": ["c1", "c2"], "position": [10, 20], "A_change": [0.1, -0.2]}
+    )
     a = g.iloc[::-1].reset_index(drop=True)
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a_path, a)
@@ -91,39 +100,38 @@ def test_column_order_does_not_matter(tmp_path):
     compare_tables(a_path, g_path)
 
 
-def test_sign_flip_on_diff_column_is_tolerated(tmp_path):
-    """Derivative columns are compared on magnitude: a sign flip must be forgiven.
+def test_sign_flip_on_diff_column_fails(tmp_path):
+    """A sign flip on a change / diff column is a real difference and must raise.
 
-    Columns matching ``SIGN_INSENSITIVE_SUBSTRINGS`` (_scope.py; here ``_diff_mean``)
-    have an unstable sign upstream, so the comparator folds the sign away.
-    This is the "forgive the flip" half of the sign-insensitive contract;
-    see ``test_magnitude_change_on_diff_column_still_fails`` for the other half.
+    History: the comparator once folded the sign away on ``_change`` /
+    ``_diff`` / ``_diff_mean`` columns because two runs had been seen to
+    "disagree in sign".  That was a misdiagnosis: the per-subject tables carry
+    categorical keys whose category order differs between runs, and sorting by
+    category code paired the control row with the treatment row of the same
+    position -- which looks exactly like a flipped diff.  With keys sorted by
+    value (``_sort_by_key_values``) two runs match sign and all, so the
+    tolerance is gone and the sign is compared like any other digit.
     """
-    # Arrange: actual is golden with every diff-column value negated.
-    g = pd.DataFrame({
-        "contig": ["c1", "c1"],
-        "position": [10, 20],
-        "A_frequency_diff_mean": [0.5, -0.3],
-        "C_frequency_diff_mean": [-0.5, 0.3],
-    })
+    g = pd.DataFrame(
+        {
+            "contig": ["c1", "c1"],
+            "position": [10, 20],
+            "A_frequency_diff_mean": [0.5, -0.3],
+            "C_frequency_diff_mean": [-0.5, 0.3],
+        }
+    )
     a = g.copy()
-    # Multiply by -1 to flip the sign but not the magnitude — should still match.
     a["A_frequency_diff_mean"] *= -1
     a["C_frequency_diff_mean"] *= -1
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a_path, a)
     _write_tsv(g_path, g)
-    # Act + Assert: |value| is unchanged by negation -> match.
-    compare_tables(a_path, g_path)
+    with pytest.raises(AssertionError, match="mismatched"):
+        compare_tables(a_path, g_path)
 
 
 def test_magnitude_change_on_diff_column_still_fails(tmp_path):
-    """Sign-insensitive must NOT be magnitude-insensitive.
-
-    The guardrail on the clever feature: folding the sign away must not also
-    blind the comparator to a genuine change in magnitude.  0.5 -> 0.6 on a
-    ``_change`` column is a real regression and must raise.
-    """
+    """A magnitude change on a change column raises (0.5 -> 0.6 is a regression)."""
     # Arrange: same column name pattern, but the magnitude actually changes.
     g = pd.DataFrame({"contig": ["c1"], "position": [10], "A_change": [0.5]})
     a = g.copy()
@@ -137,13 +145,7 @@ def test_magnitude_change_on_diff_column_still_fails(tmp_path):
 
 
 def test_non_diff_column_sign_change_fails(tmp_path):
-    """Sign flips outside the diff-column pattern must be flagged.
-
-    The sign-folding only applies to columns whose names match the
-    derivative substrings.  A plain ``A_frequency`` column has a meaningful
-    sign, so 0.5 -> -0.5 must raise.  This proves the tolerance is scoped, not
-    global.
-    """
+    """A sign flip on a plain frequency column raises (0.5 -> -0.5)."""
     # Arrange: negate a column that is NOT in the sign-insensitive set.
     g = pd.DataFrame({"contig": ["c1"], "position": [10], "A_frequency": [0.5]})
     a = g.copy()
@@ -166,15 +168,17 @@ def test_nondeterministic_diag_column_value_is_ignored(tmp_path):
     is the "forgive the wobble" half; the guardrails are the next two tests.
     """
     # Arrange: identical p-values, but the diagnostic columns differ.
-    g = pd.DataFrame({
-        "contig": ["c1", "c1"],
-        "position": [10, 20],
-        "A_p_value_LMM": [0.374867, 1.0],
-        "A_n_warnings": [4, 12],
-        "A_converged_LMM": [True, False],
-    })
+    g = pd.DataFrame(
+        {
+            "contig": ["c1", "c1"],
+            "position": [10, 20],
+            "A_p_value_LMM": [0.374867, 1.0],
+            "A_n_warnings": [4, 12],
+            "A_converged_LMM": [True, False],
+        }
+    )
     a = g.copy()
-    a["A_n_warnings"] = [8, 12]            # warning count wobbles on row 0
+    a["A_n_warnings"] = [8, 12]  # warning count wobbles on row 0
     a["A_converged_LMM"] = [False, False]  # converged flag flips on row 0
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a_path, a)
@@ -191,13 +195,17 @@ def test_real_value_diff_beside_ignored_diag_still_fails(tmp_path):
     scoped to the diagnostic columns, not the row or the file.
     """
     # Arrange: a real p-value change AND a diagnostic wobble in the same row.
-    g = pd.DataFrame({
-        "contig": ["c1"], "position": [10],
-        "A_p_value_LMM": [0.374867], "A_n_warnings": [4],
-    })
+    g = pd.DataFrame(
+        {
+            "contig": ["c1"],
+            "position": [10],
+            "A_p_value_LMM": [0.374867],
+            "A_n_warnings": [4],
+        }
+    )
     a = g.copy()
     a["A_p_value_LMM"] = [0.99]  # real regression
-    a["A_n_warnings"] = [9]      # plus diagnostic noise
+    a["A_n_warnings"] = [9]  # plus diagnostic noise
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a_path, a)
     _write_tsv(g_path, g)
@@ -214,10 +222,14 @@ def test_dropping_ignored_diag_column_still_fails_schema(tmp_path):
     regression and must be reported as a column-set mismatch.
     """
     # Arrange: golden has the diagnostic column; actual drops it.
-    g = pd.DataFrame({
-        "contig": ["c1"], "position": [10],
-        "A_p_value_LMM": [0.5], "A_converged_LMM": [True],
-    })
+    g = pd.DataFrame(
+        {
+            "contig": ["c1"],
+            "position": [10],
+            "A_p_value_LMM": [0.5],
+            "A_converged_LMM": [True],
+        }
+    )
     a = g.drop(columns=["A_converged_LMM"])
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
     _write_tsv(a_path, a)
@@ -275,17 +287,19 @@ def test_tied_rows_distinguished_by_extra_keys_match(tmp_path):
     """
     # Arrange: four rows that share every current sort key, distinguished only
     # by test_type + group_analyzed (mirrors p_value_summary_single_sample).
-    g = pd.DataFrame({
-        "mag_id": ["MAG_001"] * 4,
-        "contig": ["c1"] * 4,
-        "position": [14, 14, 14, 14],
-        "gene_id": ["g1"] * 4,
-        "test_type": ["tTest", "Wilcoxon", "tTest", "Wilcoxon"],
-        "group_analyzed": ["treatment", "treatment", "control", "control"],
-        "source_file": ["t.tsv.gz", "t.tsv.gz", "c.tsv.gz", "c.tsv.gz"],
-        "min_p_value": [0.5, 1.0, 1.0, 1.0],
-        "q_value": [0.72, 1.0, 1.0, 1.0],
-    })
+    g = pd.DataFrame(
+        {
+            "mag_id": ["MAG_001"] * 4,
+            "contig": ["c1"] * 4,
+            "position": [14, 14, 14, 14],
+            "gene_id": ["g1"] * 4,
+            "test_type": ["tTest", "Wilcoxon", "tTest", "Wilcoxon"],
+            "group_analyzed": ["treatment", "treatment", "control", "control"],
+            "source_file": ["t.tsv.gz", "t.tsv.gz", "c.tsv.gz", "c.tsv.gz"],
+            "min_p_value": [0.5, 1.0, 1.0, 1.0],
+            "q_value": [0.72, 1.0, 1.0, 1.0],
+        }
+    )
     # actual = same rows in a different (parallel-emit) order.
     a = g.iloc[[2, 0, 3, 1]].reset_index(drop=True)
     a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
@@ -304,17 +318,19 @@ def test_real_value_diff_among_tied_rows_still_fails(tmp_path):
     over-tolerate.
     """
     # Arrange: identical to the match case, then change one real value.
-    g = pd.DataFrame({
-        "mag_id": ["MAG_001"] * 4,
-        "contig": ["c1"] * 4,
-        "position": [14, 14, 14, 14],
-        "gene_id": ["g1"] * 4,
-        "test_type": ["tTest", "Wilcoxon", "tTest", "Wilcoxon"],
-        "group_analyzed": ["treatment", "treatment", "control", "control"],
-        "source_file": ["t.tsv.gz", "t.tsv.gz", "c.tsv.gz", "c.tsv.gz"],
-        "min_p_value": [0.5, 1.0, 1.0, 1.0],
-        "q_value": [0.72, 1.0, 1.0, 1.0],
-    })
+    g = pd.DataFrame(
+        {
+            "mag_id": ["MAG_001"] * 4,
+            "contig": ["c1"] * 4,
+            "position": [14, 14, 14, 14],
+            "gene_id": ["g1"] * 4,
+            "test_type": ["tTest", "Wilcoxon", "tTest", "Wilcoxon"],
+            "group_analyzed": ["treatment", "treatment", "control", "control"],
+            "source_file": ["t.tsv.gz", "t.tsv.gz", "c.tsv.gz", "c.tsv.gz"],
+            "min_p_value": [0.5, 1.0, 1.0, 1.0],
+            "q_value": [0.72, 1.0, 1.0, 1.0],
+        }
+    )
     a = g.copy()
     a.loc[0, "q_value"] = 0.99  # genuine change on the (tTest, treatment) row
     a = a.iloc[[2, 0, 3, 1]].reset_index(drop=True)  # shuffle to prove alignment
@@ -391,8 +407,9 @@ def test_compare_trees_threads_tolerance(tmp_path):
     golden, actual = tmp_path / "golden", tmp_path / "actual"
     golden.mkdir()
     actual.mkdir()
-    g = pd.DataFrame({"contig": ["c1", "c2"], "position": [10, 20],
-                      "A_frequency": [0.5, 0.25]})
+    g = pd.DataFrame(
+        {"contig": ["c1", "c2"], "position": [10, 20], "A_frequency": [0.5, 0.25]}
+    )
     a = g.copy()
     a["A_frequency"] = [0.5004, 0.2503]
     _write_tsv(golden / "f.tsv", g)
@@ -424,7 +441,8 @@ def test_exclude_substrings_skips_matching_files(tmp_path):
     _write_tsv(golden / "significance_tests" / "two_sample_paired_x" / "b.tsv", df)
     # Act + Assert: excluded substring -> the paired file is skipped, not MISSING.
     fails = compare_trees(
-        actual, golden,
+        actual,
+        golden,
         include_prefixes=["significance_tests"],
         exclude_substrings=["two_sample_paired"],
     )
@@ -454,3 +472,78 @@ def test_compare_trees_reports_missing_file(tmp_path):
     # Assert: exactly one failure, flagged as MISSING.
     assert len(fails) == 1
     assert "MISSING" in fails[0]
+
+
+def test_present_forbidden_paths_are_reported(tmp_path):
+    """``forbidden_present`` names every expected-absent path that exists."""
+    from tests.regression.compare import forbidden_present
+
+    (tmp_path / "dnds_analysis").mkdir()
+    (tmp_path / "dnds_analysis" / "x.tsv").write_text("a\n1\n")
+    (tmp_path / "lonely.tsv").write_text("a\n1\n")
+    out = forbidden_present(
+        tmp_path, ["dnds_analysis", "baseline_presence", "lonely.tsv"]
+    )
+    assert out == [
+        "FORBIDDEN (exists): dnds_analysis",
+        "FORBIDDEN (exists): lonely.tsv",
+    ]
+
+
+def test_absent_forbidden_paths_pass(tmp_path):
+    from tests.regression.compare import forbidden_present
+
+    assert forbidden_present(tmp_path, ["dnds_analysis"]) == []
+
+
+def test_full_contract_excludes_the_cache_but_not_the_allele_analysis_parquet():
+    """Only the allele-frequency cache files are left out of the full-tree
+    contract; the allele-analysis step's parquet tables are derived outputs
+    and must stay pinned."""
+    from tests.regression._scope import FULL_EXCLUDE_SUBSTRINGS
+
+    def excluded(rel):
+        return any(s in rel for s in FULL_EXCLUDE_SUBSTRINGS)
+
+    assert excluded("allele_freq_cache/MAG_001_post_allele_frequency.parquet")
+    assert not excluded(
+        "allele_freq_cache/MAG_001_post_allele_frequency_site_depth_filter.tsv"
+    )
+    assert not excluded(
+        "allele_analysis/allele_analysis_pre_post-treatment_control/"
+        "MAG_001_allele_frequency_changes_mean.parquet"
+    )
+    assert not excluded(
+        "allele_analysis/allele_analysis_pre_post-treatment_control/"
+        "MAG_001_allele_frequency_changes_no_zero-diff.parquet"
+    )
+
+
+def test_categorical_keys_with_different_category_order_still_align(tmp_path):
+    """Parquet keeps pandas categoricals, and a pipeline run records the
+    categories in first-seen order, so two runs of the same table can carry
+    the same rows under different category orders.  Sorting by category CODE
+    would then pair row i of one file with a different subject in the other;
+    the comparator must sort by the key's value instead."""
+    from tests.regression.compare import compare_tables
+
+    rows = pd.DataFrame(
+        {
+            "contig": ["c1"] * 4,
+            "position": [0, 0, 1, 1],
+            "subjectID": ["subj3", "subj8", "subj3", "subj8"],
+            "A_frequency": [0.9, 0.1, 0.8, 0.2],
+        }
+    )
+    golden = rows.copy()
+    golden["subjectID"] = pd.Categorical(
+        golden["subjectID"], categories=["subj3", "subj8"]
+    )
+    actual = rows.iloc[[1, 0, 3, 2]].copy()  # same rows, other order ...
+    actual["subjectID"] = pd.Categorical(
+        actual["subjectID"], categories=["subj8", "subj3"]
+    )  # ... other category order
+    g, a = tmp_path / "g.parquet", tmp_path / "a.parquet"
+    golden.to_parquet(g, index=False)
+    actual.to_parquet(a, index=False)
+    compare_tables(a, g)  # must not raise
