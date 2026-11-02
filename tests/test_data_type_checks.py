@@ -52,9 +52,9 @@ def _cfg(data_type, combos=None, **flags):
     """A minimal config: one well-formed timepoint combination unless given."""
     if combos is None:
         combos = (
-            [{"timepoint": ["t1"], "focus": "t1"}]
+            [{"timepoint": "t1"}]
             if data_type == "single"
-            else [{"timepoint": ["pre", "post"], "focus": "post"}]
+            else [{"earlier": "pre", "later": "post"}]
         )
     analysis = {"data_type": data_type, "timepoints_combinations": combos}
     analysis.update(flags)
@@ -109,24 +109,64 @@ class TestCheckDataTypeFeatures:
         assert "use_strain_turnover" in msg
         assert "use_dnds" not in msg
 
-    def test_single_with_a_two_timepoint_combination_is_refused(self):
+    def test_single_with_a_longitudinal_pair_is_refused(self):
         fns = _load()
-        cfg = _cfg("single", combos=[{"timepoint": ["pre", "post"], "focus": "post"}])
-        with pytest.raises(ValueError, match="exactly 1"):
+        cfg = _cfg("single", combos=[{"earlier": "pre", "later": "post"}])
+        with pytest.raises(ValueError, match='timepoint: "end"'):
             fns["check_data_type_features"](cfg)
 
-    def test_longitudinal_with_a_one_timepoint_combination_is_refused(self):
+    def test_longitudinal_with_a_single_entry_is_refused_naming_it(self):
         fns = _load()
         cfg = _cfg(
             "longitudinal",
-            combos=[
-                {"timepoint": ["pre", "post"], "focus": "post"},
-                {"timepoint": ["mid"], "focus": "mid"},
-            ],
+            combos=[{"earlier": "pre", "later": "post"}, {"timepoint": "mid"}],
         )
-        with pytest.raises(ValueError, match="exactly 2") as exc:
+        with pytest.raises(ValueError, match="earlier") as exc:
             fns["check_data_type_features"](cfg)
         assert "mid" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"timepoint": ["pre", "post"], "focus": "post"},  # the retired spelling
+            {"earlier": "pre", "later": "post", "focus": "post"},  # no focus key
+            {"earlier": "pre"},  # later missing
+            {"earlier": "pre", "later": "pre"},  # two different names
+            {"earlier": "", "later": "post"},  # blank name
+            {"earlier": ["pre"], "later": "post"},  # a list is not a name
+        ],
+    )
+    def test_longitudinal_refuses_every_other_spelling_with_the_expected_one(
+        self, entry
+    ):
+        fns = _load()
+        with pytest.raises(ValueError, match='earlier: "pre"') as exc:
+            fns["check_data_type_features"](_cfg("longitudinal", combos=[entry]))
+        assert "focus" in str(exc.value)
+
+    def test_single_refuses_the_retired_list_spelling(self):
+        fns = _load()
+        cfg = _cfg("single", combos=[{"timepoint": ["t1"], "focus": "t1"}])
+        with pytest.raises(ValueError, match='timepoint: "end"'):
+            fns["check_data_type_features"](cfg)
+
+    def test_integer_timepoint_names_are_accepted(self):
+        fns = _load()
+        assert (
+            fns["check_data_type_features"](
+                _cfg("longitudinal", combos=[{"earlier": 5, "later": 10}])
+            )
+            == "longitudinal"
+        )
+        assert (
+            fns["check_data_type_features"](_cfg("single", combos=[{"timepoint": 10}]))
+            == "single"
+        )
+
+    def test_no_combination_at_all_is_refused(self):
+        fns = _load()
+        with pytest.raises(ValueError, match="at least one"):
+            fns["check_data_type_features"](_cfg("longitudinal", combos=[]))
 
     def test_turnover_without_pairwise_ani_is_refused(self):
         fns = _load()

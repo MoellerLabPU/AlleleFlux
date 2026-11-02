@@ -353,3 +353,24 @@ class TestProfileRowWithoutN(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestMapGenesTrailingSpace(unittest.TestCase):
+    """Prodigal headers read ``>id # start # end # strand # ...``: splitting on
+    ``#`` leaves a trailing space on the id.  The profiler wrote that space
+    into every profile's gene_id, while dN/dS keys its records by Biopython's
+    ``record.id`` (no space) and gene scores had to strip it by hand.  The id
+    must come out clean at the source."""
+
+    def test_gene_ids_have_no_surrounding_whitespace(self):
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "genes.fna")
+            with open(path, "w") as fh:
+                fh.write(">c1_1 # 100 # 300 # 1 # ID=1_1;partial=00\nATGAAATAA\n")
+            genes = map_genes(path)
+        self.assertEqual(genes["gene_id"].tolist(), ["c1_1"])
+        self.assertEqual(genes["contig"].tolist(), ["c1"])
+        self.assertEqual((genes["start"].item(), genes["end"].item()), (99, 299))

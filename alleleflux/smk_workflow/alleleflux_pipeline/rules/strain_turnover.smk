@@ -35,9 +35,9 @@ rule strain_turnover:
         # EARLIER:LATER for every two-timepoint combination -- the same spelling
         # the pairwise-ANI rule uses for pairs == "transitions".
         transitions=" ".join(
-            f"{tc['timepoint'][0]}:{tc['timepoint'][1]}"
+            f"{tc['earlier']}:{tc['later']}"
             for tc in config["analysis"]["timepoints_combinations"]
-            if len(tc["timepoint"]) == 2
+            if "later" in tc
         ),
         min_compared=config["analysis"].get("strain_turnover", {}).get("min_compared", 0.1),
         pop_threshold=config["analysis"].get("strain_turnover", {}).get("pop_threshold", 0.99999),

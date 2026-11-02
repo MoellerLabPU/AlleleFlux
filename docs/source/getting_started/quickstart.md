@@ -64,8 +64,8 @@ analysis:
   use_lmm: true
   use_cmh: true
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 ```
@@ -76,7 +76,7 @@ For a single-timepoint study:
 analysis:
   data_type: "single"
   timepoints_combinations:
-    - timepoint: ["baseline"]
+    - timepoint: baseline
   groups_combinations:
     - ["disease", "healthy"]
 ```

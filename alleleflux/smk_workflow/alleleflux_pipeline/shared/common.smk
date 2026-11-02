@@ -334,6 +334,75 @@ ALL_TEST_TYPES = BETWEEN_GROUP_TEST_TYPES + WITHIN_GROUP_TEST_TYPES
 # Global Configuration
 # =============================================================================
 
+def check_timepoint_order(meta, earlier, later):
+    """Does the sheet's ``collection_date`` agree that ``earlier`` comes before ``later``?
+
+    The config's list order IS the time order for every longitudinal step, so a
+    swapped pair silently flips every frequency change.  When the metadata
+    sheet carries collection dates (ISO ``YYYY-MM-DD``, the same column the
+    cohort baseline scope reads) the order can be checked before any job is
+    submitted.  Mice sampled at both timepoints decide: ONE mouse whose
+    later-timepoint sample is dated before its earlier one stops the run,
+    naming the mice (user ruling 2026-11-02: whether the pair is swapped or
+    the sheet's dates are wrong, neither should run).  No subject at both
+    timepoints at all raises too: longitudinal AlleleFlux pairs each subject's
+    two samples (the allele-frequency step inner-joins on ``subjectID``), so
+    such a sheet has nothing to analyse.  No ``collection_date`` column, or
+    a blank date among the two timepoints' rows, means no check (``checked``
+    False): dates are never guessed.  A date that is not ``YYYY-MM-DD`` raises,
+    naming it.
+
+    Returns ``{"checked", "paired"}``.
+
+    Example: m1 pre 2024-01-15 / post 2024-04-15, m2 the same -> checked, 2
+    paired; the same sheet asked about ("post", "pre") raises naming both mice;
+    a sheet whose pre mice and post mice are different animals raises.
+    """
+    none = {"checked": False, "paired": 0}
+    if "collection_date" not in meta.columns:
+        return none
+    rows = meta[meta["time"].astype(str).isin([str(earlier), str(later)])].copy()
+    dates = rows["collection_date"]
+    if dates.isna().any() or (dates.astype(str).str.strip() == "").any():
+        return none
+    # Strict ISO parse: a day/month mix-up would reorder the check itself.
+    parsed = pd.to_datetime(dates.astype(str), format="%Y-%m-%d", errors="coerce")
+    if parsed.isna().any():
+        bad = sorted(set(dates.astype(str)[parsed.isna()]))
+        raise ValueError(
+            f"collection_date must be YYYY-MM-DD; cannot read {bad} for timepoints "
+            f"{earlier!r} / {later!r}"
+        )
+    rows["_date"] = parsed.to_numpy()
+    rows["time"] = rows["time"].astype(str)
+    rows["subjectID"] = rows["subjectID"].astype(str)
+    t0 = rows[rows["time"] == str(earlier)].groupby("subjectID")["_date"].min()
+    t1 = rows[rows["time"] == str(later)].groupby("subjectID")["_date"].min()
+    paired = t0.index.intersection(t1.index)
+    if len(paired):
+        backward = (t1[paired] < t0[paired]).to_numpy()
+        if backward.any():
+            bad = sorted(paired[backward].astype(str))
+            raise ValueError(
+                f"timepoint combination [{earlier}, {later}] lists {later!r} as the later "
+                f"timepoint, but {int(backward.sum())} of {len(paired)} mice sampled at "
+                f"both have their {later!r} sample dated BEFORE their {earlier!r} sample: "
+                f"{bad}.  Either the pair is swapped (exchange the earlier and later "
+                "names in the config) or the sheet's collection dates are wrong for "
+                "these mice; neither may run"
+            )
+        return {"checked": True, "paired": int(len(paired))}
+    # No subject at both timepoints: the allele-frequency step would inner-join
+    # the two timepoints on subjectID and keep nothing, so stop here with the
+    # reason instead of hours later with empty tables.
+    raise ValueError(
+        f"timepoint combination [{earlier}, {later}]: no subject is sampled at both "
+        f"timepoints ({len(t0)} subjects at {earlier!r}, {len(t1)} at {later!r}, none "
+        "shared).  Longitudinal analysis pairs each subject's two samples; check "
+        "that subjectID is spelled the same at both timepoints"
+    )
+
+
 def check_data_type_features(config):
     """Refuse, while the Snakefile is still being read, every setting that cannot
     mean anything for the configured data type.  Returns the checked data type.
@@ -354,9 +423,12 @@ def check_data_type_features(config):
 
     Also checked, for both data types:
 
-    * every ``timepoints_combinations`` entry lists exactly 1 timepoint on single
-      data and exactly 2 on longitudinal data -- a mismatched entry used to be
-      skipped without a word, which meant "my pre/post comparison never ran";
+    * every ``timepoints_combinations`` entry has the ONE spelling of its data
+      type: ``timepoint: "end"`` on single data, ``earlier: "pre"`` + ``later:
+      "post"`` on longitudinal data (the later one is the focus; there is no
+      focus key).  The list-plus-focus spelling was retired 2026-11-02 because
+      it never said which timepoint came first, while every step took list
+      order as time order;
     * ``data_type`` itself is one of the two known words (an unknown word used to
       fall through every ``if DATA_TYPE == ...`` branch, including the one that
       picks the output sub-folder);
@@ -383,20 +455,35 @@ def check_data_type_features(config):
             f"analysis.data_type must be one of {data_types}, got {data_type!r}"
         )
 
-    # One timepoint per entry on single data, two on longitudinal; anything
-    # else cannot be turned into a comparison label and used to vanish silently.
-    want = 1 if data_type == "single" else 2
-    bad = [
-        tc["timepoint"]
-        for tc in analysis["timepoints_combinations"]
-        if len(tc["timepoint"]) != want
-    ]
-    if bad:
-        raise ValueError(
-            f"analysis.data_type is {data_type!r}, so every entry of "
-            f"analysis.timepoints_combinations must list exactly {want} "
-            f"timepoint(s); offending entries: {bad}"
+    # ONE spelling per data type.  Longitudinal: ``earlier`` and ``later``,
+    # nothing else (the later one is the focus).  Single: ``timepoint``, one
+    # name.  Names may be YAML strings or bare integers (``10mo`` is a string
+    # already; ``10`` is read as int and used as the text "10").  Anything
+    # else, in particular the retired ``timepoint: [a, b]`` + ``focus`` form,
+    # stops here with the expected spelling in the message.
+    combos = analysis.get("timepoints_combinations") or []
+    if not combos:
+        raise ValueError("analysis.timepoints_combinations must list at least one entry")
+    want = {"timepoint"} if data_type == "single" else {"earlier", "later"}
+    spelling = (
+        '- timepoint: "end"'
+        if data_type == "single"
+        else '- earlier: "pre"\n      later: "post"'
+    )
+    for tc in combos:
+        keys = set(tc) if isinstance(tc, dict) else set()
+        named = keys == want and all(
+            isinstance(tc[k], (str, int)) and str(tc[k]).strip() for k in want
         )
+        if not named or (
+            data_type == "longitudinal" and str(tc["earlier"]) == str(tc["later"])
+        ):
+            raise ValueError(
+                f"analysis.data_type is {data_type!r}, so every entry of "
+                f"analysis.timepoints_combinations must be spelled\n    {spelling}\n"
+                f"(no other keys, no focus key: the later timepoint is the focus; "
+                f"two different names for longitudinal data); offending entry: {tc}"
+            )
 
     if data_type == "single":
         # Explicit True only: an absent key is the (longitudinal-written) template
@@ -735,29 +822,41 @@ timepoints_labels = []
 focus_timepoints = {}
 
 for time_combo in config["analysis"]["timepoints_combinations"]:
-    # Standardized format: all entries are dictionaries with "timepoint" key
-    timepoint = time_combo["timepoint"]
-    
-    if len(timepoint) == 1 and DATA_TYPE == "single":
-        # Single timepoint
-        tp = timepoint[0]
+    # Shape already checked by check_data_type_features: a single entry carries
+    # ``timepoint``, a longitudinal one ``earlier`` + ``later`` (the focus).
+    if DATA_TYPE == "single":
+        tp = str(time_combo["timepoint"])
         timepoints_labels.append(tp)
-        # For single data type, the timepoint itself is the focus
         focus_timepoints[tp] = tp
-    elif len(timepoint) == 2 and DATA_TYPE == "longitudinal":
-        # Multiple timepoints (for longitudinal analysis)
-        label = f"{timepoint[0]}_{timepoint[1]}"
+    else:
+        earlier, later = str(time_combo["earlier"]), str(time_combo["later"])
+        label = f"{earlier}_{later}"
         timepoints_labels.append(label)
-        if "focus" in time_combo:
-            # Ensure focus is one of the two timepoints
-            if time_combo["focus"] in timepoint:
-                focus_timepoints[label] = time_combo["focus"]
-            else:
-                raise ValueError(f"Invalid focus timepoint '{time_combo['focus']}' for combination '{label}'. Must be one of {timepoint}")
-        else:
-            # Default to second timepoint if focus not specified
-            logger.warning(f"No focus specified for timepoint combination {label}. Using '{timepoint[1]}' as default.")
-            focus_timepoints[label] = timepoint[1]
+        focus_timepoints[label] = later
+
+# The listed order must agree with the sheet's collection dates (when it has
+# them): a swapped pair would flip every frequency change silently.  The sheet
+# is a required input of every run (the metadata step reads it first), so a
+# path that is empty or not on disk stops here rather than one job later.
+if DATA_TYPE == "longitudinal":
+    _meta_path = config.get("input", {}).get("metadata_path", "")
+    if not _meta_path or not os.path.exists(_meta_path):
+        raise ValueError(
+            f"input.metadata_path must name the sample sheet; got {_meta_path!r}"
+            + ("" if _meta_path else " (empty)")
+            + ("" if not _meta_path or os.path.exists(_meta_path) else " (no such file)")
+        )
+    _meta_sheet = pd.read_csv(_meta_path, sep="\t", dtype=str)
+    for _label in timepoints_labels:
+        _earlier, _later = _label.split("_")
+        _order = check_timepoint_order(_meta_sheet, _earlier, _later)
+        if not _order["checked"]:
+            logger.warning(
+                f"timepoint combination {_label}: the metadata sheet has no complete "
+                "collection_date column for these timepoints, so the listed order "
+                "(earlier first) is taken on trust"
+            )
+    del _meta_sheet
 
 # Define valid focus timepoint values for each timepoint label
 valid_focus_timepoints = {}

@@ -74,7 +74,7 @@ Core analysis settings.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). Checked while the Snakefile is read: every `timepoints_combinations` entry must list exactly one timepoint for `single` and exactly two for `longitudinal`, and on `single` data an explicit `use_dnds`, `use_regional_contrast`, `use_baseline_presence` or `use_strain_turnover: true` stops the run before any job starts (these compare a sample with an earlier one, which single data does not have). Leaving those keys out is fine: absent means off for single data. |
+| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). Checked while the Snakefile is read: every `timepoints_combinations` entry must be spelled `timepoint: "name"` for `single` and `earlier:` + `later:` for `longitudinal` (see below), and on `single` data an explicit `use_dnds`, `use_regional_contrast`, `use_baseline_presence` or `use_strain_turnover: true` stops the run before any job starts (these compare a sample with an earlier one, which single data does not have). Leaving those keys out is fine: absent means off for single data. |
 | `allele_analysis_only` | `false` | If true, only run allele frequency analysis without statistical tests. |
 | `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
@@ -97,39 +97,34 @@ For detailed information about statistical tests and score calculations, see [St
 
 **Timepoints Configuration:**
 
-For longitudinal analysis, specify pairs of timepoints and a **focus timepoint**:
+For longitudinal analysis, specify each comparison as its **earlier** and **later** timepoint (names exactly as in the metadata's `time` column):
 
 ```yaml
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [pre, post]
-      focus: post      # The later/derived timepoint
-    - timepoint: [pre, mid]
-      focus: mid
+    - earlier: pre
+      later: post  # The later/derived timepoint
+    - earlier: pre
+      later: mid
 ```
 
-**Understanding the Focus Timepoint:**
+**The later timepoint is the focus.** Everything directional reads the order from these two keys: the allele-frequency change is later minus earlier, dN/dS treats the later timepoint as the derived state and the earlier one as ancestral, and the CMH score counts sites that became significant at the later timepoint. There is no separate `focus` key; the old `timepoint: [a, b]` + `focus` spelling is refused with a message showing the new one.
 
-The focus timepoint represents the **derived** or **later** state in evolutionary comparisons:
-
-- **For dN/dS analysis**: The focus timepoint is treated as the "derived" (Time 2) state, while the other timepoint is "ancestral" (Time 1). AlleleFlux calculates evolutionary changes in the direction: ancestral → derived.
-- **For CMH scores**: The score measures differential significance relative to the focus timepoint (sites significant at focus but not at the other timepoint).
-- **Selection guideline**: Always choose the **later** or **endpoint** timepoint as focus.
-- **Default behavior**: If not specified, defaults to the second timepoint in the list.
+When the metadata sheet has a `collection_date` column (`YYYY-MM-DD`), the Snakefile checks the listed order against the dates before any job starts: any mouse sampled at both timepoints whose "later" sample is dated before its "earlier" one stops the run, naming the mouse (a swapped pair or a wrong date; neither may run), and a sheet with no subject sampled at both timepoints stops as well, since longitudinal analysis pairs each subject's two samples. A sheet without dates is taken on trust, with a warning.
 
 **Examples:**
 
 ```yaml
 # Typical longitudinal study: Day 0 → Day 30
 timepoints_combinations:
-  - timepoint: [day0, day30]
-    focus: day30        # day30 is derived, day0 is ancestral
+  - earlier: day0
+    later: day30  # day30 is derived, day0 is ancestral
 
 # Treatment study: Baseline → Post-treatment
 timepoints_combinations:
-  - timepoint: [baseline, post_treatment]
-    focus: post_treatment  # Post is derived state
+  - earlier: baseline
+    later: post_treatment  # Post is derived state
 ```
 
 For single timepoint analysis:
@@ -138,7 +133,7 @@ For single timepoint analysis:
 analysis:
   data_type: single
   timepoints_combinations:
-    - timepoint: [baseline]  # No focus needed for single timepoint
+    - timepoint: baseline
 ```
 
 **Groups Configuration:**
@@ -423,8 +418,8 @@ analysis:
   use_cmh: true
   use_dnds: true
   timepoints_combinations:
-    - timepoint: [pre, post]
-      focus: post
+    - earlier: pre
+      later: post
   groups_combinations:
     - [high_fat, control]
 

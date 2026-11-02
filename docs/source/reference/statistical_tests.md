@@ -177,7 +177,7 @@ Score (%) = |Differential sites| / |S_common| × 100
 
 - The focus timepoint represents the **derived** or **later** state
 - Always choose the **endpoint** or **later timepoint** as focus
-- Example: For timepoints `[pre, post]`, set `focus: post`
+- Example: For the pair `earlier: pre`, `later: post`, the focus is `post`
 
 ---
 

@@ -62,8 +62,7 @@ analysis:
     - genus
 
   timepoints_combinations:
-    - timepoint: ['t1']
-      focus: "t1"
+    - timepoint: "t1"
 
   groups_combinations:
     - treatment: "treatment"

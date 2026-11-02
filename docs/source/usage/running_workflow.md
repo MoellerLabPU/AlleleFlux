@@ -123,8 +123,8 @@ analysis:
   use_lmm: true
   use_cmh: true
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 
@@ -172,8 +172,8 @@ The `data_type` setting is the most important configuration choice:
 analysis:
   data_type: "longitudinal"
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 
@@ -181,7 +181,7 @@ analysis:
 analysis:
   data_type: "single"
   timepoints_combinations:
-    - timepoint: ["baseline"]
+    - timepoint: baseline
   groups_combinations:
     - ["disease", "healthy"]
 ```

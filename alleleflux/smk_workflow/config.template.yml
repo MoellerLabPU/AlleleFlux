@@ -133,17 +133,16 @@ analysis:
     - species
 
   # Timepoints and groups to analyze
-  # For longitudinal analysis: specify pairs of timepoints and which one to focus on
-  # For single analysis: specify individual timepoints
+  # Longitudinal: one entry per comparison, spelled as the EARLIER and the LATER
+  # timepoint (names exactly as in the metadata's time column).  The later one is
+  # the focus everywhere it matters (dN/dS derived state, the CMH divergence
+  # score); there is no focus key.  When the metadata carries collection_date,
+  # the order is checked against the dates before any job starts.
+  # Single: one entry per timepoint, spelled as timepoint: "name".
   timepoints_combinations:
-    - timepoint: ["pre", "post"]  # Timepoint pair for longitudinal analysis
-      focus: "post"               # FOCUS TIMEPOINT: The derived/later state for evolutionary analysis
-                                  # - For dN/dS: focus = derived (Time 2), other = ancestral (Time 1)
-                                  # - For CMH scores: measures sites significant at focus but not at other timepoint
-                                  # - Guideline: Always choose the LATER or ENDPOINT timepoint as focus
-                                  # - Default: If not specified, uses the second timepoint
-                                  # - Example: For Day 0 → Day 30, use focus: "day30"
-    # - timepoint: ["end"]        # For single timepoint analysis (set data_type: "single")
+    - earlier: "pre"              # Comparison pre -> post
+      later: "post"
+    # - timepoint: "end"          # For single timepoint analysis (set data_type: "single")
 
   groups_combinations:
     - treatment: "treatment"      # Name of the treatment group as it appears in metadata

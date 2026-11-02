@@ -1125,6 +1125,15 @@ def write_config(
         )
         config_filename = f"config_with_bams_{data_type}.yml"
 
+    # ONE spelling per data type (config.template.yml): a single
+    # timepoint is ``timepoint: name``; a longitudinal pair is spelled
+    # as its earlier and later timepoint, the later one being the focus.
+    if len(timepoints) == 1:
+        timepoints_block = f'    - timepoint: "{timepoints[0]}"'
+    else:
+        timepoints_block = (
+            f'    - earlier: "{timepoints[0]}"\n' f'      later: "{timepoints[-1]}"'
+        )
     config = f"""{header}
 run_name: "{run_name}"
 
@@ -1163,8 +1172,7 @@ analysis:
     - genus
 
   timepoints_combinations:
-    - timepoint: {timepoints}
-      focus: "{timepoints[-1] if len(timepoints) > 1 else timepoints[0]}"
+{timepoints_block}
 
   groups_combinations:
     - treatment: "{groups[1]}"

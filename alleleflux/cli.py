@@ -599,7 +599,10 @@ ALLELEFLUX_TOOLS = {
     ],
     "Summary": [
         ("alleleflux-p-value-summary", "Summarize p-values across tests"),
-        ("alleleflux-significant-sites-summary", "Roll up significant sites per MAG for heatmaps"),
+        (
+            "alleleflux-significant-sites-summary",
+            "Roll up significant sites per MAG for heatmaps",
+        ),
     ],
     "Statistics": [
         ("alleleflux-lmm", "Linear Mixed Models analysis"),
@@ -782,13 +785,18 @@ def init_config(use_template, output):
         # Statistical analysis options
         click.echo("\n📊 Statistical Analysis Options:")
         click.echo("  LMM: Best for repeated measures, accounts for subject variation")
-        click.echo("  Significance tests: Simple two-sample and single-sample comparisons")
-        click.echo("  CMH: Stratified categorical analysis, detects directional changes")
+        click.echo(
+            "  Significance tests: Simple two-sample and single-sample comparisons"
+        )
+        click.echo(
+            "  CMH: Stratified categorical analysis, detects directional changes"
+        )
         use_lmm = prompt_boolean(
             "Enable Linear Mixed Models (LMM)? (true/false):", default=True
         )
         use_significance_tests = prompt_boolean(
-            "Enable significance tests (t-test, Mann-Whitney)? (true/false):", default=True
+            "Enable significance tests (t-test, Mann-Whitney)? (true/false):",
+            default=True,
         )
         use_cmh = prompt_boolean(
             "Enable Cochran-Mantel-Haenszel (CMH) test? (true/false):", default=True
@@ -819,11 +827,11 @@ def init_config(use_template, output):
                 click.echo(f"  ✓ Added timepoint: {tp}")
 
             click.echo(f"  → {len(timepoints)} timepoint(s) configured.")
-            timepoints_combinations = [{"timepoint": [tp]} for tp in timepoints]
+            timepoints_combinations = [{"timepoint": tp} for tp in timepoints]
 
         else:  # longitudinal
             click.echo(
-                "For longitudinal analysis, specify timepoint pairs and focus timepoint."
+                "For longitudinal analysis, specify each pair as its EARLIER and LATER timepoint."
             )
 
             timepoints_combinations = []
@@ -834,7 +842,7 @@ def init_config(use_template, output):
                     else ""
                 )
                 tp1 = prompt_text(
-                    f"Enter first timepoint name{count_msg} (or leave blank to finish):",
+                    f"Enter the EARLIER timepoint name{count_msg} (or leave blank to finish):",
                     default="",
                     show_default_used=False,
                 )
@@ -845,27 +853,20 @@ def init_config(use_template, output):
                     break
 
                 tp2 = prompt_text(
-                    f"Enter second timepoint name (different from '{tp1}'):",
+                    f"Enter the LATER timepoint name (different from '{tp1}'):",
                     required=True,
                 )
                 if tp2 == tp1:
                     click.echo(
-                        "  ⚠️  Second timepoint must differ from first. Try again."
+                        "  ⚠️  The later timepoint must differ from the earlier one. Try again."
                     )
                     continue
 
-                # Explain focus timepoint
-                click.echo("\n  ℹ️  Focus Timepoint:")
-                click.echo("     The focus represents the DERIVED or LATER state.")
-                click.echo("     - For dN/dS: focus = derived (Time 2), other = ancestral (Time 1)")
-                click.echo("     - For CMH: measures sites significant at focus but not at other")
-                click.echo(f"     - Guideline: Choose the LATER timepoint (typically '{tp2}')")
-                
-                focus = prompt_choice("Select the focus timepoint:", [tp1, tp2])
-                timepoints_combinations.append(
-                    {"timepoint": [tp1, tp2], "focus": focus}
-                )
-                click.echo(f"  ✓ Added pair: {tp1} → {tp2} (focus: {focus})")
+                # The later timepoint is the focus (derived state for dN/dS,
+                # the "became significant here" side of the CMH score); there is
+                # no separate focus key any more.
+                timepoints_combinations.append({"earlier": tp1, "later": tp2})
+                click.echo(f"  ✓ Added pair: {tp1} → {tp2}")
 
             click.echo(
                 f"  → {len(timepoints_combinations)} timepoint pair(s) configured."
@@ -894,14 +895,17 @@ def init_config(use_template, output):
                 break
 
             control = prompt_text(
-                f"Enter control group name (different from '{treatment}'):", required=True
+                f"Enter control group name (different from '{treatment}'):",
+                required=True,
             )
             if control == treatment:
                 click.echo("  ⚠️  Control group must differ from treatment. Try again.")
                 continue
 
             groups_combinations.append({"treatment": treatment, "control": control})
-            click.echo(f"  ✓ Added comparison: {treatment} (treatment) vs {control} (control)")
+            click.echo(
+                f"  ✓ Added comparison: {treatment} (treatment) vs {control} (control)"
+            )
 
         click.echo(f"  → {len(groups_combinations)} group comparison(s) configured.")
 

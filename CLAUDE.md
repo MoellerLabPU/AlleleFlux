@@ -149,7 +149,7 @@ The pipeline is driven by a YAML config with these top-level sections:
 - **`output.root_dir`**: Base output directory
 - **`analysis`**:
   - `data_type`: `"single"` or `"longitudinal"` — **critical**, changes statistical tests, output structure, and timepoint handling
-  - `timepoints_combinations`: List of `{timepoint: [...], focus: ...}` dicts (longitudinal only)
+  - `timepoints_combinations`: List of `{earlier: ..., later: ...}` dicts (longitudinal; the later one is the focus) or `{timepoint: ...}` (single)
   - `groups_combinations`: Group pairs to compare, e.g. `[["fat", "control"]]`
   - `use_lmm`, `use_significance_tests`, `use_cmh`: Feature flags
 - **`quality_control`**: `min_sample_num`, `breadth_threshold`

@@ -182,7 +182,7 @@ Score = |Differential| / |S_common| × 100
 
 - High scores indicate strong timepoint-specific selection at the focus timepoint
 - The focus timepoint (typically the later/derived state) determines directionality
-- Example: If `focus: post`, the score measures sites that became significant from pre→post
+- Example: For the pair `earlier: pre`, `later: post`, the score measures sites that became significant from pre→post
 
 ### LMM Test
 

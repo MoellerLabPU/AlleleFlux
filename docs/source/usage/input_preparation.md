@@ -58,8 +58,8 @@ output:
 
 analysis:
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
   use_lmm: true

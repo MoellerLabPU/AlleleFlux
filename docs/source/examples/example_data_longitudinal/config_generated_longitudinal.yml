@@ -87,8 +87,8 @@ analysis:
     - genus
 
   timepoints_combinations:
-    - timepoint: ['pre', 'post']
-      focus: "post"
+    - earlier: "pre"
+      later: "post"
 
   groups_combinations:
     - treatment: "treatment"

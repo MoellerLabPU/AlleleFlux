@@ -476,7 +476,7 @@ def map_genes(prodigal_fasta):
         header = record.description
         parts = header.split("#")
         if len(parts) == 5:
-            gene_id = parts[0]
+            gene_id = parts[0].strip()  # the header has a space before the first "#"
             # Convert to 0-based half-open coordinates to match Python/pysam conventions:
             # Prodigal uses 1-based inclusive [start, end], so subtract 1 from both.
             start = int(parts[1]) - 1
