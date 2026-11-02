@@ -262,3 +262,390 @@ class TestCoveredBp:
         readable = {("fat", "cageA"): {"c1": np.ones(10, dtype=bool)}}
         with pytest.raises(ValueError, match="c7"):
             covered_bp_by_gene(readable, _genes([("g1", "c7", 0, 4)]))
+
+
+# ---------------------------------------------------------------------------
+# Task 2: per-cage classification through the Phase 2 rules
+# ---------------------------------------------------------------------------
+
+from alleleflux.scripts.analysis.ani.null_model import build_error_model
+from alleleflux.scripts.analysis.baseline_presence import Timepoints
+from alleleflux.scripts.analysis.gene_de_novo import classify_cage_rises, is_event
+
+MODEL = build_error_model(min_base_quality=30, fdr=1e-6)
+TPS = Timepoints("pre", "post")
+PERIOD = "pre_post"
+# Three cages: fat/cageA holds m1 + m2, fat/cageB holds m3, ctl/cageC holds m9.
+MICE = {
+    "m1": ("cageA", "fat"),
+    "m2": ("cageA", "fat"),
+    "m3": ("cageB", "fat"),
+    "m9": ("cageC", "ctl"),
+}
+DATES = {"pre": "2024-01-15", "post": "2024-04-15"}
+
+
+def _sheet_rows():
+    rows = []
+    for mouse, (rep, group) in MICE.items():
+        for tp in ("pre", "post"):
+            rows.append((f"{mouse}_{tp}", mouse, rep, group, tp, DATES[tp]))
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "sample_id",
+            "subjectID",
+            "replicate",
+            "group",
+            "time",
+            "collection_date",
+        ],
+    )
+
+
+def _rows(counts):
+    """counts: {(mouse, tp, position): (A, C, G, T)} -> cache rows for contig c1."""
+    recs = []
+    for (mouse, tp, pos), (a, c, g, t) in counts.items():
+        rep, group = MICE[mouse]
+        recs.append(
+            {
+                "contig": "c1",
+                "position": pos,
+                "sample_id": f"{mouse}_{tp}",
+                "subjectID": mouse,
+                "replicate": rep,
+                "group": group,
+                "timepoint": tp,
+                "A": a,
+                "C": c,
+                "G": g,
+                "T": t,
+                "total_coverage": a + c + g + t,
+            }
+        )
+    return pd.DataFrame(recs)
+
+
+def _background(positions, mice=MICE, tps=("pre", "post"), depth=40):
+    """Every mouse at every timepoint: ``depth`` reads of A, nothing else."""
+    return {(m, tp, p): (depth, 0, 0, 0) for m in mice for tp in tps for p in positions}
+
+
+def _rise(rep, group, pos, allele="T"):
+    return {
+        "contig": "c1",
+        "position": pos,
+        "gene_id": "g1",
+        "replicate": rep,
+        "group": group,
+        "allele": allele,
+        "diff_mean": 0.5,
+        "subjectID_count": 1,
+    }
+
+
+def _turnover(verdicts):
+    """verdicts: {mouse: True/False/None} -> the per-mouse turnover table."""
+    return pd.DataFrame(
+        {
+            "subjectID": list(verdicts),
+            "transition": PERIOD,
+            "sample_t2": [f"{m}_post" for m in verdicts],
+            "dominant_strain_change": [
+                pd.NA if v is None else v for v in verdicts.values()
+            ],
+        }
+    )
+
+
+def _classify(rises, counts, **over):
+    kwargs = dict(
+        mag_id="M",
+        tps=TPS,
+        scope="cohort",
+        model=MODEL,
+        min_freq=0.05,
+        min_cov=5,
+        window_bp=1000,
+        max_neighbours=0,
+        strain_gate="none",
+        min_determined_carriers=1,
+        turnover=None,
+    )
+    kwargs.update(over)
+    return classify_cage_rises(
+        pd.DataFrame(rises), _rows(counts), _sheet_rows(), **kwargs
+    )
+
+
+class TestClassifyCageRises:
+    def test_standing_allele_is_not_an_event(self):
+        counts = _background([2000])
+        counts[("m9", "pre", 2000)] = (
+            34,
+            0,
+            0,
+            6,
+        )  # another group's mouse had T before
+        counts[("m1", "post", 2000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 2000)], counts)
+        assert out["origin"].tolist() == ["standing_variation"]
+        assert out["carriers"].item() == "m1"
+        assert out["n_baseline_samples_present"].item() == 1
+        assert not is_event(out["origin"], "exclude").any()
+
+    def test_lone_de_novo_in_one_cage_is_an_event(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 3000)], counts)
+        assert out["origin"].tolist() == ["de_novo"]
+        assert out["block_id"].item() == ""
+        assert out["n_baseline_samples_covered"].item() == 4  # every pre row (cohort)
+        assert is_event(out["origin"], "exclude").tolist() == [True]
+
+    def test_a_whisper_at_baseline_is_de_novo_below_detection(self):
+        counts = _background([3000])
+        counts[("m2", "pre", 3000)] = (39, 0, 0, 1)  # 1 read of 40: under the bar
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 3000)], counts)
+        assert out["origin"].item() == "de_novo_below_detection"
+        assert is_event(out["origin"], "exclude").item()
+
+    def test_two_rises_within_the_window_in_one_cage_are_a_block(self):
+        counts = _background([1172, 1472])
+        counts[("m1", "post", 1172)] = (20, 0, 0, 20)
+        counts[("m1", "post", 1472)] = (20, 0, 0, 20)
+        out = _classify(
+            [_rise("cageA", "fat", 1172), _rise("cageA", "fat", 1472)], counts
+        )
+        assert out["origin"].tolist() == ["block_event", "block_event"]
+        assert out["block_id"].nunique() == 1 and out["block_id"].iloc[0] != ""
+        assert out["n_de_novo_neighbours"].tolist() == [1, 1]
+        assert is_event(out["origin"], "exclude").tolist() == [False, False]
+        assert is_event(out["origin"], "once").tolist() == [True, True]
+
+    def test_the_same_positions_in_different_cages_are_not_neighbours(self):
+        counts = _background([1172, 1472])
+        counts[("m1", "post", 1172)] = (20, 0, 0, 20)
+        counts[("m3", "post", 1472)] = (20, 0, 0, 20)
+        out = _classify(
+            [_rise("cageA", "fat", 1172), _rise("cageB", "fat", 1472)], counts
+        )
+        assert out["origin"].tolist() == ["de_novo", "de_novo"]
+        assert out["block_id"].tolist() == ["", ""]
+
+    def test_rise_without_a_present_carrier_is_not_present_later(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (39, 0, 0, 1)  # one read: below the bar
+        out = _classify([_rise("cageA", "fat", 3000)], counts)
+        assert out["origin"].item() == "not_present_later"
+        assert out["carriers"].item() == ""
+        assert not is_event(out["origin"], "once").item()
+
+    def test_baseline_nobody_covered_is_not_an_event(self):
+        counts = _background([3000], tps=("post",))
+        counts.update(
+            {(m, "pre", 3000): (2, 0, 0, 0) for m in MICE}
+        )  # all under min_cov
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 3000)], counts)
+        assert out["origin"].item() == "baseline_not_covered"
+        assert out["n_baseline_samples_covered"].item() == 0
+
+    def test_carrier_gate_one_clean_carrier_keeps_the_event(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        counts[("m2", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify(
+            [_rise("cageA", "fat", 3000)],
+            counts,
+            strain_gate="carrier",
+            turnover=_turnover({"m1": True, "m2": False}),
+        )
+        assert out["origin"].item() == "de_novo"
+        assert out["carriers"].item() == "m1,m2"
+        assert (
+            out["n_carriers_determined"].item(),
+            out["n_carriers_strain_changed"].item(),
+        ) == (2, 1)
+
+    def test_carrier_gate_every_carrier_changed_strain_is_new_strain(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify(
+            [_rise("cageA", "fat", 3000)],
+            counts,
+            strain_gate="carrier",
+            turnover=_turnover({"m1": True, "m2": False}),
+        )
+        assert out["origin"].item() == "new_strain"
+        assert not is_event(out["origin"], "once").item()
+
+    def test_carrier_gate_without_a_verdict_is_undetermined_not_counted(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        for turnover in (None, _turnover({"m1": None}), _turnover({"m2": False})):
+            out = _classify(
+                [_rise("cageA", "fat", 3000)],
+                counts,
+                strain_gate="carrier",
+                turnover=turnover,
+            )
+            assert out["origin"].item() == "strain_undetermined"
+            assert not is_event(out["origin"], "once").item()
+
+    def test_gate_none_leaves_a_de_novo_event_alone(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 3000)], counts, strain_gate="none")
+        assert out["origin"].item() == "de_novo"
+        assert out["carrier_strain_status"].item() == ""
+
+    @pytest.mark.parametrize("gate", ["group", "both"])
+    def test_group_gates_are_refused(self, gate):
+        counts = _background([3000])
+        with pytest.raises(ValueError, match="strain_gate"):
+            _classify([_rise("cageA", "fat", 3000)], counts, strain_gate=gate)
+
+    def test_scope_decides_which_earlier_samples_count(self):
+        # m3 (same group, other cage) had T before; m9 (other group) did not.
+        counts = _background([3000])
+        counts[("m3", "pre", 3000)] = (34, 0, 0, 6)
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        rise = [_rise("cageA", "fat", 3000)]
+        assert (
+            _classify(rise, counts, scope="cohort")["origin"].item()
+            == "standing_variation"
+        )
+        assert (
+            _classify(rise, counts, scope="comparison")["origin"].item()
+            == "standing_variation"
+        )
+        assert (
+            _classify(rise, counts, scope="own_group")["origin"].item()
+            == "standing_variation"
+        )
+        assert _classify(rise, counts, scope="individual")["origin"].item() == "de_novo"
+        # the carrier's own earlier sample had a whisper: individual says below detection
+        counts[("m1", "pre", 3000)] = (39, 0, 0, 1)
+        assert (
+            _classify(rise, counts, scope="individual")["origin"].item()
+            == "de_novo_below_detection"
+        )
+
+    def test_output_keeps_the_rise_columns_and_adds_the_verdict_columns(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        out = _classify([_rise("cageA", "fat", 3000)], counts)
+        assert list(out.columns) == [
+            "contig",
+            "position",
+            "gene_id",
+            "replicate",
+            "group",
+            "allele",
+            "diff_mean",
+            "subjectID_count",
+            "origin",
+            "block_id",
+            "n_de_novo_neighbours",
+            "carriers",
+            "n_carriers",
+            "carrier_strain_status",
+            "n_carriers_determined",
+            "n_carriers_strain_changed",
+            "n_baseline_samples_covered",
+            "n_baseline_samples_present",
+        ]
+
+    def test_no_rises_gives_an_empty_frame_with_the_columns(self):
+        out = _classify([], _background([3000]))
+        assert out.empty and "origin" in out.columns
+
+
+class TestIsEvent:
+    def test_only_de_novo_flavours_count_and_blocks_follow_the_knob(self):
+        origins = pd.Series(
+            [
+                "de_novo",
+                "de_novo_below_detection",
+                "block_event",
+                "standing_variation",
+                "new_strain",
+                "strain_undetermined",
+                "not_present_later",
+                "baseline_not_covered",
+            ]
+        )
+        assert is_event(origins, "exclude").tolist() == [
+            True,
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ]
+        assert is_event(origins, "once").tolist() == [
+            True,
+            True,
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ]
+
+    def test_unknown_block_rule_raises(self):
+        with pytest.raises(ValueError, match="block_rule"):
+            is_event(pd.Series(["de_novo"]), "twice")
+
+
+class TestCohortWithoutDates:
+    """A sheet with no collection_date cannot order a third timepoint against
+    the comparison, and the sheet's row order says nothing (user 2026-11-02).
+    Under ``cohort`` the baseline then narrows to the comparison's EARLIER
+    timepoint, exactly like ``comparison``; a 'mid' sample listed first in the
+    sheet must not become baseline just because it is listed first."""
+
+    def _undated_sheet_mid_first(self):
+        sheet = _sheet_rows().drop(columns=["collection_date"])
+        mid = pd.DataFrame(
+            [("m7_mid", "m7", "cageZ", "other", "mid")],
+            columns=["sample_id", "subjectID", "replicate", "group", "time"],
+        )
+        return pd.concat([mid, sheet], ignore_index=True)  # mid listed FIRST
+
+    def test_undated_cohort_uses_only_the_earlier_timepoint(self):
+        counts = _background([3000])
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        rows = _rows(counts)
+        # a 'mid' sample of another group carries T; without dates nobody can
+        # say whether mid is before post, so it must not be baseline
+        mid_row = rows.iloc[[0]].copy()
+        mid_row.loc[
+            :, ["sample_id", "subjectID", "replicate", "group", "timepoint"]
+        ] = ["m7_mid", "m7", "cageZ", "other", "mid"]
+        mid_row.loc[:, ["A", "C", "G", "T", "total_coverage"]] = [30, 0, 0, 10, 40]
+        rows = pd.concat([rows, mid_row], ignore_index=True)
+        out = classify_cage_rises(
+            pd.DataFrame([_rise("cageA", "fat", 3000)]),
+            rows,
+            self._undated_sheet_mid_first(),
+            mag_id="M",
+            tps=TPS,
+            scope="cohort",
+            model=MODEL,
+            min_freq=0.05,
+            min_cov=5,
+            window_bp=1000,
+            max_neighbours=0,
+            strain_gate="none",
+            min_determined_carriers=1,
+            turnover=None,
+        )
+        assert out["origin"].item() == "de_novo"
+        assert out["n_baseline_samples_covered"].item() == 4  # the four pre rows only

@@ -56,8 +56,49 @@ import pandas as pd
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
     NUCLEOTIDES,
 )
+from alleleflux.scripts.analysis.baseline_presence import (
+    EVIDENCE_BELOW_DETECTION,
+    EVIDENCE_NOT_COVERED,
+    Timepoints,
+    assess_rows,
+    baseline_cutoff,
+    baseline_rows,
+)
+from alleleflux.scripts.analysis.de_novo_rules import (
+    BLOCK_EVENT,
+    CARRIER_NEW_STRAIN,
+    CARRIER_UNDETERMINED,
+    DE_NOVO_ORIGINS,
+    assign_blocks,
+    carrier_strain_verdicts,
+)
 
 logger = logging.getLogger(__name__)
+
+# The per-cage origin words.  The three "counted" ones come from
+# de_novo_rules (DE_NOVO_ORIGINS + BLOCK_EVENT); the rest mirror rising
+# origin's vocabulary so a reader of both tables meets one set of words.
+ORIGIN_STANDING = "standing_variation"
+ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION = DE_NOVO_ORIGINS
+ORIGIN_NEW_STRAIN = "new_strain"
+ORIGIN_NOT_PRESENT_LATER = "not_present_later"
+ORIGIN_BASELINE_NOT_COVERED = "baseline_not_covered"
+BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+STRAIN_GATES = ("carrier", "none")  # no group vote at cage level
+BLOCK_RULES = ("exclude", "once")
+
+VERDICT_COLUMNS = [
+    "origin",
+    "block_id",
+    "n_de_novo_neighbours",
+    "carriers",
+    "n_carriers",
+    "carrier_strain_status",
+    "n_carriers_determined",
+    "n_carriers_strain_changed",
+    "n_baseline_samples_covered",
+    "n_baseline_samples_present",
+]
 
 # The mean-change table's per-base columns (``A_frequency_diff_mean`` ...) and
 # the one-letter allele each stands for.  Derived from the ONE constant the
@@ -320,3 +361,217 @@ def covered_bp_total(
         for (group, replicate), arrays in sorted(readable.items())
     ]
     return pd.DataFrame(records, columns=["group", "replicate", "covered_bp_total"])
+
+
+# ---------------------------------------------------------------------------
+# Task 2: the Phase 2 rules, cage by cage
+# ---------------------------------------------------------------------------
+
+
+def _cage_key(group: str, replicate: str) -> str:
+    """The cluster key handed to ``assign_blocks`` as ``rose_in``: one cage."""
+    return f"{group}|{replicate}"
+
+
+def classify_cage_rises(
+    rises: pd.DataFrame,
+    cache_rows: pd.DataFrame,
+    sheet: pd.DataFrame,
+    *,
+    mag_id: str,
+    tps: Timepoints,
+    scope: str,
+    model: np.ndarray,
+    min_freq: float,
+    min_cov: int,
+    window_bp: int,
+    max_neighbours: int,
+    strain_gate: str,
+    min_determined_carriers: int,
+    turnover: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Phase 2's three questions, asked of every candidate rise with the CAGE as the unit.
+
+    For each row of ``rises`` (one MAG; Task 1's ``cage_rises``) the cache rows
+    of that site for EVERY loaded sample (``cache_rows``: ``contig, position,
+    sample_id, subjectID, replicate, group, timepoint, A, C, G, T``; under the
+    cohort scope every timepoint of the run, otherwise the comparison's two)
+    are judged in this fixed order, reusing the Phase 2 functions as they are:
+
+    1. **presence verdicts** (``baseline_presence.assess_rows``): per sample,
+       ``present`` / ``below_detection`` / ``absent`` / ``not_covered`` for
+       the rising letter, with the bar (``model``), ``min_freq`` and ``min_cov``;
+    2. **carriers**: the cage's later-timepoint mice with the letter
+       ``present``.  None -> ``not_present_later`` (a cage-average tick with no
+       mouse clearing the bar is noise);
+    3. **baseline** (``baseline_presence.baseline_rows`` with ``scope``):
+       ``individual`` = the carriers' own earlier samples, ``own_group`` = the
+       cage's group's earlier samples, ``comparison`` = both groups' earlier
+       samples, ``cohort`` = every sample dated before the first carrier
+       (``baseline_cutoff``).  No covered baseline sample ->
+       ``baseline_not_covered``; any ``present`` -> ``standing_variation``; any
+       ``below_detection`` -> ``de_novo_below_detection``; else ``de_novo``;
+    4. **blocks** (``de_novo_rules.assign_blocks``) over the de novo rows of
+       one cage (``rose_in`` = the cage): neighbours within ``window_bp`` on a
+       contig, more than ``max_neighbours`` of them -> ``block_event`` with a
+       ``block_id``.  Two cages never cluster together;
+    5. **strain gate** on the two de novo flavours only:
+       ``carrier`` asks ``de_novo_rules.carrier_strain_verdicts`` about the
+       cage's carriers for the period ``{earlier}_{later}`` in ``turnover``
+       (this MAG's ``{mag}_strain_turnover.tsv``; None = no table):
+       ``new_strain_carriers`` -> ``new_strain``, undetermined ->
+       ``strain_undetermined``, same strain -> kept.  ``none`` skips the gate.
+       ``group`` / ``both`` are refused: a cage has no group vote.
+
+    ``sheet`` supplies ``collection_date`` by ``sample_id``; without dates the
+    cohort baseline is the comparison's earlier timepoint (``baseline_rows``).
+
+    Returns ``rises``' columns plus ``VERDICT_COLUMNS``, same row order.
+    Which rows count as events is ``is_event``'s decision, not this one's.
+
+    Example (cohort, min_cov 5, bar 3 at 40x): cage A = m1 + m2, candidate T
+    at 3000; every earlier sample has 40 A and 0 T, m1's later sample 20 A /
+    20 T -> carriers "m1", 4 covered baseline samples, none present ->
+    ``de_novo``; add 6 T in another group's earlier sample -> ``standing_variation``;
+    add a second de novo rise in cage A at 3300 -> both ``block_event``.
+    """
+    if scope not in BASELINE_SCOPES:
+        raise ValueError(
+            f"baseline scope must be one of {BASELINE_SCOPES}, got {scope!r}"
+        )
+    if strain_gate not in STRAIN_GATES:
+        raise ValueError(
+            f"strain_gate must be one of {STRAIN_GATES} for the gene-level analysis "
+            f"(a cage has no group vote), got {strain_gate!r}"
+        )
+    out_columns = list(rises.columns) + VERDICT_COLUMNS
+    if rises.empty:
+        return pd.DataFrame(columns=out_columns)
+
+    # --- the rows every verdict is read from: labels as text, dates and the
+    # sheet's ``time`` word attached by sample id (baseline_rows reads ``time``).
+    rows = cache_rows.copy()
+    for col in ("contig", "sample_id", "subjectID", "replicate", "group", "timepoint"):
+        rows[col] = rows[col].astype(str)
+    rows["position"] = rows["position"].astype("int64")
+    rows["time"] = rows["timepoint"]
+    meta = sheet.set_index(sheet["sample_id"].astype(str))
+    rows["collection_date"] = (
+        meta["collection_date"].reindex(rows["sample_id"]).to_numpy()
+        if "collection_date" in meta.columns
+        else np.nan
+    )
+    by_site = {
+        key: idx for key, idx in rows.groupby(["contig", "position"]).indices.items()
+    }
+
+    # --- stages 1-3, one candidate at a time (the per-site frames are tiny:
+    # one row per loaded sample).
+    records = []
+    for rise in rises.itertuples(index=False):
+        contig, position = str(rise.contig), int(rise.position)
+        group, replicate, allele = (
+            str(rise.group),
+            str(rise.replicate),
+            str(rise.allele),
+        )
+        rec = {
+            "carriers": "",
+            "n_carriers": 0,
+            "carrier_strain_status": "",
+            "n_carriers_determined": 0,
+            "n_carriers_strain_changed": 0,
+            "n_baseline_samples_covered": 0,
+            "n_baseline_samples_present": 0,
+        }
+        idx = by_site.get((contig, position))
+        if idx is None:
+            # A candidate with no cache row anywhere is a contract violation:
+            # the candidate list was derived from this very cache.
+            raise ValueError(
+                f"{mag_id} {contig}:{position}: candidate rise but no cache row at the site"
+            )
+        site = rows.iloc[idx]
+        site = pd.concat(
+            [site, assess_rows(site, allele, model, min_freq, min_cov)], axis=1
+        )
+        later = site[
+            (site["time"] == tps.later)
+            & (site["group"] == group)
+            & (site["replicate"] == replicate)
+        ]
+        carriers = sorted(set(later.loc[later["allele_present"], "subjectID"]))
+        rec["carriers"] = ",".join(carriers)
+        rec["n_carriers"] = len(carriers)
+        if not carriers:
+            rec["origin"] = ORIGIN_NOT_PRESENT_LATER
+            records.append(rec)
+            continue
+        # own_group judges on the cage's group only; the other scopes see every
+        # loaded sample and baseline_rows picks the earlier ones they define.
+        pool = site[site["group"] == group] if scope == "own_group" else site
+        t0 = baseline_rows(pool, scope, tps, set(carriers), baseline_cutoff(later))
+        t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
+        rec["n_baseline_samples_covered"] = int(len(t0_cov))
+        rec["n_baseline_samples_present"] = int(t0_cov["allele_present"].sum())
+        if t0_cov.empty:
+            rec["origin"] = ORIGIN_BASELINE_NOT_COVERED
+        elif t0_cov["allele_present"].any():
+            rec["origin"] = ORIGIN_STANDING
+        elif (t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION).any():
+            rec["origin"] = ORIGIN_DE_NOVO_BELOW_DETECTION
+        else:
+            rec["origin"] = ORIGIN_DE_NOVO
+        records.append(rec)
+
+    out = pd.concat([rises.reset_index(drop=True), pd.DataFrame(records)], axis=1)
+
+    # --- stage 4: blocks within a cage.  assign_blocks clusters by rose_in,
+    # so the cage key keeps two cages' rises apart even at the same positions.
+    alleles = out[["contig", "position", "allele", "origin"]].copy()
+    alleles["mag_id"] = mag_id
+    alleles["rose_in"] = [
+        _cage_key(g, r)
+        for g, r in zip(out["group"].astype(str), out["replicate"].astype(str))
+    ]
+    blocked = assign_blocks(alleles, window_bp, max_neighbours)
+    out["origin"] = blocked["origin"].to_numpy()
+    out["block_id"] = blocked["block_id"].to_numpy()
+    out["n_de_novo_neighbours"] = blocked["n_de_novo_neighbours"].to_numpy()
+
+    # --- stage 5: the carrier gate, de novo rows only, after the blocks.
+    if strain_gate == "carrier":
+        period = f"{tps.earlier}_{tps.later}"
+        gated = out.index[out["origin"].isin(DE_NOVO_ORIGINS)]
+        for i in gated:
+            mice = [m for m in str(out.at[i, "carriers"]).split(",") if m]
+            if turnover is None:
+                status, n_det, n_chg = CARRIER_UNDETERMINED, 0, 0
+            else:
+                status, n_det, n_chg = carrier_strain_verdicts(
+                    mice, turnover, period, min_determined_carriers
+                )
+            out.at[i, "carrier_strain_status"] = status
+            out.at[i, "n_carriers_determined"] = n_det
+            out.at[i, "n_carriers_strain_changed"] = n_chg
+            if status == CARRIER_NEW_STRAIN:
+                out.at[i, "origin"] = ORIGIN_NEW_STRAIN
+            elif status == CARRIER_UNDETERMINED:
+                out.at[i, "origin"] = CARRIER_UNDETERMINED
+    return out[out_columns]
+
+
+def is_event(origin: pd.Series, block_rule: str) -> pd.Series:
+    """Which origins count as a de novo event for the gene tables.
+
+    ``de_novo`` and ``de_novo_below_detection`` always; ``block_event`` only
+    under ``block_rule == "once"`` (one event per block; ``exclude``, the
+    default, drops blocks as Phase 2 does).  Nothing else ever counts.
+
+    Example: origins [de_novo, block_event, standing_variation] -> exclude:
+    [True, False, False]; once: [True, True, False].
+    """
+    if block_rule not in BLOCK_RULES:
+        raise ValueError(f"block_rule must be one of {BLOCK_RULES}, got {block_rule!r}")
+    counted = set(DE_NOVO_ORIGINS) | ({BLOCK_EVENT} if block_rule == "once" else set())
+    return origin.isin(counted)

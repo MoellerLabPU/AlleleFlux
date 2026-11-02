@@ -185,10 +185,10 @@ names every undated sample.  Ordering the baseline by timepoint label while
 some samples are dated would silently change the answer, so it is treated as a
 data error.  (Under every other scope blank dates are fine; they are only
 carried along.)  A sheet with **no** dates at all, a study that never recorded
-them, still runs: "before" then means an earlier timepoint label in the
-metadata's order, the run logs one warning saying so, and staggered designs
-are not handled in that mode.  Samples outside the comparison whose label
-sorts after the later timepoint then never count.
+them, still runs, but nothing can then place a third timepoint before or after
+the comparison, and the order of rows in the sheet says nothing.  The baseline
+narrows to the comparison's earlier timepoint, exactly as under `comparison`,
+the other timepoints are not loaded, and the run logs one warning saying so.
 
 **What stays the comparison's, whatever the scope.** The later-timepoint
 checks and counts, the frequency change, and the rising table use only the
@@ -219,8 +219,8 @@ strictly before its *cutoff*: the first carrier's date, or, for a group that
 rose without any later sample clearing the presence bar (no carrier, verdict
 `allele_not_present_at_{later}`), the day that group was first sampled at the
 later timepoint.  So the two rising rows of one site, and the summary row,
-describe comparable baselines, and timepoint-label order is used only on a
-sheet with no dates at all.
+describe comparable baselines; a sheet with no dates at all falls back to the
+comparison's earlier timepoint.
 
 ### Naming
 

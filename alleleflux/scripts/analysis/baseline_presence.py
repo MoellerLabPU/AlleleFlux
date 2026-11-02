@@ -838,7 +838,6 @@ def baseline_rows(
     tps: Timepoints,
     carriers: set,
     first_date,
-    label_order: list,
 ) -> pd.DataFrame:
     """The rows one (site, allele) is judged against as its baseline (spec 2.2).
 
@@ -871,9 +870,10 @@ def baseline_rows(
         ``first_date`` (``baseline_cutoff``: the first carrier's date, or the
         group's later sampling day when it has no carrier).  When the sheet has no dates
         (``first_date`` None and every row undated; the orchestrator refuses a
-        partly dated sheet and warns once about an undated one) every row whose
-        timepoint label comes before ``tps.later`` in ``label_order`` (the
-        sheet's order of appearance).
+        partly dated sheet and warns once about an undated one) nothing can
+        place a third timepoint before or after the comparison, and the sheet's
+        row order says nothing (user ruling 2026-11-02), so the baseline narrows
+        to the comparison's earlier-timepoint rows, exactly as ``comparison``.
 
     Example (cohort, dates): first carrier 2017-06-10; rows dated 2017-01-10
     (the comparison's pre samples) and 2016-09-01 (a third group) are the
@@ -887,8 +887,8 @@ def baseline_rows(
         dates = _dates(sub)
         if first_date is not None and dates.notna().all():
             return sub[dates < first_date]
-        before = label_order[: label_order.index(tps.later)]
-        return sub[sub["time"].isin(before)]
+        # Undated sheet: only the config's earlier/later order is known.
+        return sub[sub["time"] == tps.earlier]
     raise ValueError(f"unknown baseline scope {scope!r}")
 
 
@@ -1001,7 +1001,6 @@ def summarise_sites(
     long: pd.DataFrame,
     tps: Timepoints,
     scope: str = "comparison",
-    label_order: list | None = None,
 ) -> pd.DataFrame:
     """One row per site x allele: the few numbers the baseline question asks for.
 
@@ -1018,9 +1017,8 @@ def summarise_sites(
         ``origin_in_own_mouse``.
     tps
         Earlier / later timepoint labels; spells the column names.
-    scope, label_order
-        Which rows are the baseline (``baseline_rows``); ``label_order`` is the
-        sheet's timepoint order, needed only by ``cohort`` without dates.
+    scope
+        Which rows are the baseline (``baseline_rows``).
 
     Returns
     -------
@@ -1060,7 +1058,7 @@ def summarise_sites(
         t1 = sub[(sub["time"] == tps.later) & comp[sub.index]]
         t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
         carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
-        t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1), label_order)
+        t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1))
         rows.append(_site_record(key, sub, t0, t1, tps))
     return pd.DataFrame(rows, columns=summary_columns(tps))
 
@@ -1088,7 +1086,6 @@ def summarise_rising(
     change: pd.DataFrame,
     tps: Timepoints,
     scope: str = "comparison",
-    label_order: list | None = None,
 ) -> pd.DataFrame:
     """One row per (site, allele, group the allele ROSE in).
 
@@ -1116,7 +1113,7 @@ def summarise_rising(
         ``frequency_change_by_group(long, tps)`` over the comparison's rows.
     tps
         Earlier / later timepoint labels.
-    scope, label_order
+    scope
         As in ``summarise_sites``.
 
     Returns
@@ -1165,9 +1162,7 @@ def summarise_rising(
             # first carrier's date (cohort) are this group's.
             t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
             carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
-            t0 = baseline_rows(
-                sub, scope, tps, carriers, baseline_cutoff(t1), label_order
-            )
+            t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1))
             record = _site_record(key, sub, t0, t1, tps)
             record.update(
                 {
@@ -1406,8 +1401,13 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     )
     # Timepoints the per-MAG workers read from the cache, and the sheet's
     # timepoint order (the cohort fallback when dates cannot order the baseline).
-    label_order = list(dict.fromkeys(meta["time"]))
-    timepoints = label_order if args.baseline_scope == "cohort" else [earlier, later]
+    # Which timepoints the per-MAG workers read from the cache: the comparison's
+    # two, plus every other one under a DATED cohort scope (dates alone can
+    # place them before or after the first carrier).  Without dates the cohort
+    # baseline is the comparison's earlier timepoint (baseline_rows), so the
+    # other timepoints are not read at all.
+    sheet_timepoints = list(dict.fromkeys(meta["time"]))
+    timepoints = [earlier, later]
     if args.baseline_scope == "cohort":
         extra = meta[~meta["is_comparison_sample"]]
         logger.info(
@@ -1433,11 +1433,15 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
                 f"every sample or for none; {len(missing)} of {len(meta)} are blank: "
                 f"{missing}"
             )
-        if not dated.any():
+        if dated.all():
+            timepoints = sheet_timepoints
+        else:
             logger.warning(
-                f"cohort scope: no collection_date in the metadata; 'before' means an "
-                f"earlier timepoint label in the sheet's timepoint order {label_order} "
-                f"(staggered designs are not handled)"
+                f"cohort scope: no collection_date in the metadata, so nothing can "
+                f"place the other timepoints {sorted(set(sheet_timepoints) - {earlier, later})} "
+                f"before or after the first carrier; the baseline is the comparison's "
+                f"earlier timepoint {earlier!r} only (as under --baseline_scope "
+                f"comparison).  Add a collection_date column to use the full cohort."
             )
 
     # ---- 2. Significant sites of the chosen test, then their candidate alleles per MAG.
@@ -1597,7 +1601,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     long["time"] = pd.Categorical(
         long["time"],
         categories=[earlier, later]
-        + [t for t in label_order if t not in (earlier, later)],
+        + [t for t in sheet_timepoints if t not in (earlier, later)],
         ordered=True,
     )
     long = long[LONG_COLUMNS].sort_values(
@@ -1608,11 +1612,11 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     # ---- 5. Summary (every reported allele) and rising table (only the allele
     # that rose, per group, judged on that group's later samples); write all three.
     scope = args.baseline_scope
-    summary = summarise_sites(long, tps, scope, label_order)
+    summary = summarise_sites(long, tps, scope)
     # The change is the comparison's (both timepoints, its mice): cohort rows
     # of other groups are baseline material only.
     change = frequency_change_by_group(long[_comparison_mask(long)], tps)
-    rising = summarise_rising(long, change, tps, scope, label_order)
+    rising = summarise_rising(long, change, tps, scope)
     stem = os.path.join(
         args.output_dir,
         f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",

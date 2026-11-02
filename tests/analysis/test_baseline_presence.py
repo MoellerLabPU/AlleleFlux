@@ -1638,15 +1638,17 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         done = self._run("--baseline_scope", "comparison")
         self.assertEqual(done.returncode, 0, done.stderr)
 
-    def test_cohort_without_a_date_column_falls_back_to_label_order_with_warning(self):
+    def test_cohort_without_a_date_column_narrows_to_the_earlier_timepoint(self):
         """No collection_date column anywhere: a study that never recorded dates.
-        'before' means an earlier timepoint LABEL in the sheet's order (pre, end,
-        mid): 'mid' sorts after 'end', neither extra sample is baseline, and the
-        run says so once."""
+        Nothing can place 'mid' before or after the comparison and the sheet's
+        row order says nothing (user ruling 2026-11-02), so the baseline is the
+        comparison's earlier timepoint only, the 'mid' samples are not even
+        loaded, and the run says so once."""
         self._add_cohort_samples(dates=None)
         done = self._run("--baseline_scope", "cohort")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("timepoint order", done.stderr)
+        self.assertIn("earlier timepoint", done.stderr)
+        self.assertNotIn("m5_mid", set(self._long()["sample_id"]))
         g = self._summary().set_index("allele").loc["G"]
         self.assertEqual(int(g["n_pre_samples_covered"]), 3)  # m1, m2, m3 pre only
         self.assertEqual(g["origin_any_mouse"], "standing_variation")  # m1 pre has G
