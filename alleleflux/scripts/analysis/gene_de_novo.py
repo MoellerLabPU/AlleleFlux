@@ -52,6 +52,8 @@ import logging
 
 import numpy as np
 import pandas as pd
+from Bio import SeqIO
+from Bio.Seq import Seq
 
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
     NUCLEOTIDES,
@@ -72,6 +74,7 @@ from alleleflux.scripts.analysis.de_novo_rules import (
     assign_blocks,
     carrier_strain_verdicts,
 )
+from alleleflux.scripts.evolution.dnds_from_timepoints import COMPLEMENT_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -575,3 +578,325 @@ def is_event(origin: pd.Series, block_rule: str) -> pd.Series:
         raise ValueError(f"block_rule must be one of {BLOCK_RULES}, got {block_rule!r}")
     counted = set(DE_NOVO_ORIGINS) | ({BLOCK_EVENT} if block_rule == "once" else set())
     return origin.isin(counted)
+
+
+# ---------------------------------------------------------------------------
+# Task 3: gene tables
+# ---------------------------------------------------------------------------
+
+SUBSTITUTION_CLASSES = ("synonymous", "nonsynonymous", "nonsense")
+# The same complement table dN/dS uses for reverse-strand genes, so the two
+# modules cannot drift apart on strand handling.
+_COMPLEMENT = str.maketrans(
+    "".join(COMPLEMENT_MAP), "".join(COMPLEMENT_MAP[b] for b in COMPLEMENT_MAP)
+)
+# Prodigal calls genes with the bacterial / archaeal table, as dN/dS does.
+TRANSLATION_TABLE = 11
+
+GENE_CAGE_COLUMNS = [
+    "mag_id",
+    "gene_id",
+    "contig",
+    "group",
+    "replicate",
+    "n_de_novo",
+    "n_block_excluded",
+    "n_synonymous",
+    "n_nonsynonymous",
+    "n_nonsense",
+    "covered_bp",
+    "gene_length",
+    "covered_fraction",
+    "entered",
+    "rate",
+]
+CAGE_TOTAL_COLUMNS = [
+    "mag_id",
+    "group",
+    "replicate",
+    "n_de_novo_total",
+    "covered_bp_total",
+]
+
+
+def load_genes(prodigal_fasta: str) -> pd.DataFrame:
+    """Prodigal's gene file as one row per gene with 0-based inclusive coordinates.
+
+    Prodigal writes ``>id # start # end # strand # ...`` (1-based inclusive)
+    above each coding sequence, already read 5' to 3' (reverse-strand genes
+    are reverse-complemented in the file).  Same coordinate rule as
+    ``profile_mags.map_genes`` (subtract 1 from both ends), plus ``strand``,
+    ``length`` and the ``sequence`` the substitution classes need; the
+    ``contig`` is the id up to its last ``_``.  A sequence whose length
+    disagrees with the header raises, naming the gene.
+
+    Example: ``>c1_1 # 101 # 109 # 1 # ...`` over ``ATGGGATGG`` -> gene c1_1 on
+    contig c1, start 100, end 108, strand 1, length 9.
+    """
+    records = []
+    for rec in SeqIO.parse(prodigal_fasta, "fasta"):
+        parts = rec.description.split("#")
+        if len(parts) != 5:
+            raise ValueError(f"unexpected Prodigal header {rec.description!r}")
+        gene_id = parts[0].strip()
+        start, end, strand = int(parts[1]) - 1, int(parts[2]) - 1, int(parts[3])
+        seq = str(rec.seq).upper()
+        if len(seq) != end - start + 1:
+            raise ValueError(
+                f"gene {gene_id}: header spans {end - start + 1} bases but the "
+                f"sequence has {len(seq)}"
+            )
+        records.append(
+            {
+                "gene_id": gene_id,
+                "contig": "_".join(gene_id.split("_")[:-1]),
+                "start": start,
+                "end": end,
+                "strand": strand,
+                "length": len(seq),
+                "sequence": seq,
+            }
+        )
+    return pd.DataFrame(
+        records,
+        columns=["gene_id", "contig", "start", "end", "strand", "length", "sequence"],
+    )
+
+
+def classify_substitution(position: int, ref: str, alt: str, gene: pd.Series) -> str:
+    """Does swapping ``ref`` for ``alt`` at this contig position change the protein?
+
+    ``gene`` carries ``start, end`` (0-based inclusive), ``strand`` (1 / -1)
+    and ``sequence`` (coding strand, 5' to 3').  The arithmetic is dN/dS's
+    ``get_codon_from_site`` with 0-based ends (that helper takes Prodigal's
+    1-based ones): on the forward strand the coding index is ``position -
+    start``; on the reverse strand it is ``end - position`` and the contig
+    letters are complemented first (``COMPLEMENT_MAP``, shared with dN/dS),
+    because the coding sequence is the reverse complement of the contig.
+    Checked 2026-11-03 by brute force over every position of both bundled
+    references, 6 genes per strand: coding letter == (complemented) reference
+    letter, and index + codon identical to ``get_codon_from_site``.  The codon
+    is translated with the bacterial table before and after the swap.
+
+    Raises when the position is outside the gene or the contig's reference
+    letter is not the coding sequence's letter there (the gene file and the
+    reference disagree, or the strand is wrong).
+
+    Example: gene ATG GGA TGG at 100..108 forward; position 105 is the third
+    base of GGA, A -> G gives GGG, still glycine: ``synonymous``; position 107
+    G -> A turns TGG into TAG, a stop: ``nonsense``.
+    """
+    start, end, strand = int(gene["start"]), int(gene["end"]), int(gene["strand"])
+    seq = str(gene["sequence"])
+    if not start <= position <= end:
+        raise ValueError(
+            f"position {position} is outside gene {gene['gene_id']} ({start}..{end})"
+        )
+    if strand == 1:
+        index, ref_c, alt_c = position - start, ref, alt
+    else:
+        index = end - position
+        ref_c, alt_c = ref.translate(_COMPLEMENT), alt.translate(_COMPLEMENT)
+    if seq[index] != ref_c:
+        raise ValueError(
+            f"gene {gene['gene_id']} position {position}: the coding sequence has "
+            f"{seq[index]!r} where the reference says {ref!r} (strand {strand})"
+        )
+    codon_start = (index // 3) * 3
+    codon = seq[codon_start : codon_start + 3]
+    if len(codon) != 3:
+        raise ValueError(
+            f"gene {gene['gene_id']} position {position}: partial codon {codon!r}"
+        )
+    offset = index - codon_start
+    mutant = codon[:offset] + alt_c + codon[offset + 1 :]
+    before = str(Seq(codon).translate(table=TRANSLATION_TABLE))
+    after = str(Seq(mutant).translate(table=TRANSLATION_TABLE))
+    if after == before:
+        return "synonymous"
+    if after == "*":
+        return "nonsense"
+    return "nonsynonymous"
+
+
+def gene_tables(
+    events: pd.DataFrame,
+    readable: dict[tuple[str, str], dict[str, np.ndarray]],
+    genes: pd.DataFrame,
+    cages: pd.DataFrame,
+    *,
+    mag_id: str,
+    block_rule: str,
+    min_gene_covered_fraction: float,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The two tables the tests read: one row per gene x cage, one row per cage.
+
+    ``events`` is Task 2's classified rise table plus ``ref_base`` (the
+    contig's reference letter at the site, from the cache); ``is_event`` with
+    ``block_rule`` decides which rows count.  ``readable`` is
+    ``CoverageMask.readable``; ``genes`` is ``load_genes``; ``cages`` lists
+    the comparison's (group, replicate) pairs so a cage with nothing readable
+    still gets its zero rows.
+
+    Gene x cage: ``n_de_novo`` (counted events in the gene), ``n_block_excluded``
+    (block rows dropped by ``block_rule: exclude``), the three substitution
+    classes of the counted events, ``covered_bp`` (readable bases inside the
+    gene; the denominator, decision 7), ``gene_length``, ``covered_fraction =
+    covered_bp / gene_length``, ``entered`` (``covered_bp > 0`` and the
+    fraction at least ``min_gene_covered_fraction``, decision 5) and ``rate =
+    n_de_novo / covered_bp`` (NaN when not entered).  A cage that does not
+    enter for a gene reports ``covered_bp 0`` and ``n_de_novo 0`` so the tests
+    never see it, while ``covered_fraction`` keeps the real number.
+
+    Cage: ``n_de_novo_total`` = every counted event of the cage, inside a gene
+    or not (an intergenic event is part of the genome's rate), and
+    ``covered_bp_total``.
+
+    An event whose ``gene_id`` is not in ``genes`` raises.
+
+    Worked example (the unit test ``TestGeneTables``).  One 1,200 bp contig
+    with three genes: g1 100..399 (+), g2 400..699 (-), g3 700..999 (+).
+    Three cages: treatment A and B, control C.  Readable: A all 1,200 bases,
+    B bases 0..599 only, C all 1,200.  Counted events: A at 150 and 160 (both
+    in g1; A->G at a wobble position = synonymous, T->C at a first codon base
+    = nonsynonymous) and at 1,100 (between genes); B at 450 (in g2, on the
+    reverse strand; nonsynonymous).  C caught nothing.
+
+    Gene x cage rows (9 in all; the zero rows are kept):
+
+        gene  cage  n_de_novo  n_syn  n_nonsyn  covered_bp  fraction  entered  rate
+        g1    A     2          1      1         300         1.00      True     2/300
+        g2    A     0          0      0         300         1.00      True     0
+        g2    B     1          0      1         200         0.67      True     1/200
+        g3    B     0          0      0         0           0.00      False    NaN
+        g1    C     0          0      0         300         1.00      True     0
+
+    With ``min_gene_covered_fraction`` 0.8 the g2/B row no longer enters:
+    ``entered`` False, ``covered_bp`` 0, ``n_de_novo`` 0, rate NaN, while
+    ``covered_fraction`` still reads 0.67.
+
+    Cage rows: A 3 events over 1,200 bases (the intergenic one counts), B 1
+    over 600, C 0 over 1,200.  These are Test A's "fair share" numbers: cage
+    A caught 3 in 1,200 bases, so a 300-base gene deserves 0.75 by chance.
+    """
+    if not 0.0 <= min_gene_covered_fraction <= 1.0:
+        raise ValueError(
+            f"min_gene_covered_fraction must be within [0, 1], got {min_gene_covered_fraction}"
+        )
+    gene_index = genes.set_index(genes["gene_id"].astype(str))
+    cage_keys = [(str(g), str(r)) for g, r in zip(cages["group"], cages["replicate"])]
+
+    # --- readable bases per gene and per cage; cages absent from the mask
+    # (no paired sample at all) get zeros.
+    known = {k: readable[k] for k in cage_keys if k in readable}
+    by_gene = (
+        covered_bp_by_gene(known, genes).set_index(["group", "replicate", "gene_id"])[
+            "covered_bp"
+        ]
+        if known
+        else pd.Series(dtype="int64")
+    )
+    totals_bp = (
+        covered_bp_total(known).set_index(["group", "replicate"])["covered_bp_total"]
+        if known
+        else pd.Series(dtype="int64")
+    )
+
+    # --- the counted events, classified by substitution where they sit in a gene.
+    ev = (
+        events.copy()
+        if len(events)
+        else pd.DataFrame(
+            columns=[
+                "origin",
+                "gene_id",
+                "group",
+                "replicate",
+                "position",
+                "ref_base",
+                "allele",
+            ]
+        )
+    )
+    for col in ("gene_id", "group", "replicate", "ref_base", "allele"):
+        ev[col] = ev[col].fillna("").astype(str) if col in ev.columns else ""
+    counted = ev[is_event(ev["origin"], block_rule)].copy()
+    excluded_blocks = ev[
+        (ev["origin"] == BLOCK_EVENT) & ~is_event(ev["origin"], block_rule)
+    ]
+    classes = []
+    for e in counted.itertuples(index=False):
+        if e.gene_id == "":
+            classes.append("")
+            continue
+        if e.gene_id not in gene_index.index:
+            raise ValueError(
+                f"event at {e.position} names gene {e.gene_id!r}, not in the gene file"
+            )
+        classes.append(
+            classify_substitution(
+                int(e.position), e.ref_base, e.allele, gene_index.loc[e.gene_id]
+            )
+        )
+    counted["substitution"] = classes
+
+    # --- gene x cage rows.
+    records = []
+    for group, replicate in cage_keys:
+        in_cage = counted[
+            (counted["group"] == group) & (counted["replicate"] == replicate)
+        ]
+        blocks_in_cage = excluded_blocks[
+            (excluded_blocks["group"] == group)
+            & (excluded_blocks["replicate"] == replicate)
+        ]
+        for gene in genes.itertuples(index=False):
+            gid = str(gene.gene_id)
+            length = int(gene.end) - int(gene.start) + 1
+            covered = int(by_gene.get((group, replicate, gid), 0))
+            fraction = covered / length if length else 0.0
+            entered = covered > 0 and fraction >= min_gene_covered_fraction
+            mine = in_cage[in_cage["gene_id"] == gid]
+            n = int(len(mine)) if entered else 0
+            sub = mine["substitution"] if entered else pd.Series(dtype=object)
+            records.append(
+                {
+                    "mag_id": mag_id,
+                    "gene_id": gid,
+                    "contig": str(gene.contig),
+                    "group": group,
+                    "replicate": replicate,
+                    "n_de_novo": n,
+                    "n_block_excluded": int((blocks_in_cage["gene_id"] == gid).sum()),
+                    "n_synonymous": int((sub == "synonymous").sum()),
+                    "n_nonsynonymous": int((sub == "nonsynonymous").sum()),
+                    "n_nonsense": int((sub == "nonsense").sum()),
+                    "covered_bp": covered if entered else 0,
+                    "gene_length": length,
+                    "covered_fraction": fraction,
+                    "entered": bool(entered),
+                    "rate": (n / covered) if entered else np.nan,
+                }
+            )
+    gene_cage = pd.DataFrame(records, columns=GENE_CAGE_COLUMNS)
+
+    # --- cage totals: every counted event (intergenic included) over every readable base.
+    totals = pd.DataFrame(
+        [
+            {
+                "mag_id": mag_id,
+                "group": group,
+                "replicate": replicate,
+                "n_de_novo_total": int(
+                    (
+                        (counted["group"] == group)
+                        & (counted["replicate"] == replicate)
+                    ).sum()
+                ),
+                "covered_bp_total": int(totals_bp.get((group, replicate), 0)),
+            }
+            for group, replicate in cage_keys
+        ],
+        columns=CAGE_TOTAL_COLUMNS,
+    )
+    return gene_cage, totals

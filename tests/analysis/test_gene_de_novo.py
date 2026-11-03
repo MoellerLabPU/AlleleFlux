@@ -649,3 +649,283 @@ class TestCohortWithoutDates:
         )
         assert out["origin"].item() == "de_novo"
         assert out["n_baseline_samples_covered"].item() == 4  # the four pre rows only
+
+
+# ---------------------------------------------------------------------------
+# Task 3: gene tables
+# ---------------------------------------------------------------------------
+
+from alleleflux.scripts.analysis.gene_de_novo import (
+    classify_substitution,
+    gene_tables,
+    load_genes,
+)
+
+# A 9-base gene: ATG GGA TGG = M G W.  Forward copy at 100..108, reverse-strand
+# copy at 200..208 (its coding sequence is the same string; on the contig it
+# is reverse-complemented, so contig bases are complements and run backwards).
+CODING = "ATGGGATGG"
+
+
+def _gene(gene_id, contig, start, end, strand, sequence):
+    return pd.Series(
+        {
+            "gene_id": gene_id,
+            "contig": contig,
+            "start": start,
+            "end": end,
+            "strand": strand,
+            "sequence": sequence,
+        }
+    )
+
+
+FWD = _gene("gf", "c1", 100, 108, 1, CODING)
+REV = _gene("gr", "c1", 200, 208, -1, CODING)
+
+
+class TestClassifySubstitution:
+    def test_forward_wobble_change_is_synonymous(self):
+        # position 105 = codon 1 (GGA), third base A -> G gives GGG, still Gly
+        assert classify_substitution(105, "A", "G", FWD) == "synonymous"
+
+    def test_forward_first_base_change_is_nonsynonymous(self):
+        # position 103 = codon 1 first base G -> A gives AGA = Arg
+        assert classify_substitution(103, "G", "A", FWD) == "nonsynonymous"
+
+    def test_forward_stop_gain_is_nonsense(self):
+        # position 107 = codon 2 (TGG) second base G -> A gives TAG = stop
+        assert classify_substitution(107, "G", "A", FWD) == "nonsense"
+
+    def test_reverse_strand_complements_and_counts_from_the_end(self):
+        # contig 203 -> coding index 208 - 203 = 5 = codon 1 third base; the
+        # contig shows the complement, so ref T / alt C read as A -> G: GGG, Gly
+        assert classify_substitution(203, "T", "C", REV) == "synonymous"
+        # contig 205 -> coding index 3 = codon 1 first base: C -> T on the
+        # contig is G -> A in the coding sequence: AGA, Arg
+        assert classify_substitution(205, "C", "T", REV) == "nonsynonymous"
+
+    def test_reference_mismatch_raises(self):
+        with pytest.raises(ValueError, match="105"):
+            classify_substitution(105, "C", "G", FWD)
+
+    def test_position_outside_the_gene_raises(self):
+        with pytest.raises(ValueError, match="gf"):
+            classify_substitution(99, "A", "G", FWD)
+
+
+class TestLoadGenes:
+    def test_prodigal_headers_become_zero_based_rows_with_sequences(self, tmp_path):
+        fasta = tmp_path / "genes.fna"
+        fasta.write_text(
+            ">c1_1 # 101 # 109 # 1 # ID=1_1;partial=00\n"
+            + CODING
+            + "\n>c1_2 # 201 # 209 # -1 # ID=1_2;partial=00\n"
+            + CODING
+            + "\n"
+        )
+        genes = load_genes(str(fasta))
+        assert genes[["gene_id", "contig", "start", "end", "strand", "length"]].to_dict(
+            "records"
+        ) == [
+            {
+                "gene_id": "c1_1",
+                "contig": "c1",
+                "start": 100,
+                "end": 108,
+                "strand": 1,
+                "length": 9,
+            },
+            {
+                "gene_id": "c1_2",
+                "contig": "c1",
+                "start": 200,
+                "end": 208,
+                "strand": -1,
+                "length": 9,
+            },
+        ]
+        assert genes["sequence"].tolist() == [CODING, CODING]
+
+    def test_a_sequence_whose_length_disagrees_with_the_header_raises(self, tmp_path):
+        fasta = tmp_path / "genes.fna"
+        fasta.write_text(">c1_1 # 101 # 112 # 1 # ID=1_1\n" + CODING + "\n")
+        with pytest.raises(ValueError, match="c1_1"):
+            load_genes(str(fasta))
+
+
+def _genes_frame():
+    # three genes on a 1,200 bp contig: g1 100..399 (+), g2 400..699 (-), g3 700..999 (+)
+    seq = (CODING * 34)[:300]  # 300 bases = 100 codons; codon k starts at 3k
+    return pd.DataFrame(
+        [
+            ("g1", "c1", 100, 399, 1, seq),
+            ("g2", "c1", 400, 699, -1, seq),
+            ("g3", "c1", 700, 999, 1, seq),
+        ],
+        columns=["gene_id", "contig", "start", "end", "strand", "sequence"],
+    ).assign(length=300)
+
+
+def _event(group, rep, pos, gene, ref, alt, origin="de_novo"):
+    return {
+        "contig": "c1",
+        "position": pos,
+        "gene_id": gene,
+        "replicate": rep,
+        "group": group,
+        "allele": alt,
+        "ref_base": ref,
+        "origin": origin,
+    }
+
+
+def _readable(spec):
+    """spec: {(group, rep): slice-or-None} -> readable dict over the 1,200 bp contig."""
+    out = {}
+    for cage, readable in spec.items():
+        arr = np.zeros(1200, dtype=bool)
+        if readable is not None:
+            arr[readable] = True
+        out[cage] = {"c1": arr}
+    return out
+
+
+CAGES = pd.DataFrame(
+    [("fat", "A"), ("fat", "B"), ("ctl", "C")], columns=["group", "replicate"]
+)
+
+
+class TestGeneTables:
+    def _run(self, events, readable, **over):
+        kwargs = dict(mag_id="M", block_rule="exclude", min_gene_covered_fraction=0.0)
+        kwargs.update(over)
+        return gene_tables(
+            pd.DataFrame(events), readable, _genes_frame(), CAGES, **kwargs
+        )
+
+    def test_counts_rates_and_totals_pin_the_arithmetic(self):
+        # g1's sequence repeats ATG GGA TGG; position 150 is codon 16 (index 50,
+        # 50 % 9 == 5 -> the A of GGA, third base): A -> G is synonymous.
+        # position 160 is index 60, 60 % 9 == 6 -> T of TGG, first base:
+        # T -> C gives CGG = Arg, nonsynonymous.  1100 is between genes.
+        events = [
+            _event("fat", "A", 150, "g1", "A", "G"),
+            _event("fat", "A", 160, "g1", "T", "C"),
+            _event("fat", "A", 1100, "", "A", "T"),
+            # g2 is reverse: contig 450 -> coding index 699 - 450 = 249,
+            # 249 % 9 == 6 -> T of TGG first base; contig shows A; alt G on the
+            # contig is C in coding: CGG, nonsynonymous
+            _event("fat", "B", 450, "g2", "A", "G"),
+        ]
+        readable = _readable(
+            {
+                ("fat", "A"): slice(0, 1200),
+                ("fat", "B"): slice(0, 600),
+                ("ctl", "C"): slice(0, 1200),
+            }
+        )
+        gene_cage, totals = self._run(events, readable)
+        gc = gene_cage.set_index(["group", "replicate", "gene_id"])
+        row = gc.loc[("fat", "A", "g1")]
+        assert (
+            row.n_de_novo,
+            row.n_synonymous,
+            row.n_nonsynonymous,
+            row.n_nonsense,
+        ) == (2, 1, 1, 0)
+        assert (row.covered_bp, row.gene_length, row.covered_fraction) == (
+            300,
+            300,
+            1.0,
+        )
+        assert row.rate == pytest.approx(2 / 300) and row.entered
+        row = gc.loc[("fat", "B", "g2")]
+        assert (row.n_de_novo, row.n_nonsynonymous, row.covered_bp) == (
+            1,
+            1,
+            200,
+        )  # 400..599 readable
+        assert row.covered_fraction == pytest.approx(200 / 300)
+        row = gc.loc[("fat", "B", "g3")]
+        assert row.covered_bp == 0 and np.isnan(row.rate) and not row.entered
+        assert len(gene_cage) == 9  # 3 genes x 3 cages, zeros kept
+        assert gene_cage["n_de_novo"].sum() == 3  # the intergenic one is in no gene
+        tot = totals.set_index(["group", "replicate"])
+        assert tot.loc[("fat", "A")].to_dict() == {
+            "mag_id": "M",
+            "n_de_novo_total": 3,
+            "covered_bp_total": 1200,
+        }
+        assert tot.loc[("fat", "B")].to_dict() == {
+            "mag_id": "M",
+            "n_de_novo_total": 1,
+            "covered_bp_total": 600,
+        }
+        assert tot.loc[("ctl", "C")].to_dict() == {
+            "mag_id": "M",
+            "n_de_novo_total": 0,
+            "covered_bp_total": 1200,
+        }
+
+    def test_block_rule_decides_whether_blocks_count(self):
+        events = [
+            _event("fat", "A", 150, "g1", "A", "G", origin="block_event"),
+            _event("fat", "A", 160, "g1", "T", "C", origin="block_event"),
+            _event("fat", "A", 180, "g1", "A", "G", origin="standing_variation"),
+        ]
+        readable = _readable(
+            {("fat", "A"): slice(0, 1200), ("fat", "B"): None, ("ctl", "C"): None}
+        )
+        gc, tot = self._run(events, readable)
+        row = gc.set_index(["group", "replicate", "gene_id"]).loc[("fat", "A", "g1")]
+        assert (row.n_de_novo, row.n_block_excluded) == (0, 2)
+        assert (
+            tot.set_index(["group", "replicate"]).loc[("fat", "A"), "n_de_novo_total"]
+            == 0
+        )
+        gc, tot = self._run(events, readable, block_rule="once")
+        row = gc.set_index(["group", "replicate", "gene_id"]).loc[("fat", "A", "g1")]
+        assert (row.n_de_novo, row.n_block_excluded) == (2, 0)
+        assert (
+            tot.set_index(["group", "replicate"]).loc[("fat", "A"), "n_de_novo_total"]
+            == 2
+        )
+
+    def test_covered_fraction_knob_drops_a_sliver(self):
+        events = [_event("fat", "B", 450, "g2", "A", "G")]
+        readable = _readable(
+            {("fat", "A"): None, ("fat", "B"): slice(0, 600), ("ctl", "C"): None}
+        )
+        gc, _ = self._run(events, readable, min_gene_covered_fraction=0.8)
+        row = gc.set_index(["group", "replicate", "gene_id"]).loc[("fat", "B", "g2")]
+        # 200 of 300 bases searched is under the 0.8 bar: the cage does not
+        # enter for this gene, and its event is not counted
+        assert not row.entered and row.covered_bp == 0 and row.n_de_novo == 0
+        assert row.covered_fraction == pytest.approx(200 / 300)  # still reported
+        assert np.isnan(row.rate)
+
+    def test_cage_with_nothing_readable_appears_with_zeros(self):
+        readable = _readable(
+            {("fat", "A"): slice(0, 1200)}
+        )  # B and C not in the mask at all
+        gc, tot = self._run([], readable)
+        assert len(gc) == 9
+        sub = gc[(gc.group == "ctl") & (gc.replicate == "C")]
+        assert (
+            (sub.covered_bp == 0).all()
+            and (~sub.entered).all()
+            and sub.rate.isna().all()
+        )
+        assert tot.set_index(["group", "replicate"]).loc[("ctl", "C")].to_dict() == {
+            "mag_id": "M",
+            "n_de_novo_total": 0,
+            "covered_bp_total": 0,
+        }
+
+    def test_an_event_in_an_unknown_gene_raises(self):
+        with pytest.raises(ValueError, match="g9"):
+            self._run(
+                [_event("fat", "A", 150, "g9", "A", "G")],
+                _readable({("fat", "A"): slice(0, 1200)}),
+            )
