@@ -52,7 +52,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-from Bio import SeqIO
 from Bio.Seq import Seq
 
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
@@ -74,7 +73,13 @@ from alleleflux.scripts.analysis.de_novo_rules import (
     assign_blocks,
     carrier_strain_verdicts,
 )
-from alleleflux.scripts.evolution.dnds_from_timepoints import COMPLEMENT_MAP
+
+# load_genes is re-exported here: tests and callers import it from this module.
+from alleleflux.scripts.utilities.genes import (  # noqa: F401 (re-export)
+    COMPLEMENT_MAP,
+    coding_index,
+    load_genes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -619,68 +624,23 @@ CAGE_TOTAL_COLUMNS = [
 ]
 
 
-def load_genes(prodigal_fasta: str) -> pd.DataFrame:
-    """Prodigal's gene file as one row per gene with 0-based inclusive coordinates.
-
-    Prodigal writes ``>id # start # end # strand # ...`` (1-based inclusive)
-    above each coding sequence, already read 5' to 3' (reverse-strand genes
-    are reverse-complemented in the file).  Same coordinate rule as
-    ``profile_mags.map_genes`` (subtract 1 from both ends), plus ``strand``,
-    ``length`` and the ``sequence`` the substitution classes need; the
-    ``contig`` is the id up to its last ``_``.  A sequence whose length
-    disagrees with the header raises, naming the gene.
-
-    Example: ``>c1_1 # 101 # 109 # 1 # ...`` over ``ATGGGATGG`` -> gene c1_1 on
-    contig c1, start 100, end 108, strand 1, length 9.
-    """
-    records = []
-    for rec in SeqIO.parse(prodigal_fasta, "fasta"):
-        parts = rec.description.split("#")
-        if len(parts) != 5:
-            raise ValueError(f"unexpected Prodigal header {rec.description!r}")
-        gene_id = parts[0].strip()
-        start, end, strand = int(parts[1]) - 1, int(parts[2]) - 1, int(parts[3])
-        seq = str(rec.seq).upper()
-        if len(seq) != end - start + 1:
-            raise ValueError(
-                f"gene {gene_id}: header spans {end - start + 1} bases but the "
-                f"sequence has {len(seq)}"
-            )
-        records.append(
-            {
-                "gene_id": gene_id,
-                "contig": "_".join(gene_id.split("_")[:-1]),
-                "start": start,
-                "end": end,
-                "strand": strand,
-                "length": len(seq),
-                "sequence": seq,
-            }
-        )
-    return pd.DataFrame(
-        records,
-        columns=["gene_id", "contig", "start", "end", "strand", "length", "sequence"],
-    )
-
-
 def classify_substitution(position: int, ref: str, alt: str, gene: pd.Series) -> str:
     """Does swapping ``ref`` for ``alt`` at this contig position change the protein?
 
-    ``gene`` carries ``start, end`` (0-based inclusive), ``strand`` (1 / -1)
-    and ``sequence`` (coding strand, 5' to 3').  The arithmetic is dN/dS's
-    ``get_codon_from_site`` with 0-based ends (that helper takes Prodigal's
-    1-based ones): on the forward strand the coding index is ``position -
-    start``; on the reverse strand it is ``end - position`` and the contig
-    letters are complemented first (``COMPLEMENT_MAP``, shared with dN/dS),
-    because the coding sequence is the reverse complement of the contig.
-    Checked 2026-11-03 by brute force over every position of both bundled
-    references, 6 genes per strand: coding letter == (complemented) reference
-    letter, and index + codon identical to ``get_codon_from_site``.  The codon
-    is translated with the bacterial table before and after the swap.
+    ``gene`` is a ``load_genes`` row: ``start, end`` (0-based inclusive),
+    ``strand`` (1 / -1) and ``sequence`` (coding strand, 5' to 3').  The
+    coding index comes from the shared ``coding_index`` (the same arithmetic
+    dN/dS's ``get_codon_from_site`` routes through): ``position - start`` on
+    the forward strand, ``end - position`` on the reverse strand, where the
+    contig letters are complemented first (``COMPLEMENT_MAP``, shared with
+    dN/dS) because the coding sequence is the reverse complement of the
+    contig.  The codon is translated with the bacterial table before and
+    after the swap.
 
-    Raises when the position is outside the gene or the contig's reference
-    letter is not the coding sequence's letter there (the gene file and the
-    reference disagree, or the strand is wrong).
+    Raises when the position is outside the gene (named in the message), the
+    contig's reference letter is not the coding sequence's letter there (the
+    gene file and the reference disagree, or the strand is wrong), or the
+    codon is incomplete (a sequence length that is not a multiple of three).
 
     Example: gene ATG GGA TGG at 100..108 forward; position 105 is the third
     base of GGA, A -> G gives GGG, still glycine: ``synonymous``; position 107
@@ -688,14 +648,16 @@ def classify_substitution(position: int, ref: str, alt: str, gene: pd.Series) ->
     """
     start, end, strand = int(gene["start"]), int(gene["end"]), int(gene["strand"])
     seq = str(gene["sequence"])
+    # Re-raise the shared helper's out-of-gene error with the gene id in it:
+    # callers see thousands of genes and need to know which one disagreed.
     if not start <= position <= end:
         raise ValueError(
             f"position {position} is outside gene {gene['gene_id']} ({start}..{end})"
         )
+    index = coding_index(position, start, end, strand)
     if strand == 1:
-        index, ref_c, alt_c = position - start, ref, alt
+        ref_c, alt_c = ref, alt
     else:
-        index = end - position
         ref_c, alt_c = ref.translate(_COMPLEMENT), alt.translate(_COMPLEMENT)
     if seq[index] != ref_c:
         raise ValueError(

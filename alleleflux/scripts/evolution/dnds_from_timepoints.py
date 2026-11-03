@@ -64,14 +64,20 @@ from Bio.SeqRecord import SeqRecord
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.cache_io import load_cache_sites
+
+# COMPLEMENT_MAP lives with the shared gene helpers now; it is re-exported from
+# this module's namespace so existing importers keep working.
+from alleleflux.scripts.utilities.genes import (  # noqa: F401 (re-export)
+    COMPLEMENT_MAP,
+    coding_index,
+    parse_prodigal_records,
+)
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 # Set up logger for this script
 logger = logging.getLogger(__name__)
 
 # --- Global Constants ---
-# Defines the complement for each DNA base. Used for reverse strand genes.
-COMPLEMENT_MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
 
 # NCBI genetic code table 11 (bacterial/archaeal) used throughout the script
 GENETIC_CODE_TABLE = CodonTable.unambiguous_dna_by_id[11]
@@ -803,14 +809,27 @@ def get_codon_from_site(position, gene_info, sequence):
         A tuple of (codon_string, pos_in_gene) or (None, None) if the position is invalid.
     """
     strand = gene_info["strand"]
-    # Calculate the 0-indexed position within the gene's sequence.
-    if strand == 1:
-        pos_in_gene = position - (gene_info["start"] - 1)
-    elif strand == -1:
-        pos_in_gene = (gene_info["end"] - 1) - position
-    else:
+    # The strand is checked up front so the warning text stays what it always
+    # was; coding_index would also reject it, but with a different message.
+    if strand not in (1, -1):
         logger.warning(
             f"Unknown strand '{strand}' for gene {gene_info['record'].id}. Cannot get codon."
+        )
+        return None, None
+    # Calculate the 0-indexed position within the gene's sequence through the
+    # shared helper (0-based ends, hence the -1 on Prodigal's 1-based ones).
+    # A position outside the header span raises there; this function's
+    # contract is (None, None) plus a warning, never an exception, so the
+    # error is turned into the same out-of-bounds warning as before.  (With
+    # a real Prodigal file the span equals the sequence length, so the two
+    # checks agree; the second one below still guards a shorter sequence.)
+    try:
+        pos_in_gene = coding_index(
+            position, gene_info["start"] - 1, gene_info["end"] - 1, strand
+        )
+    except ValueError:
+        logger.warning(
+            f"Contig position {position} for gene {gene_info['record'].id} is outside the gene span (gene len: {len(sequence)})."
         )
         return None, None
     # Validate that the calculated position is within the bounds of the sequence.
@@ -1992,16 +2011,9 @@ def main():
 
     # Load Prodigal records once for all MAGs
     logger.info("Loading gene annotation file...")
-    prodigal_raw = SeqIO.to_dict(SeqIO.parse(args.prodigal_fasta, "fasta"))
-    prodigal_records = {}
-    for rec in prodigal_raw.values():
-        header_parts = [p.strip() for p in rec.description.split("#")]
-        prodigal_records[rec.id] = {
-            "record": rec,
-            "start": int(header_parts[1]),
-            "end": int(header_parts[2]),
-            "strand": int(header_parts[3]),
-        }
+    # Shared reader: {gene_id: {"record", "start", "end", "strand"}} with
+    # Prodigal's 1-based inclusive ends kept as written.
+    prodigal_records = parse_prodigal_records(args.prodigal_fasta)
 
     # Determine number of CPUs to use, ensuring it doesn't exceed the number of MAGs
     num_cpus = min(args.cpus, len(args.mag_ids))
