@@ -65,7 +65,19 @@ class RateTest:
     dispersion
         ``max(1, Pearson X2 / df_resid)``; 1 when there is no residual df.
     p_value
-        ``chi2.sf(deviance / dispersion, 1)``; NaN when untestable.
+        The discounted verdict: ``chi2.sf(deviance / dispersion, 1)`` (Test A)
+        or ``f.sf(deviance / dispersion, 1, df_resid)`` (Test B); NaN when
+        untestable.
+    p_value_raw
+        The same surprise WITHOUT the cage-agreement discount:
+        ``chi2.sf(deviance, 1)``, the textbook Poisson likelihood-ratio test
+        that treats every cage as an independent Poisson draw.  Reported
+        next to ``p_value`` so a reader sees what requiring the cages to
+        agree cost (collaborator request 2026-11-04).  Chi-square for both
+        tests: no dispersion is estimated here, so there is nothing for an
+        F curve to charge for.  Defined whenever the statistic is (it needs
+        no spare cage), so Test B with one cage per group has a raw p but
+        no discounted one.
     n
         Cages used (after dropping cages with no exposure in Test A).
     note
@@ -84,6 +96,7 @@ class RateTest:
     n: int
     note: str = ""
     df_resid: int = 0
+    p_value_raw: float = math.nan
 
 
 def _untestable(note: str, n: int, rate_ratio: float = math.nan) -> RateTest:
@@ -184,7 +197,11 @@ def gene_vs_genome(observed, expected) -> RateTest:
     #    it: p = 0.147.  Without the discount the same counts would give
     #    p = 0.013; one loud cage does not carry a gene on its own.
     p = float(chi2.sf(lrt / phi, 1))
-    return RateTest(rr, lrt, phi, p, n, "", max(n - 1, 0))
+    # 5. The raw verdict: the same surprise with no discount, chi2.sf(6.17, 1)
+    #    = 0.013 in the hand case.  Reported beside p so the cost of asking
+    #    the cages to agree is visible gene by gene.
+    raw = float(chi2.sf(lrt, 1))
+    return RateTest(rr, lrt, phi, p, n, "", max(n - 1, 0), p_value_raw=raw)
 
 
 def group_vs_group(observed_a, exposure_a, observed_b, exposure_b) -> RateTest:
@@ -277,6 +294,10 @@ def group_vs_group(observed_a, exposure_a, observed_b, exposure_b) -> RateTest:
     #    With one cage per group there are no spare cages and no replicate:
     #    untestable (note no_residual_df), never a p-value.
     df_resid = n - 2
+    # The raw verdict (no discount, no dispersion estimated, so the plain
+    # chi-square curve, never F): planted 5.55 -> 0.0185; burst 13.86 ->
+    # 0.0002, which is exactly the number the discount exists to temper.
+    raw = float(chi2.sf(lrt, 1))
     if df_resid <= 0:
         # One cage per group: no spare cage to estimate the dispersion from
         # and no replicate at all, so no p-value; the effect size is still
@@ -289,6 +310,7 @@ def group_vs_group(observed_a, exposure_a, observed_b, exposure_b) -> RateTest:
             n,
             NOTE_NO_RESIDUAL_DF,
             0,
+            p_value_raw=raw,  # needs no spare cage, so it is still reported
         )
     p = float(f_dist.sf(lrt / phi, 1, df_resid))
     # 5. The effect size: treatment pace over control pace.  inf when control
@@ -297,7 +319,7 @@ def group_vs_group(observed_a, exposure_a, observed_b, exposure_b) -> RateTest:
         ratio = math.inf
     else:
         ratio = ra / rb
-    return RateTest(ratio, lrt, phi, p, n, "", df_resid)
+    return RateTest(ratio, lrt, phi, p, n, "", df_resid, p_value_raw=raw)
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +338,8 @@ def _group_columns(group: str) -> list[str]:
         f"dispersion_{group}",
         f"p_value_vs_genome_{group}",
         f"q_value_vs_genome_{group}",
+        f"p_value_raw_vs_genome_{group}",
+        f"q_value_raw_vs_genome_{group}",
         f"note_{group}",
     ]
 
@@ -335,6 +359,8 @@ def result_columns(groups: tuple[str, str]) -> list[str]:
             "df_resid_between",
             "p_value_between",
             "q_value_between",
+            "p_value_raw_between",
+            "q_value_raw_between",
             "note_between",
         ]
     )
@@ -390,8 +416,10 @@ def test_every_gene(
     entered cages of both groups (NaN when none entered).
 
     BH (decision 9): three families, ``p_value_vs_genome_{a}``,
-    ``p_value_vs_genome_{b}`` and ``p_value_between``, each corrected over
-    its tested genes only, per genome when ``fdr_by_mag`` else over the whole
+    ``p_value_vs_genome_{b}`` and ``p_value_between``, plus their
+    undiscounted twins ``p_value_raw_*`` (collaborator request 2026-11-04:
+    the same statistic looked up without the cage-agreement discount, on
+    the chi-square curve), each corrected over its tested genes only, per genome when ``fdr_by_mag`` else over the whole
     comparison.
 
     Worked case (the regression plant's shape, 4 cages per group, a 100-base
@@ -469,6 +497,7 @@ def test_every_gene(
                         f"rate_ratio_vs_genome_{g}": np.nan,
                         f"dispersion_{g}": np.nan,
                         f"p_value_vs_genome_{g}": np.nan,
+                        f"p_value_raw_vs_genome_{g}": np.nan,
                         f"note_{g}": NOTE_BELOW_FLOOR,
                     }
                 )
@@ -479,6 +508,7 @@ def test_every_gene(
                         f"rate_ratio_vs_genome_{g}": r.rate_ratio,
                         f"dispersion_{g}": r.dispersion,
                         f"p_value_vs_genome_{g}": r.p_value,
+                        f"p_value_raw_vs_genome_{g}": r.p_value_raw,
                         f"note_{g}": r.note,
                     }
                 )
@@ -493,6 +523,7 @@ def test_every_gene(
                     "dispersion_between": np.nan,
                     "df_resid_between": 0,
                     "p_value_between": np.nan,
+                    "p_value_raw_between": np.nan,
                     "note_between": NOTE_BELOW_FLOOR,
                 }
             )
@@ -504,12 +535,17 @@ def test_every_gene(
                     "dispersion_between": r.dispersion,
                     "df_resid_between": r.df_resid,
                     "p_value_between": r.p_value,
+                    "p_value_raw_between": r.p_value_raw,
                     "note_between": r.note,
                 }
             )
         records.append(rec)
     out = pd.DataFrame(records)
+    # Six BH families: the three discounted ones and their raw twins, each
+    # corrected over its own tested genes.
     for g in (a, b):
         _bh(out, f"p_value_vs_genome_{g}", f"q_value_vs_genome_{g}", fdr_by_mag)
+        _bh(out, f"p_value_raw_vs_genome_{g}", f"q_value_raw_vs_genome_{g}", fdr_by_mag)
     _bh(out, "p_value_between", "q_value_between", fdr_by_mag)
+    _bh(out, "p_value_raw_between", "q_value_raw_between", fdr_by_mag)
     return out[cols].reset_index(drop=True)

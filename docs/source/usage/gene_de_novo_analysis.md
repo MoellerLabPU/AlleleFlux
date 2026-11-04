@@ -31,6 +31,8 @@ Both are likelihood-ratio tests of Poisson counts with an exposure offset, in cl
 
 A gene is tested in a group only when at least `quality_control.min_sample_num` of that group's cages entered it (Test B: both groups); below that the note reads `below_cage_floor`. Benjamini-Hochberg runs within each of the three families (Test A per group, Test B) over the tested genes only, per MAG when `statistics.fdr_group_by_mag_id` is true. A gene with no events in a family is `no_events`, never p = 1.
 
+**Both tests are also reported without the discount** (`p_value_raw_*`, with their own q-values): the same statistic looked up on the chi-square curve with the dispersion fixed at 1, the textbook Poisson test that treats every cage as an independent draw. Read the pair together: when the cages agree the two are close (the planted case: 0.0185 raw, 0.057 discounted, the gap being only the F curve's charge for estimating the dispersion); when one cage carries the events they split wide (ten events in one cage and none in three: 0.0002 raw, 0.147 discounted). The raw p uses the chi-square and never F, because no dispersion is estimated for it; in a simulation with no cage-to-cage noise the raw chi-square rejected 5 to 8 percent of null genes at 0.05 while an F lookup of the same statistic rejected 1 to 4 percent, and with strong cage noise the raw p rejected 18 to 42 percent of null genes on either curve, which is what the discount is for.
+
 With 4 cages per group a perfect four-to-nothing split in Test B reads p = 0.057: suggestive, not significant. At 8 cages per group the same pattern is p = 0.005. The test has the power it needs at the floor, not below it.
 
 ## Worked cage

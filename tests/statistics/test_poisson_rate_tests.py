@@ -30,6 +30,7 @@ from alleleflux.scripts.statistics.poisson_rate_tests import (
     RateTest,
     gene_vs_genome,
     group_vs_group,
+    result_columns,
 )
 
 
@@ -46,6 +47,8 @@ class TestGeneVsGenome:
         assert r.deviance == pytest.approx(6.1652, rel=1e-3)
         assert r.dispersion == pytest.approx(2.935, rel=1e-3)
         assert r.p_value == pytest.approx(0.1472, abs=1e-3)
+        # the same surprise without the agreement discount: chi2.sf(6.1652, 1)
+        assert r.p_value_raw == pytest.approx(0.0130, abs=1e-3)
         assert r.n == 3 and r.note == ""
 
     def test_underdispersed_case_keeps_dispersion_at_one(self):
@@ -67,6 +70,7 @@ class TestGeneVsGenome:
         r = gene_vs_genome(np.zeros(4), np.full(4, 0.3))
         assert r.rate_ratio == 0.0
         assert math.isnan(r.p_value) and math.isnan(r.deviance)
+        assert math.isnan(r.p_value_raw)
         assert r.note == "no_events"
 
     def test_no_exposure_is_untestable(self):
@@ -112,6 +116,7 @@ class TestGroupVsGroup:
         assert r.deviance == pytest.approx(5.5452, rel=1e-4)
         assert r.dispersion == 1.0
         assert r.p_value == pytest.approx(0.0567, rel=1e-2)
+        assert r.p_value_raw == pytest.approx(0.0185, rel=1e-2)  # chi2, no discount
         assert r.n == 8 and r.note == ""
         assert r.df_resid == 6
 
@@ -162,6 +167,11 @@ class TestGroupVsGroup:
         from scipy.stats import f as fdist
 
         assert r.p_value == pytest.approx(fdist.sf(plain / 5.0, 1, 6), rel=1e-6)
+        from scipy.stats import chi2
+
+        # raw: the burst looks overwhelming (0.0002) once cage agreement is ignored
+        assert r.p_value_raw == pytest.approx(chi2.sf(plain, 1), rel=1e-6)
+        assert r.p_value_raw < 1e-3 < r.p_value
 
     def test_one_cage_per_group_is_untestable_there_is_no_replicate(self):
         # 2 cages - 2 rates = 0 spare cages: the dispersion cannot be estimated
@@ -173,6 +183,10 @@ class TestGroupVsGroup:
         assert math.isnan(r.p_value) and math.isnan(r.dispersion)
         assert r.note == "no_residual_df"
         assert r.rate_ratio == math.inf  # the effect size is still reported
+        # the raw p needs no dispersion estimate, so it IS reported: chi2 on 2*3 ln 2
+        from scipy.stats import chi2
+
+        assert r.p_value_raw == pytest.approx(chi2.sf(2 * 3 * math.log(2), 1), rel=1e-6)
 
     def test_no_events_anywhere_is_untestable(self):
         r = group_vs_group(np.zeros(3), np.full(3, 50.0), np.zeros(3), np.full(3, 50.0))
@@ -282,6 +296,13 @@ class TestTestEveryGene:
         assert x["rate_control"] == 0.0
         assert x["rate_ratio_treatment_vs_control"] == math.inf
         assert x["p_value_between"] == pytest.approx(0.0567, rel=1e-2)  # F(1, 6)
+        assert x["p_value_raw_between"] == pytest.approx(0.0185, rel=1e-2)  # chi2
+        # two genes are tested between the groups (gX and gZ), so BH doubles
+        # the smaller p: q = min(0.0185 * 2 / 1, gZ's larger raw p) = 0.037
+        assert x["q_value_raw_between"] == pytest.approx(2 * x["p_value_raw_between"])
+        assert x["p_value_raw_vs_genome_treatment"] == pytest.approx(
+            gene_vs_genome(np.ones(4), np.full(4, 0.1)).p_value_raw
+        )
         assert x["df_resid_between"] == 6
         assert x["note_between"] == ""
         # gY: no events anywhere -> every test untestable, every q NaN
@@ -293,6 +314,10 @@ class TestTestEveryGene:
             "q_value_vs_genome_treatment",
             "q_value_vs_genome_control",
             "q_value_between",
+            "p_value_raw_vs_genome_treatment",
+            "q_value_raw_vs_genome_treatment",
+            "p_value_raw_between",
+            "q_value_raw_between",
         ):
             assert math.isnan(y[col]), col
         assert (y["note_treatment"], y["note_control"], y["note_between"]) == (
@@ -392,3 +417,17 @@ class TestTestEveryGene:
         gc, tot = _plant_fixture()
         out = every_gene(gc.iloc[0:0], tot, GROUPS, min_cages=4, fdr_by_mag=False)
         assert out.empty and "p_value_between" in out.columns
+
+
+class TestResultColumns:
+    def test_raw_columns_follow_the_discounted_ones_in_every_block(self):
+        cols = result_columns(("a", "b"))
+        i = cols.index("q_value_vs_genome_a")
+        assert cols[i + 1 : i + 3] == [
+            "p_value_raw_vs_genome_a",
+            "q_value_raw_vs_genome_a",
+        ]
+        assert cols[i + 3] == "note_a"
+        j = cols.index("q_value_between")
+        assert cols[j + 1 : j + 3] == ["p_value_raw_between", "q_value_raw_between"]
+        assert cols[j + 3] == "note_between"
