@@ -45,6 +45,7 @@ analysis:
   use_regional_contrast: False
   use_baseline_presence: False
   use_strain_turnover: False
+  use_gene_de_novo: False
   # Pairwise conANI/popANI between EVERY pair of samples (the between-mouse
   # strain-sharing question; the only mode with a meaning on one timepoint).
   # The planted divergent sample (planted_truth.json: strain_swap) is the one

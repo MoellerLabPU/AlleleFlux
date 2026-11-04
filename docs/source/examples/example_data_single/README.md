@@ -7,7 +7,8 @@ All paths in the configs and metadata are RELATIVE to this directory.
 
 `planted_truth.json` lists every fact planted in the profiles
 (significant sites, standing / de novo alleles, the strain-swapped
-sample, the depth spikes); the regression test asserts them.
+sample, the depth spikes, the hot gene); the regression test asserts
+them.
 
 ## Option A — pre-generated profiles (fastest; carries the planted facts)
 

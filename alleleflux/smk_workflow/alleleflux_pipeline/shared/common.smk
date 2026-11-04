@@ -672,11 +672,15 @@ LABEL_BLIND_EXTRAS = (
     "use_baseline_presence",
     "use_pairwise_ani",
     "use_strain_turnover",
+    # The gene-level de novo analysis reads the sample sheet's own labels (its
+    # CLI takes no permuted-sheet flag) and its carrier gate reads the strain
+    # turnover tables, which this same switch removes from a null run.
+    "use_gene_de_novo",
 )
 
 
 def switch_off_label_blind_extras(config, is_permuted_run):
-    """Force the four label-blind feature flags to False in a permuted run.
+    """Force the five label-blind feature flags to False in a permuted run.
 
     Mutates ``config["analysis"]`` in place and returns the flags that were ON
     before (for the log line).  A non-permuted run is left untouched.
@@ -684,7 +688,7 @@ def switch_off_label_blind_extras(config, is_permuted_run):
     so an absent key counts as "was on" for that flag only.
 
     Example: ``{"analysis": {"use_pairwise_ani": True}}`` in a permuted run ->
-    returns ``["use_dnds", "use_pairwise_ani"]`` and leaves all four keys False.
+    returns ``["use_dnds", "use_pairwise_ani"]`` and leaves all five keys False.
     """
     if not is_permuted_run:
         return []
@@ -818,6 +822,21 @@ def dnds_sentinel(timepoints, groups, subject_id):
         str(subject_id),
         SENTINEL_DNDS,
     )
+
+def transition_labels(combos) -> str:
+    """``EARLIER:LATER`` for every two-timepoint combination, space-joined.
+
+    The one spelling of the ``--transitions`` argument that the pairwise-ANI
+    rule (``pairs: transitions``) and the strain-turnover rule pass to their
+    CLIs, so the two can never disagree.  Single-timepoint entries (no
+    ``later``) contribute nothing.  Values are written as given (a numeric
+    timepoint name stays ``0:7``).
+
+    Example: ``[{"earlier": "5mo", "later": "10mo"}, {"earlier": "5mo",
+    "later": "16mo"}]`` -> ``"5mo:10mo 5mo:16mo"``.
+    """
+    return " ".join(f"{tc['earlier']}:{tc['later']}" for tc in combos if "later" in tc)
+
 
 timepoints_labels = []
 focus_timepoints = {}
@@ -1721,22 +1740,11 @@ def gene_de_novo_cli_args():
 # Evaluated once at parse time, only when the feature is on (same guard as
 # DE_NOVO_RULE_PARAMS: a config without use_gene_de_novo must never trip the
 # gate-vs-turnover check).
+# In a permuted (null) run the flag is already False here: it is one of the
+# LABEL_BLIND_EXTRAS switched off above, so neither the parameter check (whose
+# carrier gate would ask for the strain turnover that null runs lack) nor the
+# rule ever runs there.
 if config.get("analysis", {}).get("use_gene_de_novo", False):
-    # A permuted (null) run switches strain turnover off (label-blind, see
-    # switch_off_label_blind_extras), so the carrier gate has nothing to read;
-    # the shared check inside gene_de_novo_params would then say "set
-    # use_strain_turnover: true", which a null run cannot do, hence this check
-    # FIRST, on the config's own gate word (carrier when absent), with the
-    # right advice.
-    _gate_word = str(
-        (config["analysis"].get("baseline_presence", {}) or {}).get("strain_gate", "carrier")
-    )
-    if IS_PERMUTED_RUN and _gate_word == "carrier":
-        raise ValueError(
-            "analysis.use_gene_de_novo in a permuted run: strain turnover is off in "
-            "null runs, so analysis.baseline_presence.strain_gate carrier cannot be "
-            "used; set strain_gate: none or use_gene_de_novo: false"
-        )
     GENE_DE_NOVO_PARAMS = gene_de_novo_params()
     GENE_DE_NOVO_ARGS = gene_de_novo_cli_args()
 else:

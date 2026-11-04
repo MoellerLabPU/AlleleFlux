@@ -120,12 +120,64 @@ class TestPlan:
         assert truth["strain_swap"]["sample_id"].startswith("treatment_")
         assert len(truth["depth_spikes"]) == 2
 
+    def test_hot_gene_has_one_event_per_strain_keeping_treatment_mouse(
+        self, longitudinal
+    ):
+        """The hot gene is the longest gene on a contig that holds no other de
+        novo plant; each treatment mouse that keeps its strain gets ONE event
+        inside it.  The strain-swapped mouse gets none: its cage shows a burst
+        of new alleles on every contig, which the per-cage cluster rule folds
+        into blocks, and a single event planted there would be folded too."""
+        mags, samples, truth, _ = longitudinal
+        hot = truth["hot_gene"]
+        contig = next(
+            c
+            for m in mags
+            if m["mag_id"] == hot["mag"]
+            for c in m["contigs"]
+            if c["contig_id"] == hot["contig"]
+        )
+        gene = next(g for g in contig["genes"] if g["gene_id"] == hot["gene_id"])
+        assert gene["end"] - gene["start"] == max(
+            g["end"] - g["start"] for g in contig["genes"]
+        )
+        de_novo_contigs = {
+            (s["mag"], s["contig"])
+            for s in truth["significant_sites"]
+            if s["kind"] == "de_novo"
+        }
+        assert (hot["mag"], hot["contig"]) not in de_novo_contigs
+        events = hot["events"]
+        positions = [e["position"] for e in events]
+        assert all(gene["start"] <= p < gene["end"] for p in positions)
+        assert len(set(positions)) == len(positions)
+        swapped = truth["strain_swap"]["subjectID"]
+        later = truth["timepoints"][-1]
+        keepers = sorted(
+            s["subjectID"]
+            for s in samples
+            if s["group"] == truth["groups"]["treatment"]
+            and s["time"] == later
+            and s["subjectID"] != swapped
+        )
+        assert sorted(e["subjectID"] for e in events) == keepers
+        assert len({e["replicate"] for e in events}) == len(events)
+        for e in events:
+            assert e["sample_id"] in truth["carrier_samples"]
+            assert e["ref_base"] == contig["sequence"][e["position"]]
+            ref_idx = gen.BASES.index(e["ref_base"])
+            assert e["rising_allele"] == gen.BASES[(ref_idx + 1) % 4]
+
     def test_plants_never_overlap(self, longitudinal):
         _, _, truth, _ = longitudinal
         sites = {
             (s["mag"], s["contig"], s["position"]) for s in truth["significant_sites"]
         }
         assert len(sites) == len(truth["significant_sites"])
+        hot = truth["hot_gene"]
+        hot_keys = {(hot["mag"], hot["contig"], e["position"]) for e in hot["events"]}
+        assert not sites & hot_keys
+        sites |= hot_keys
         for spike in truth["depth_spikes"]:
             for pos in range(spike["start"], spike["end"]):
                 assert (spike["mag"], spike["contig"], pos) not in sites
@@ -157,6 +209,41 @@ class TestProfiles:
                 assert _dominant(counts) == lone["ref_base"]
             else:
                 assert rising == 0
+
+    def test_hot_gene_allele_has_zero_reads_outside_its_one_sample(self, longitudinal):
+        _, samples, truth, profiles = longitudinal
+        hot = truth["hot_gene"]
+        for event in hot["events"]:
+            key = (hot["contig"], event["position"])
+            for sample in samples:
+                counts = _rows_by_position(profiles[sample["sample_id"]][hot["mag"]])[
+                    key
+                ]
+                rising = counts[event["rising_allele"]]
+                if sample["sample_id"] == event["sample_id"]:
+                    assert (
+                        abs(rising / counts["cov"] - truth["shift_rising_fraction"])
+                        < 0.03
+                    )
+                    assert _dominant(counts) == event["ref_base"]
+                else:
+                    assert rising == 0
+
+    def test_background_noise_is_at_most_one_read_per_minor_base(self):
+        """Sequencer noise is one stray read, not three: three reads of one
+        letter at depth 20-40 clear the baseline-presence bar and read as a
+        real minor allele, so every low-depth position became a fake de novo
+        candidate in the gene-level analysis."""
+        random.seed(1)
+        seen = set()
+        for _ in range(500):
+            counts = gen._background_counts(
+                "A", random.randint(20, 80), ["T", "G", "C"]
+            )
+            for b in ("T", "G", "C"):
+                assert counts[b] <= 1, counts
+                seen.add(counts[b])
+        assert seen == {0, 1}  # the noise is still there, just one read deep
 
     def test_standing_allele_persists_in_one_control_mouse_at_both_timepoints(
         self, longitudinal
@@ -357,6 +444,12 @@ class TestWriteConfig:
         assert bp["strain_gate"] == "carrier"
         assert bp["min_determined_carriers"] == 1
         assert a["use_regional_contrast"] is False
+        assert a["use_gene_de_novo"] is True
+        assert a["gene_de_novo"] == {
+            "block_rule": "exclude",
+            "min_gene_covered_fraction": 0.0,
+            "min_determined_carriers": 1,
+        }
 
     def test_single_keeps_the_longitudinal_only_features_off(self, tmp_path):
         a = self._emit(tmp_path, "single")["analysis"]
@@ -373,6 +466,7 @@ class TestWriteConfig:
             "use_regional_contrast",
             "use_baseline_presence",
             "use_strain_turnover",
+            "use_gene_de_novo",
         ):
             assert a[flag] is False, flag
 

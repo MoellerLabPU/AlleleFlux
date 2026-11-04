@@ -39,14 +39,17 @@ run are tolerated.  Catches silent numerical drift and dropped outputs.
 
 **Planted facts** (`test_planted_truth.py`).  The data generator decided every
 significant site, the standing allele, the lone de novo allele, the block of
-three, the strain-swapped sample and the depth spikes up front and wrote them
-to `planted_truth.json` beside each dataset.  Six tests read that card and
-look each fact up in the run's outputs: significant and rising in treatment;
-standing with the planted mouse named at baseline; de novo with every carrier
-absent before; one `block_event`; the swapped sample the only strain change;
-the spikes removed for exactly the spiked samples.  A golden that was wrong on
-the day it was captured would pass layer one forever; layer two is what catches
-that.
+three, the strain-swapped sample, the depth spikes and the hot gene up front
+and wrote them to `planted_truth.json` beside each dataset.  Eight tests read
+that card and look each fact up in the run's outputs: significant and rising
+in treatment; standing with the planted mouse named at baseline; de novo with
+every carrier absent before; one `block_event`; the swapped sample the only
+strain change; the spikes removed for exactly the spiked samples; the hot gene
+(one private de novo event per strain-keeping treatment mouse, none in
+control) the only gene of its genome with events and significant between the
+groups; the strain-swapped cage contributing no de novo event (its burst of
+new alleles is folded into blocks).  A golden that was wrong on the day it was
+captured would pass layer one forever; layer two is what catches that.
 
 Both layers read one pipeline run per scenario (`conftest.pipeline_run`), so
 the second layer costs seconds.

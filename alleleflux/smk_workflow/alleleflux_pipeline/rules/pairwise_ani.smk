@@ -62,14 +62,13 @@ rule pairwise_ani:
         # params block parseable then (no job of this rule exists in that case).
         pairs=(PAIRWISE_ANI or {}).get("pairs", ""),
         # --transitions is only meaningful for pairs == "transitions"; built from the
-        # configured timepoint combinations (EARLIER:LATER each).  The guard in
+        # configured timepoint combinations (EARLIER:LATER each, transition_labels
+        # in common.smk, shared with the strain-turnover rule).  The guard in
         # common.smk refuses "transitions" on single data, so every entry here
         # has two timepoints when this branch is taken.
         transitions_arg=(
-            "--transitions " + " ".join(
-                f"{tc['timepoint'][0]}:{tc['timepoint'][1]}"
-                for tc in config["analysis"]["timepoints_combinations"]
-            )
+            "--transitions "
+            + transition_labels(config["analysis"]["timepoints_combinations"])
             if (PAIRWISE_ANI or {}).get("pairs") == "transitions"
             else ""
         ),

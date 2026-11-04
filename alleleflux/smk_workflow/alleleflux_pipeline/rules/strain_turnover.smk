@@ -32,13 +32,9 @@ rule strain_turnover:
         rollup=os.path.join(OUTDIR, "strain_turnover", "{mag}_turnover_rollup.tsv"),
     params:
         output_dir=os.path.join(OUTDIR, "strain_turnover"),
-        # EARLIER:LATER for every two-timepoint combination -- the same spelling
+        # EARLIER:LATER for every two-timepoint combination -- the same helper
         # the pairwise-ANI rule uses for pairs == "transitions".
-        transitions=" ".join(
-            f"{tc['earlier']}:{tc['later']}"
-            for tc in config["analysis"]["timepoints_combinations"]
-            if "later" in tc
-        ),
+        transitions=transition_labels(config["analysis"]["timepoints_combinations"]),
         min_compared=config["analysis"].get("strain_turnover", {}).get("min_compared", 0.1),
         pop_threshold=config["analysis"].get("strain_turnover", {}).get("pop_threshold", 0.99999),
         con_threshold=config["analysis"].get("strain_turnover", {}).get("con_threshold", 0.999),

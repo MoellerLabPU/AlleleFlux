@@ -6,4 +6,4 @@ MAG_001	subj4	D	control	pre_post	control_subj4_pre	control_subj4_post	2900	0.986
 MAG_001	subj5	A	treatment	pre_post	treatment_subj5_pre	treatment_subj5_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
 MAG_001	subj6	B	treatment	pre_post	treatment_subj6_pre	treatment_subj6_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
 MAG_001	subj7	C	treatment	pre_post	treatment_subj7_pre	treatment_subj7_post	2940	1.0	1.0	1.0	0.0	False	False	stable	0.1	0.99999	0.999	5
-MAG_001	subj8	D	treatment	pre_post	treatment_subj8_pre	treatment_subj8_post	2940	1.0	0.9799319727891156	0.9809523809523808	0.0010204081632652073	True	True	strain_replacement+dominant_strain_change	0.1	0.99999	0.999	5
+MAG_001	subj8	D	treatment	pre_post	treatment_subj8_pre	treatment_subj8_post	2940	1.0	0.9799319727891156	0.9799319727891156	0.0	True	True	strain_replacement+dominant_strain_change	0.1	0.99999	0.999	5

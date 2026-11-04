@@ -6,4 +6,4 @@ MAG_001	control_subj4_post	control_subj4_pre	2900	0.9863945578231292	0.986394557
 MAG_001	treatment_subj5_post	treatment_subj5_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj5	treatment	post	A	subj5	treatment	pre	A
 MAG_001	treatment_subj6_post	treatment_subj6_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj6	treatment	post	B	subj6	treatment	pre	B
 MAG_001	treatment_subj7_post	treatment_subj7_pre	2940	1.0	1.0	0	0	1.0	1.0	5	subj7	treatment	post	C	subj7	treatment	pre	C
-MAG_001	treatment_subj8_post	treatment_subj8_pre	2940	1.0	1.0	59	56	0.9799319727891157	0.9809523809523809	5	subj8	treatment	post	D	subj8	treatment	pre	D
+MAG_001	treatment_subj8_post	treatment_subj8_pre	2940	1.0	1.0	59	59	0.9799319727891157	0.9799319727891157	5	subj8	treatment	post	D	subj8	treatment	pre	D

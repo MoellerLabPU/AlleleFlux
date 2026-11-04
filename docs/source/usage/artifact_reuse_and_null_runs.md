@@ -115,10 +115,10 @@ at a run that only got as far as profiles gracefully degrades to profiles-only r
 
 A null run estimates how large an AlleleFlux score looks **by chance** by shuffling group
 labels among samples and re-running the group-dependent tail. In a permuted run the
-workflow forces `use_dnds`, `use_baseline_presence`, `use_pairwise_ani` and
-`use_strain_turnover` to False (logged at startup): those four read labels from the
-real metadata and QC tables, not from the permuted sheet, so they are not part of the
-null tail. Because the science of the
+workflow forces `use_dnds`, `use_baseline_presence`, `use_pairwise_ani`,
+`use_strain_turnover` and `use_gene_de_novo` to False (logged at startup): those five
+read labels from the real metadata and QC tables, not from the permuted sheet, so they
+are not part of the null tail. Because the science of the
 shuffle lives entirely in the `group` column, AlleleFlux reuses the real run's
 profiles/QC/cache and **relabels in memory** — it never re-profiles.
 

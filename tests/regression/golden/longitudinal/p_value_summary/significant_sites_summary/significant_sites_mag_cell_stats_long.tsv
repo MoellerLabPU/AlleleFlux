@@ -1,33 +1,33 @@
 comparison	period	group_pair	test_type	group_analyzed	mag_id	n_total_sites	n_sig_p	n_sig_q	pct_sig_p	pct_sig_q	min_p_value	min_q_value
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	2132	213	54	9.9906191369606	2.5328330206378986	2.638052615460138e-27	3.34307217694186e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	2937	251	67	8.546135512427647	2.281239359891045	2.3724588399705608e-32	1.202599385981077e-28
-pre_post-treatment_control	pre_post	treatment_control	CMH	pre	MAG_001	2938	215	0	7.317903335602451	0.0	0.0001242307274257	0.4853118760568217
-pre_post-treatment_control	pre_post	treatment_control	CMH	pre	MAG_002	2132	170	0	7.973733583489681	0.0	0.0002813399227715	0.4853118760568217
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	control	MAG_001	2939	217	0	7.383463763184757	0.0	0.0001853194317526	0.5533189697311717
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	control	MAG_002	2132	180	0	8.442776735459661	0.0	0.0005270675471816	0.5533189697311717
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	2132	197	54	9.24015009380863	2.5328330206378986	3.2673187074288294e-30	5.5239468280263406e-27
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	2940	277	70	9.421768707482993	2.380952380952381	1.3984229481773407e-34	7.0928011931554734e-31
-pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	control	MAG_001	2940	0	0	0.0	0.0	0.125	0.4402777777777777
-pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	control	MAG_002	2132	0	0	0.0	0.0	0.125	0.4402777777777777
-pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	treatment	MAG_001	2940	0	0	0.0	0.0	0.125	0.4243641231593039
-pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	treatment	MAG_002	2132	0	0	0.0	0.0	0.125	0.4243641231593039
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	2940	393	2	13.36734693877551	0.06802721088435375	1.5127225520041725e-06	0.0076725287837651
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_002	2132	263	1	12.335834896810507	0.04690431519699812	1.780003707895073e-05	0.045140894032219
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	2132	283	11	13.273921200750468	0.5159474671669794	3.0567836875886536e-08	5.16800228781655e-05
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	2940	399	10	13.571428571428571	0.3401360544217687	2.5333314654179357e-10	1.284905719259977e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon		MAG_001	2938	0	0	0.0	0.0	0.125	0.3570422535211267
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon		MAG_002	2132	0	0	0.0	0.0	0.125	0.3570422535211267
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon_abs		MAG_001	2938	0	0	0.0	0.0	0.125	0.3347860538827258
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon_abs		MAG_002	2132	0	0	0.0	0.0	0.125	0.3347860538827258
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	2132	392	9	18.386491557223266	0.42213883677298314	1.651036505439191e-07	0.0001674151016515
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	2938	474	9	16.133424098025866	0.3063308373042886	2.5333314654179357e-10	1.2843990529668935e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	2132	315	11	14.77485928705441	0.5159474671669794	1.651036505439191e-07	0.0002092688770644
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	2938	471	9	16.03131381892444	0.3063308373042886	2.5333314654179357e-10	1.2843990529668935e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney		MAG_001	2938	296	0	10.074880871341048	0.0	0.0177060658073666	0.3135435992578847
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney		MAG_002	2132	231	0	10.834896810506567	0.0	0.0210705701343786	0.3135435992578847
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney_abs		MAG_001	2938	309	0	10.517358747447243	0.0	0.0177060658073666	0.279668507176401
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney_abs		MAG_002	2132	236	0	11.069418386491558	0.0	0.0210705701343786	0.279668507176401
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	2132	304	10	14.25891181988743	0.46904315196998125	1.0046069912812026e-13	5.093357445795696e-10
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	2938	409	9	13.921034717494894	0.3063308373042886	1.1895379057863214e-12	3.015478591168325e-09
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	2132	280	11	13.133208255159476	0.5159474671669794	1.0046069912812026e-13	5.093357445795696e-10
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	2938	400	9	13.614703880190605	0.3063308373042886	1.2429689303206978e-12	3.1509262383629684e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	2130	67	51	3.1455399061032865	2.3943661971830985	1.473717282373915e-26	3.7336627348943136e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	2937	76	67	2.5876744977868573	2.281239359891045	7.235582617122638e-28	3.66626971209604e-24
+pre_post-treatment_control	pre_post	treatment_control	CMH	pre	MAG_001	2937	22	0	0.7490636704119851	0.0	0.0051354734050209	0.9999943118076158
+pre_post-treatment_control	pre_post	treatment_control	CMH	pre	MAG_002	2130	15	0	0.704225352112676	0.0	0.0090843498876637	0.9999943118076158
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	control	MAG_001	2938	22	0	0.7488087134104833	0.0	0.0173241132339383	0.999979314272952
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	control	MAG_002	2132	17	0	0.797373358348968	0.0	0.0085171428542312	0.999979314272952
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	2132	64	51	3.0018761726078798	2.3921200750469045	3.879866294085569e-33	9.839340921801003e-30
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	2940	82	69	2.7891156462585034	2.3469387755102042	1.1304732352458852e-33	5.7337602491671294e-30
+pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	control	MAG_001	2940	0	0	0.0	0.0	0.125	0.4797578509269768
+pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	control	MAG_002	2132	0	0	0.0	0.0	0.125	0.4797578509269768
+pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	treatment	MAG_001	2940	0	0	0.0	0.0	0.125	0.491663435440093
+pre_post-treatment_control	pre_post	treatment_control	single_sample_Wilcoxon	treatment	MAG_002	2132	0	0	0.0	0.0	0.125	0.491663435440093
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	2940	283	2	9.625850340136054	0.06802721088435375	3.210152733589354e-06	0.010132138762033
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_002	2132	205	0	9.615384615384615	0.0	3.397500660150314e-05	0.0559394535358283
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	2132	208	9	9.75609756097561	0.42213883677298314	2.2138272774230505e-08	3.7428439836965706e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	2940	307	8	10.4421768707483	0.272108843537415	5.50052710488583e-10	2.789867347598093e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon		MAG_001	2937	0	0	0.0	0.0	0.125	0.410216968911917
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon		MAG_002	2130	0	0	0.0	0.0	0.125	0.410216968911917
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon_abs		MAG_001	2937	0	0	0.0	0.0	0.125	0.3756672597864769
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_Wilcoxon_abs		MAG_002	2130	0	0	0.0	0.0	0.125	0.3756672597864769
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	2130	324	10	15.211267605633802	0.4694835680751174	7.465272731200403e-08	7.67925109936099e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	2937	435	10	14.811031664964249	0.34048348655090227	5.50052710488583e-10	2.7871170840456497e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	2130	305	12	14.31924882629108	0.5633802816901409	7.577709788199121e-08	9.439914384371484e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	2937	410	11	13.959822948586993	0.37453183520599254	5.50052710488583e-10	2.7871170840456497e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney		MAG_001	2937	246	0	8.375893769152196	0.0	0.0202080042393892	0.362608462295375
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney		MAG_002	2130	195	0	9.154929577464788	0.0	0.0210705701343786	0.362608462295375
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney_abs		MAG_001	2937	336	0	11.440245148110316	0.0	0.0202080042393892	0.2689081429250013
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_MannWhitney_abs		MAG_002	2130	246	0	11.549295774647888	0.0	0.0202080042393892	0.2689081429250013
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	2130	281	9	13.192488262910798	0.4225352112676056	4.302424432086957e-13	2.1800384597384612e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	2937	387	8	13.176710929519919	0.27238678924072185	1.928831904989263e-10	1.9546782525161195e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	2130	305	8	14.31924882629108	0.3755868544600939	4.438124992114433e-13	2.2487979335043834e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	2937	405	11	13.789581205311542	0.37453183520599254	1.928831904989263e-10	1.9546782525161195e-07

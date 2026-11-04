@@ -1,347 +1,337 @@
 comparison	period	group_pair	test_type	group_analyzed	mag_id	contig	position	gene_id	q_value
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	23		1.2048323528201151e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	47		6.496736813723892e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	77		2.287828250599671e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	166		1.5156899511674857e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	171		0.000420201319356
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	195		8.627720520514863e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	240		3.178503388470273e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	247		2.0764742107032168e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	251		1.682481822876722e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	258		0.0337950355807215
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	263		0.030829358178132
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	564		4.739499004649811e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	567		0.0049079213063023
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	615		5.716393847286443e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	894		4.840027716435741e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	917		5.698786145315583e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1179		7.230719931807254e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1178		2.373351354104354e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1207		1.3977151862439798e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1220		2.099046767788247e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	756	MAG_002.fa_contig1_gene1	2.0074881611954352e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	2.1476087702349597e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	787	MAG_002.fa_contig1_gene1	4.006831290190567e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	791	MAG_002.fa_contig1_gene1	1.9274640167327624e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	9.901740163753036e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	988	MAG_002.fa_contig1_gene2	2.9726231533926765e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	997	MAG_002.fa_contig1_gene2	1.574848899163822e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1007	MAG_002.fa_contig1_gene2	3.469844142192097e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1049	MAG_002.fa_contig1_gene2	4.490864757160494e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	372	MAG_002.fa_contig1_gene3	3.34307217694186e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	462	MAG_002.fa_contig1_gene3	5.0851939243012954e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	4.6604311480390314e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	1.4850971755345656e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	20		9.527944328319402e-23
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	53		4.8003360013818555e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	552		7.826810507597093e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	551		1.0292789012050279e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	835		5.349659596403919e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	840		2.0156466545165668e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	885		3.178503388470273e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	334	MAG_002.fa_contig2_gene1	8.249779274789309e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	404	MAG_002.fa_contig2_gene1	4.616948270580504e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	416	MAG_002.fa_contig2_gene1	2.7418086803097584e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	3.536348765313314e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	571	MAG_002.fa_contig2_gene2	8.481348669220535e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	587	MAG_002.fa_contig2_gene2	3.185596204979513e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	2.998628644895188e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	720	MAG_002.fa_contig2_gene2	9.071442363594506e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	733	MAG_002.fa_contig2_gene2	1.7747762603738634e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	817	MAG_002.fa_contig2_gene2	0.0015762447110108
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	66	MAG_002.fa_contig2_gene3	1.8843843030329896e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	102	MAG_002.fa_contig2_gene3	4.2461086502610885e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	129	MAG_002.fa_contig2_gene3	0.0006830652066065
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	190	MAG_002.fa_contig2_gene3	9.766598475057822e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	18		1.2199780778096712e-05
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	110		4.490864757160494e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	596		1.6001163010699589e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	989		1.1931003608992397e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	622	MAG_001.fa_contig1_gene1	9.766598475057822e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	7.476441623221121e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	663	MAG_001.fa_contig1_gene1	2.9741993553656032e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	742	MAG_001.fa_contig1_gene1	9.901740163753036e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	772	MAG_001.fa_contig1_gene1	4.968645101906207e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	208	MAG_001.fa_contig1_gene2	2.972768257211843e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	268	MAG_001.fa_contig1_gene2	1.0860895804535709e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	281	MAG_001.fa_contig1_gene2	1.9737123651299213e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	296	MAG_001.fa_contig1_gene2	1.284952188089128e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	302	MAG_001.fa_contig1_gene2	1.413083309203379e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	344	MAG_001.fa_contig1_gene2	4.1963410991050933e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	400	MAG_001.fa_contig1_gene2	1.2968464058559316e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	429	MAG_001.fa_contig1_gene2	2.995608448709852e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	446	MAG_001.fa_contig1_gene2	1.3056398562544752e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	875	MAG_001.fa_contig1_gene3	9.326002349357309e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	905	MAG_001.fa_contig1_gene3	1.403881643819975e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	938	MAG_001.fa_contig1_gene3	1.4084783464074218e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	69		1.2673379128792036e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	107		8.981608116199545e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	115		1.5264888493185914e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	183		0.0038160373609775
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	196		3.520066469528989e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	240		3.6289114572680536e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	243		2.6823737278972254e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	300		0.0470453312488117
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	304		1.4956567168290201e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	332		0.0092454361441964
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	353		0.0002446493982229
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	367		2.4351871767687184e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	493		3.331636454205112e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	501		0.0012829655151684
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	619		6.578249081272194e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	693		5.879143422811416e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	720		3.3893036892833544e-22
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1410		1.4272166192324898e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1418		2.287828250599671e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1752		0.0153997219294326
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1772		1.202599385981077e-28
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1902		3.221502791543115e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	769	MAG_001.fa_contig2_gene1	1.0030082261743573e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	813	MAG_001.fa_contig2_gene1	5.355603587767535e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	828	MAG_001.fa_contig2_gene1	8.126592912659577e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	889	MAG_001.fa_contig2_gene1	8.802828107168276e-23
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	950	MAG_001.fa_contig2_gene1	1.6800585176498982e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	971	MAG_001.fa_contig2_gene1	2.846677175770473e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1001	MAG_001.fa_contig2_gene1	2.573602800924504e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1056	MAG_001.fa_contig2_gene1	8.050140785750125e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	8.557514797103065e-22
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	9.527944328319402e-23
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	5.290707417699117e-26
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1484	MAG_001.fa_contig2_gene2	5.329248157696008e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1531	MAG_001.fa_contig2_gene2	1.4084647843824482e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1593	MAG_001.fa_contig2_gene2	1.3902263193429665e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1597	MAG_001.fa_contig2_gene2	0.0039609654092443
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1633	MAG_001.fa_contig2_gene2	1.2262681282817026e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	2.6869183490387414e-23
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1217	MAG_001.fa_contig2_gene3	1.4956567168290201e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1222	MAG_001.fa_contig2_gene3	8.723547167508528e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1286	MAG_001.fa_contig2_gene3	6.756558472536904e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1333	MAG_001.fa_contig2_gene3	2.4368822818729295e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1338	MAG_001.fa_contig2_gene3	2.3317094556634696e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1350	MAG_001.fa_contig2_gene3	3.8063181012317044e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1375	MAG_001.fa_contig2_gene3	1.334381260155626e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	23		1.0458374363617484e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	47		1.435104624352055e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	77		2.5063152218097265e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	166		5.5239468280263406e-27
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	171		0.0067575785969499
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	195		8.897714720014029e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	240		1.872514141597476e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	247		1.9299105809446976e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	251		8.469077145730962e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	564		1.3551028443604995e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	567		1.921918054820761e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	615		1.0633464524634436e-05
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	894		5.4114671908615686e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	917		1.0230363252268699e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	958		0.0414968142740522
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1179		1.3684448473755413e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1178		0.0026060534238023
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1207		4.449918999485901e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1220		3.858127314755259e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	756	MAG_002.fa_contig1_gene1	2.0586088418414626e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	3.008729050064501e-22
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	787	MAG_002.fa_contig1_gene1	8.644775232363663e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	791	MAG_002.fa_contig1_gene1	7.699012325777011e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	2.444789026343668e-24
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	988	MAG_002.fa_contig1_gene2	8.694328523562117e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	997	MAG_002.fa_contig1_gene2	7.343575988010643e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1007	MAG_002.fa_contig1_gene2	0.0287216053624275
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1049	MAG_002.fa_contig1_gene2	1.1371160528726957e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	372	MAG_002.fa_contig1_gene3	2.4301425709751355e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	462	MAG_002.fa_contig1_gene3	2.6480451543732266e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	2.770034658946168e-23
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	5.927314229242774e-26
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	20		1.7871493135111952e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	53		5.803163853909724e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	551		1.0075669895434251e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	552		2.941558963017719e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	835		1.0466570271926518e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	840		8.340045019447781e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	885		8.490896849316098e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	334	MAG_002.fa_contig2_gene1	0.001123211329478
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	404	MAG_002.fa_contig2_gene1	5.751682666320107e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	416	MAG_002.fa_contig2_gene1	1.5103256578221815e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	456	MAG_002.fa_contig2_gene1	0.0209621216648209
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	3.9252687270938078e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	571	MAG_002.fa_contig2_gene2	1.0318211206965563e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	587	MAG_002.fa_contig2_gene2	2.6203838358722175e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	9.493220241959032e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	720	MAG_002.fa_contig2_gene2	1.872514141597476e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	733	MAG_002.fa_contig2_gene2	9.892953812721386e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	817	MAG_002.fa_contig2_gene2	0.0004274907291491
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	66	MAG_002.fa_contig2_gene3	1.6358659074797563e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	102	MAG_002.fa_contig2_gene3	6.404646119661978e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	129	MAG_002.fa_contig2_gene3	0.0068994882239785
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	190	MAG_002.fa_contig2_gene3	1.3984528186241701e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	18		7.125784670118475e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	110		7.590689848446852e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	596		5.43156255394895e-22
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	989		2.619722761851631e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	622	MAG_001.fa_contig1_gene1	1.5864449280866922e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	2.477925223589681e-22
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	663	MAG_001.fa_contig1_gene1	9.276799508528754e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	742	MAG_001.fa_contig1_gene1	1.5527153585879842e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	772	MAG_001.fa_contig1_gene1	6.540688250797214e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	208	MAG_001.fa_contig1_gene2	7.285857239817213e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	268	MAG_001.fa_contig1_gene2	4.980856923134288e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	281	MAG_001.fa_contig1_gene2	2.633084698137538e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	296	MAG_001.fa_contig1_gene2	4.641235537884463e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	302	MAG_001.fa_contig1_gene2	1.4349088456156092e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	335	MAG_001.fa_contig1_gene2	3.347590341290452e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	344	MAG_001.fa_contig1_gene2	1.9982863771735752e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	400	MAG_001.fa_contig1_gene2	1.8368680572623826e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	429	MAG_001.fa_contig1_gene2	7.66400457246645e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	446	MAG_001.fa_contig1_gene2	1.1151285543301007e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	875	MAG_001.fa_contig1_gene3	2.47081334487456e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	905	MAG_001.fa_contig1_gene3	6.027431232038953e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	938	MAG_001.fa_contig1_gene3	8.802069207413028e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	69		3.6808396032570546e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	107		9.283885310307958e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	115		2.498815910317533e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	183		2.7674231682693135e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	196		1.5057621172026026e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	240		3.355833464287069e-13
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	243		8.121287589756251e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	304		2.897796571859193e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	353		1.9474899458343447e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	367		8.469077145730962e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	493		4.257002323471724e-15
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	501		0.0004825400722223
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	619		5.95165106504542e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	693		1.0883615038819912e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	720		1.372032640225909e-21
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1410		4.980856923134288e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1418		2.3946572073109803e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1772		3.9252687270938078e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1902		4.803043692336127e-10
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	729	MAG_001.fa_contig2_gene1	2.8541704023063853e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	769	MAG_001.fa_contig2_gene1	2.734977750518868e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	813	MAG_001.fa_contig2_gene1	5.867169738396639e-20
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	828	MAG_001.fa_contig2_gene1	3.452116469757777e-12
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	868	MAG_001.fa_contig2_gene1	0.0393469800000608
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	889	MAG_001.fa_contig2_gene1	2.507648240047299e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	950	MAG_001.fa_contig2_gene1	9.122535990082501e-16
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	971	MAG_001.fa_contig2_gene1	2.822887551883434e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1001	MAG_001.fa_contig2_gene1	1.2193911963437238e-07
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1056	MAG_001.fa_contig2_gene1	1.720493954602806e-14
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	4.3542239109897335e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	2.2156875529212333e-25
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	3.234069875707985e-27
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1482	MAG_001.fa_contig2_gene2	0.0287216053624275
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1484	MAG_001.fa_contig2_gene2	1.1707055829024046e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1531	MAG_001.fa_contig2_gene2	1.3281166968466457e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1593	MAG_001.fa_contig2_gene2	1.8658486548349814e-18
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1597	MAG_001.fa_contig2_gene2	3.13180702507063e-09
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1633	MAG_001.fa_contig2_gene2	2.6818558127303472e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1162	MAG_001.fa_contig2_gene3	0.0207773665715459
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	7.0928011931554734e-31
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1191	MAG_001.fa_contig2_gene3	0.0226302770709706
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1217	MAG_001.fa_contig2_gene3	1.1523208694312285e-17
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1222	MAG_001.fa_contig2_gene3	2.2523735034728478e-11
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1286	MAG_001.fa_contig2_gene3	1.2909180067924238e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1333	MAG_001.fa_contig2_gene3	1.396292465044347e-08
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1338	MAG_001.fa_contig2_gene3	1.6789862468288457e-06
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1350	MAG_001.fa_contig2_gene3	1.6259255208763872e-19
-pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1375	MAG_001.fa_contig2_gene3	8.082332638374703e-08
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	0.0002215420972709
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	0.0001160703253428
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	1.284905719259977e-06
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	0.0002663017721385
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1644	MAG_001.fa_contig2_gene2	0.0327518625710592
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	4.771533324835588e-05
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	571		0.0327518625710592
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	720		0.0004698789875981
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1714		0.0006755601553836
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1772		0.0003556679289627
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	0.000893818277803
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0029706503317129
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	0.0033733897877514
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	5.16800228781655e-05
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	77		0.0004122437566192
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	166		0.0008810770413273
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	253		0.0327518625710592
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	0.0005517380926535
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	0.0006755601553836
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	53		0.000424721160909
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	843		0.0404503289010762
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	MAG_001.fa_contig2	1360	MAG_001.fa_contig2_gene3	0.049984402852943
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	MAG_001.fa_contig2	468		0.0076725287837651
-pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_002	MAG_002.fa_contig1	815	MAG_002.fa_contig1_gene1	0.045140894032219
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	3.8877843046729066e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	3.6362392041682736e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	1.2843990529668935e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	0.0002575707261185
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1477	MAG_001.fa_contig2_gene2	0.0481252940816126
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	3.179767870257154e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	531		0.049557124027827
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	720		0.0009992115744847
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1772		0.0002575707261185
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	5.183712406230542e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	761	MAG_001.fa_contig1_gene1	0.0143291935615587
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	0.0004023959238911
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	1.2843990529668935e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	0.0002861896956872
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	4.769651805385731e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	195		0.0362431695998723
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	720		0.0002861896956872
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1772		0.0002861896956872
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	0.0010309221066931
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.003167444202268
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	0.0048171769541352
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	0.0001674151016515
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	77		0.0002575707261185
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	166		0.0003643862879256
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	0.0002575707261185
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	0.0015879143758698
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	53		0.0002575707261185
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	0.0011168322822509
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0030425426547996
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	1098	MAG_002.fa_contig1_gene2	0.0404250616756876
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	0.0030425426547996
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	0.0002092688770644
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	77		0.0002861896956872
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	166		0.0018458700501648
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	577		0.0296733871682733
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	0.0011658524879475
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	0.0005520953508206
-pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	53		0.0002861896956872
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	0.0009572848133579
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0029694789396263
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	0.0013838208672186
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	5.093357445795696e-10
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	77		4.069775474680896e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	166		8.238341587231331e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	541		0.0417177282436481
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	3.0350708622850806e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	4.600390854736607e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	53		2.9841366475440505e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	773	MAG_002.fa_contig1_gene1	0.0009572848133579
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0029694789396263
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	516	MAG_002.fa_contig1_gene3	0.001423175038026
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	5.093357445795696e-10
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	77		4.476753022148986e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	166		0.0001510223004752
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	198		0.0081760710082968
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	499	MAG_002.fa_contig2_gene1	3.4537085609939986e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	580	MAG_002.fa_contig2_gene2	0.0175034036315501
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	664	MAG_002.fa_contig2_gene2	4.837215160847144e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	53		2.9841366475440505e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	7.339360046089113e-07
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	3.015478591168325e-09
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	4.2813301765563113e-07
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	0.0001330983817766
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	1.0599226234190517e-05
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1252	MAG_001.fa_contig2_gene3	0.0417177282436481
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1335	MAG_001.fa_contig2_gene3	0.043810121686968
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	720		5.1299294465736735e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1772		0.0001914379822689
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig1	638	MAG_001.fa_contig1_gene1	7.339360046089113e-07
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1016	MAG_001.fa_contig2_gene1	0.0339371293905991
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1436	MAG_001.fa_contig2_gene2	3.1509262383629684e-09
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1441	MAG_001.fa_contig2_gene2	4.2813301765563113e-07
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	0.0001451982346654
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1576	MAG_001.fa_contig2_gene2	0.0442479795260977
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	5.024362004503103e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	720		5.024362004503103e-06
-pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1772		0.0001914379822689
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	23		1.5103469024389781e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	47		4.141516788388357e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	69		1.8981937399693322e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	170		1.0301134979654832e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	169		4.2738260300271467e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	184		2.9726574475241184e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	239		4.173127058025797e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	244		5.037722082707394e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	246		6.749276605088693e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	250		1.7658187633319968e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	522		9.767864349458354e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	541		9.270066818827054e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	567		3.3493856375727897e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	623		1.0848600086315576e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	916		4.300390358054609e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	954		3.704593965524058e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1225		3.2907025832815525e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	756	MAG_002.fa_contig1_gene1	4.141516788388357e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	772	MAG_002.fa_contig1_gene1	1.7490402413188441e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	786	MAG_002.fa_contig1_gene1	3.8432767741640624e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	816	MAG_002.fa_contig1_gene1	3.162967357436927e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	5.958937721033014e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1005	MAG_002.fa_contig1_gene2	2.09483896787845e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1006	MAG_002.fa_contig1_gene2	3.905175372111235e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	1048	MAG_002.fa_contig1_gene2	5.119860295652571e-06
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	354	MAG_002.fa_contig1_gene3	2.347471747377574e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	461	MAG_002.fa_contig1_gene3	5.984403125243337e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	494	MAG_002.fa_contig1_gene3	1.3202116579229368e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	502	MAG_002.fa_contig1_gene3	3.9632039314618723e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	6.230526359317402e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	281		1.9245575248569864e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	306		2.2292352345479764e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	394	MAG_002.fa_contig2_gene1	3.7336627348943136e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	445	MAG_002.fa_contig2_gene1	2.719292996522737e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	492	MAG_002.fa_contig2_gene1	6.94709806181976e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	496	MAG_002.fa_contig2_gene1	4.0913984316945336e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	3.2907025832815525e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	588	MAG_002.fa_contig2_gene2	9.468527923335689e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	587	MAG_002.fa_contig2_gene2	1.4849974378128577e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	602	MAG_002.fa_contig2_gene2	1.0849675582654208e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	609	MAG_002.fa_contig2_gene2	2.2618826814453568e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	662	MAG_002.fa_contig2_gene2	5.947593582466437e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	2.6108399634708053e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	713	MAG_002.fa_contig2_gene2	3.1047642162635926e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	722	MAG_002.fa_contig2_gene2	1.309846295224456e-05
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	766	MAG_002.fa_contig2_gene2	1.1715773031369535e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	816	MAG_002.fa_contig2_gene2	1.8489826247826755e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	1.3092429957779023e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	97	MAG_002.fa_contig2_gene3	8.709025519330858e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	129	MAG_002.fa_contig2_gene3	2.616183062257628e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_002	MAG_002.fa_contig2	186	MAG_002.fa_contig2_gene3	5.8636597972039404e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	55		4.6605423109098224e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	140		6.0402850065589e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	148		1.067958406933392e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	167		7.703612659069506e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	594		4.482738890620342e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	2.6108399634708053e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	674	MAG_001.fa_contig1_gene1	2.1533619192678035e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	716	MAG_001.fa_contig1_gene1	3.402134930009265e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	730	MAG_001.fa_contig1_gene1	3.070765017753562e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	214	MAG_001.fa_contig1_gene2	3.566147712744833e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	298	MAG_001.fa_contig1_gene2	2.0522117649898242e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	311	MAG_001.fa_contig1_gene2	1.9842209017159064e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	376	MAG_001.fa_contig1_gene2	0.0004569341475299
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	420	MAG_001.fa_contig1_gene2	0.0001718897122824
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	454	MAG_001.fa_contig1_gene2	2.61259463378695e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	470	MAG_001.fa_contig1_gene2	3.411294498971321e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	496	MAG_001.fa_contig1_gene2	6.381249856622036e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	551	MAG_001.fa_contig1_gene2	0.0120623220567843
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	814	MAG_001.fa_contig1_gene3	1.067958406933392e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	828	MAG_001.fa_contig1_gene3	7.138958639903853e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	2.5767903094968472e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	875	MAG_001.fa_contig1_gene3	2.0361838427769498e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	891	MAG_001.fa_contig1_gene3	4.4120806528083785e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	923	MAG_001.fa_contig1_gene3	3.9338801388877363e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig1	962	MAG_001.fa_contig1_gene3	2.1347791651417796e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	18		1.0045500706524124e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	107		1.503509707845085e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	115		3.644500279587833e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	196		3.1744986335575466e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	208		3.7381250858033713e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	240		1.5590645706980996e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	302		0.0003378962863549
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	304		2.179557856567764e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	344		2.06249931329315e-06
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	367		1.5124874143352817e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	400		8.060058845949759e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	446		3.867293024459582e-05
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	693		4.789560579829256e-06
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	723		4.818894345794362e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1391		2.6564501547708785e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1393		7.14879460918255e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1728		5.442400680829923e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1763		8.585830407578315e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1772		1.5103469024389781e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1902		2.0425144261178452e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	729	MAG_001.fa_contig2_gene1	1.221521448337285e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	742	MAG_001.fa_contig2_gene1	4.972488557733266e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	772	MAG_001.fa_contig2_gene1	7.300483554526823e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	828	MAG_001.fa_contig2_gene1	2.4103180536227294e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	875	MAG_001.fa_contig2_gene1	3.3493856375727897e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	889	MAG_001.fa_contig2_gene1	2.07595498618172e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	971	MAG_001.fa_contig2_gene1	1.609329230505122e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1056	MAG_001.fa_contig2_gene1	1.6884071014140435e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	3.3493856375727897e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	1.5913688333875708e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	3.66626971209604e-24
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1484	MAG_001.fa_contig2_gene2	1.7623665953884852e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1491	MAG_001.fa_contig2_gene2	2.753567514819152e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1510	MAG_001.fa_contig2_gene2	2.563940507764952e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1537	MAG_001.fa_contig2_gene2	3.660659721909257e-06
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1652	MAG_001.fa_contig2_gene2	1.3876573226978495e-05
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	2.0484957235656068e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1180	MAG_001.fa_contig2_gene3	1.697312930942615e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1217	MAG_001.fa_contig2_gene3	1.6983471613076548e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1286	MAG_001.fa_contig2_gene3	2.9412339574849884e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1333	MAG_001.fa_contig2_gene3	1.3504403656650393e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH	post	MAG_001	MAG_001.fa_contig2	1335	MAG_001.fa_contig2_gene3	2.0564746372708166e-13
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	2.789867347598093e-06
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	0.0001299620249483
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	0.0012055473648254
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	7.686828809149189e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	2.25472110064642e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	0.0001299620249483
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	723		0.0002314243122786
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_001	MAG_001.fa_contig2	1772		0.0005288223509695
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.000332155282882
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	8.469051852643788e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	169		0.0001110811444163
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	522		0.0001299620249483
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig1	541		7.686828809149189e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	462	MAG_002.fa_contig2_gene1	0.0419521446083578
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	0.0001149203057393
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	0.0002676530452536
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	treatment	MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	3.7428439836965706e-05
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	MAG_001.fa_contig2	1504	MAG_001.fa_contig2_gene2	0.010132138762033
+pre_post-treatment_control	pre_post	treatment_control	single_sample_tTest	control	MAG_001	MAG_001.fa_contig2	528		0.010132138762033
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	2.7871170840456497e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	0.0003537246082202
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	0.0011933168697067
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	7.67925109936099e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	2.2524983866276437e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	0.0001755660886568
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	723		0.0003508134926793
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1102		0.0293251545511919
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1772		0.0005283010355604
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_001	MAG_001.fa_contig2	1800		0.0029212121769994
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	2.7871170840456497e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	846	MAG_001.fa_contig1_gene3	0.0289655722317499
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	0.0003537246082202
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig1	975		0.0430454848747542
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	0.0011933168697067
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	9.439914384371484e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	2.2524983866276437e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	0.0001755660886568
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	226		0.0310232116117003
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	723		0.0003508134926793
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_001	MAG_001.fa_contig2	1772		0.0005283010355604
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0003573530614093
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	271	MAG_002.fa_contig1_gene3	0.0210328304776584
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	0.0001755660886568
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	169		8.814628407994614e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	522		0.0002477766146064
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig1	541		7.67925109936099e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	0.0003573530614093
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	0.0003850535164772
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	7.67925109936099e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest		MAG_002	MAG_002.fa_contig2	189	MAG_002.fa_contig2_gene3	0.043411028838227
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0003743470212675
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	990	MAG_002.fa_contig1_gene2	0.0470004174871553
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	0.0001755660886568
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	169		9.439914384371484e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	522		0.0002477766146064
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig1	541		9.439914384371484e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	0.0005013531480096
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	614	MAG_002.fa_contig2_gene2	0.0190941610963074
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	0.0003743470212675
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	758	MAG_002.fa_contig2_gene2	0.0190941610963074
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	9.439914384371484e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_paired_tTest_abs		MAG_002	MAG_002.fa_contig2	189	MAG_002.fa_contig2_gene3	0.0413438369887876
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	23		1.0266006879868503e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	47		8.926414160191844e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	69		2.7652527328305986e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	169		1.22916864996783e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	170		1.8771286006279762e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	184		1.3654461479518546e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	239		2.941744965543828e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	244		1.0390043094479668e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	246		1.566416516532846e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	250		2.426235796421836e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	522		2.373721231916625e-28
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	541		5.894065565360451e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	567		5.3836020041996354e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	623		1.3221645171485173e-25
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	916		1.3165779950254718e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	954		6.956230952640139e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1225		3.131283091012913e-27
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	756	MAG_002.fa_contig1_gene1	3.3154604599820886e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	772	MAG_002.fa_contig1_gene1	1.22916864996783e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	786	MAG_002.fa_contig1_gene1	8.532093832739964e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	816	MAG_002.fa_contig1_gene1	2.289154517376769e-18
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	2.4947194826750057e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1005	MAG_002.fa_contig1_gene2	1.564240025550853e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1006	MAG_002.fa_contig1_gene2	2.879593612239198e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	1048	MAG_002.fa_contig1_gene2	4.7463995080499095e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	354	MAG_002.fa_contig1_gene3	1.776820020541829e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	461	MAG_002.fa_contig1_gene3	4.0321521465008217e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	494	MAG_002.fa_contig1_gene3	4.952653987342924e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	502	MAG_002.fa_contig1_gene3	2.024099408935286e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	2.8428659955840853e-24
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	281		2.3003613664821388e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	306		5.1484618711657003e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	394	MAG_002.fa_contig2_gene1	1.2832247229054206e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	445	MAG_002.fa_contig2_gene1	6.312063060006248e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	492	MAG_002.fa_contig2_gene1	1.3084150021253749e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	496	MAG_002.fa_contig2_gene1	3.354108347785627e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	1.3039712754210442e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	587	MAG_002.fa_contig2_gene2	6.62907234334967e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	588	MAG_002.fa_contig2_gene2	5.1484618711657003e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	602	MAG_002.fa_contig2_gene2	1.402615877460987e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	609	MAG_002.fa_contig2_gene2	1.551557197396568e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	662	MAG_002.fa_contig2_gene2	5.1484618711657003e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	1.3097533699182768e-19
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	713	MAG_002.fa_contig2_gene2	6.889375178548986e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	722	MAG_002.fa_contig2_gene2	2.7321680991069678e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	766	MAG_002.fa_contig2_gene2	1.7097975088310457e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	816	MAG_002.fa_contig2_gene2	9.786254310176108e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	9.839340921801003e-30
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	97	MAG_002.fa_contig2_gene3	2.6620056039099167e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	129	MAG_002.fa_contig2_gene3	3.287065673089077e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_002	MAG_002.fa_contig2	186	MAG_002.fa_contig2_gene3	1.8209230047365422e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	55		4.927184569930212e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	140		6.313846866764507e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	148		4.9767781461665655e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	167		1.5263526677754717e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	594		6.524077419121773e-25
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	597		2.913968481414894e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	5.7337602491671294e-30
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	674	MAG_001.fa_contig1_gene1	3.468840489605981e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	716	MAG_001.fa_contig1_gene1	8.290234011942111e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	730	MAG_001.fa_contig1_gene1	1.9474396089439586e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	214	MAG_001.fa_contig1_gene2	5.850255312797809e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	298	MAG_001.fa_contig1_gene2	2.907154620765085e-05
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	311	MAG_001.fa_contig1_gene2	5.894065565360451e-23
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	376	MAG_001.fa_contig1_gene2	0.0006200308578615
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	420	MAG_001.fa_contig1_gene2	0.0007928882779061
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	454	MAG_001.fa_contig1_gene2	4.116226763691201e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	470	MAG_001.fa_contig1_gene2	9.695024193170872e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	496	MAG_001.fa_contig1_gene2	4.1802227284439645e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	814	MAG_001.fa_contig1_gene3	3.980401017457386e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	828	MAG_001.fa_contig1_gene3	8.092946721328801e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	2.980572709607386e-26
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	875	MAG_001.fa_contig1_gene3	1.1220928267651364e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	891	MAG_001.fa_contig1_gene3	4.1142721019723626e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	923	MAG_001.fa_contig1_gene3	5.954930129537712e-06
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig1	962	MAG_001.fa_contig1_gene3	5.3023499530088315e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	18		5.6293379403441945e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	107		2.2299304290823723e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	115		1.6590702311909457e-12
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	196		1.68688019935538e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	208		1.8486991326598616e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	240		2.0089836007920398e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	302		1.5506234405324078e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	304		1.4170732704202564e-21
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	344		1.2471660745439026e-07
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	367		1.7459830441893562e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	400		3.8498418326392125e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	446		2.5112501028808477e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	693		1.9888262994816122e-09
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	723		1.7220123254916646e-25
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1391		2.455237198506905e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1393		4.950111533726544e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1728		4.732595556658901e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1758		8.065674501742521e-22
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1763		1.0266006879868503e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1772		2.173262112201218e-24
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1902		6.863988855865445e-13
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	729	MAG_001.fa_contig2_gene1	1.0439148237043136e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	742	MAG_001.fa_contig2_gene1	2.760353468202836e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	772	MAG_001.fa_contig2_gene1	8.846845154063302e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	828	MAG_001.fa_contig2_gene1	6.653789739587917e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	875	MAG_001.fa_contig2_gene1	1.0109306801881548e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	889	MAG_001.fa_contig2_gene1	3.0307085430818737e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	971	MAG_001.fa_contig2_gene1	3.0079763661651827e-20
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1056	MAG_001.fa_contig2_gene1	5.7090185118139966e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	1.2445526585985282e-15
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	3.3861467336862716e-29
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	2.1281112249604533e-25
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1484	MAG_001.fa_contig2_gene2	6.931676849452789e-14
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1491	MAG_001.fa_contig2_gene2	1.7686223570009863e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1510	MAG_001.fa_contig2_gene2	1.2572798642521198e-11
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1537	MAG_001.fa_contig2_gene2	2.021787382360469e-16
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1613	MAG_001.fa_contig2_gene2	2.954465744963061e-10
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1652	MAG_001.fa_contig2_gene2	3.386045148721543e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	6.416013177937893e-26
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1180	MAG_001.fa_contig2_gene3	1.0405509500141856e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1217	MAG_001.fa_contig2_gene3	1.0829674195571304e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1286	MAG_001.fa_contig2_gene3	6.706173584310491e-17
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1333	MAG_001.fa_contig2_gene3	2.8785209003468577e-08
+pre_post-treatment_control	pre_post	treatment_control	CMH_across_time	treatment	MAG_001	MAG_001.fa_contig2	1335	MAG_001.fa_contig2_gene3	2.7978930540000286e-10
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0002903493623951
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	3.3031889210460197e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	169		7.971438457767119e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	522		2.095325516304681e-08
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig1	541		3.1996879580670794e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	400	MAG_002.fa_contig2_gene1	0.0467896002018091
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	2.7824131803209773e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	1.2415902180689214e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	2.1800384597384612e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	853	MAG_002.fa_contig1_gene1	0.0002903493623951
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	519	MAG_002.fa_contig1_gene3	3.3031889210460197e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	169		7.971438457767119e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	522		2.095325516304681e-08
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig1	541		3.1996879580670794e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	502	MAG_002.fa_contig2_gene1	2.98061443746722e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	667	MAG_002.fa_contig2_gene2	1.2847275363189756e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_002	MAG_002.fa_contig2	56	MAG_002.fa_contig2_gene3	2.2487979335043834e-09
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	3.981595834350928e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	1.9546782525161195e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	8.631188478587869e-05
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	3.5986774932591014e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	4.0954516120502615e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	0.0001003234792324
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	723		1.3547053240314276e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest		MAG_001	MAG_001.fa_contig2	1772		0.0001277868826601
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig1	641	MAG_001.fa_contig1_gene1	3.981595834350928e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig1	850	MAG_001.fa_contig1_gene3	1.9546782525161195e-07
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig1	171		0.0453631408330164
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1439	MAG_001.fa_contig2_gene2	0.0001376089825513
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1444	MAG_001.fa_contig2_gene2	3.6231166687842064e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1472	MAG_001.fa_contig2_gene2	4.0954516120502615e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1479	MAG_001.fa_contig2_gene2	0.0108618296167991
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1172	MAG_001.fa_contig2_gene3	0.0001080406699426
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	226		0.020516054756606
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	723		1.3547053240314276e-06
+pre_post-treatment_control	pre_post	treatment_control	two_sample_unpaired_tTest_abs		MAG_001	MAG_001.fa_contig2	1772		0.0001851380719189

@@ -81,6 +81,15 @@ analysis:
     # fewer than 3 determined mice would be strain_undetermined at the house
     # default; 1 keeps every carried allele judgeable on this small design.
     min_determined_carriers: 1
+  # Gene-level de novo accumulation: every cage's de novo events counted per
+  # gene and tested against the genome's pace and between the groups.  The
+  # planted hot gene (planted_truth.json: hot_gene) is the one gene with
+  # events; the block plant is folded away by block_rule exclude.
+  use_gene_de_novo: True
+  gene_de_novo:
+    block_rule: "exclude"
+    min_gene_covered_fraction: 0.0
+    min_determined_carriers: 1
   # Score heatmaps, boxplots and the HTML run report (images; excluded from
   # the regression comparison, but the rules run).
   figures:

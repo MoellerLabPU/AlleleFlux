@@ -65,7 +65,7 @@ FULL_EXCLUDE_SUBSTRINGS = (
 )
 
 # Outputs a scenario must NOT produce, relative to the pipeline's data dir.
-# The single-timepoint run has no earlier timepoint, so the four
+# The single-timepoint run has no earlier timepoint, so the five
 # longitudinal-only trees must be absent (the workflow refuses the flags at
 # parse time; this pins that nothing downstream writes them anyway).
 EXPECTED_ABSENT = {
@@ -75,6 +75,7 @@ EXPECTED_ABSENT = {
         "baseline_presence",
         "strain_turnover",
         "regional_contrast",
+        "gene_de_novo",
     ],
 }
 

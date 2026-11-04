@@ -50,6 +50,17 @@ class TestGeneVsGenome:
         # the same surprise without the agreement discount: chi2.sf(6.1652, 1)
         assert r.p_value_raw == pytest.approx(0.0130, abs=1e-3)
         assert r.n == 3 and r.note == ""
+        # Both curves for both statistics (collaborator request 2026-11-04):
+        # Test A's house pick is chi-square, so p_value_chi2 IS p_value; the F
+        # twin uses df_resid = cages - 1 = 2.
+        from scipy.stats import f as f_dist
+
+        assert r.df_resid == 2
+        assert r.p_value_chi2 == r.p_value
+        assert r.p_value_f == pytest.approx(f_dist.sf(6.1652 / 2.935, 1, 2), rel=1e-3)
+        assert r.p_value_raw_chi2 == r.p_value_raw
+        assert r.p_value_raw_f == pytest.approx(f_dist.sf(6.1652, 1, 2), rel=1e-3)
+        assert r.p_value_f > r.p_value and r.p_value_raw_f > r.p_value_raw
 
     def test_underdispersed_case_keeps_dispersion_at_one(self):
         # o = [1,1,1,1], e = [0.1]*4: rr 10, LRT = 2*(4 ln 10 - 9*0.4) = 11.2207,
@@ -97,6 +108,10 @@ class TestGeneVsGenome:
         r = gene_vs_genome(np.array([3]), np.array([0.5]))
         assert r.n == 1 and r.dispersion == 1.0
         assert r.deviance == pytest.approx(2 * (3 * math.log(6) - 5 * 0.5), rel=1e-6)
+        # no spare cage: the chi-square twins exist, the F twins cannot
+        assert r.df_resid == 0
+        assert not math.isnan(r.p_value_chi2) and not math.isnan(r.p_value_raw_chi2)
+        assert math.isnan(r.p_value_f) and math.isnan(r.p_value_raw_f)
 
     def test_mismatched_lengths_raise(self):
         with pytest.raises(ValueError, match="length"):
@@ -119,6 +134,13 @@ class TestGroupVsGroup:
         assert r.p_value_raw == pytest.approx(0.0185, rel=1e-2)  # chi2, no discount
         assert r.n == 8 and r.note == ""
         assert r.df_resid == 6
+        # Both curves: Test B's house pick is F, so p_value_f IS p_value; with
+        # dispersion 1 the raw and discounted statistics coincide, so the raw F
+        # twin equals the discounted p and the chi-square twin equals the raw p.
+        assert r.p_value_f == r.p_value
+        assert r.p_value_chi2 == pytest.approx(0.0185, rel=1e-2)
+        assert r.p_value_raw_chi2 == r.p_value_raw
+        assert r.p_value_raw_f == pytest.approx(0.0567, rel=1e-2)
 
     def test_eight_cages_per_group_one_event_each_is_significant(self):
         # LRT = 2 * 8 ln 2 = 11.09; F.sf(11.09, 1, 14) = 0.0050
@@ -187,6 +209,10 @@ class TestGroupVsGroup:
         from scipy.stats import chi2
 
         assert r.p_value_raw == pytest.approx(chi2.sf(2 * 3 * math.log(2), 1), rel=1e-6)
+        assert r.p_value_raw_chi2 == r.p_value_raw
+        # no F curve without a spare cage, discounted or raw
+        assert math.isnan(r.p_value_chi2) and math.isnan(r.p_value_f)
+        assert math.isnan(r.p_value_raw_f)
 
     def test_no_events_anywhere_is_untestable(self):
         r = group_vs_group(np.zeros(3), np.full(3, 50.0), np.zeros(3), np.full(3, 50.0))
@@ -305,6 +331,41 @@ class TestTestEveryGene:
         )
         assert x["df_resid_between"] == 6
         assert x["note_between"] == ""
+        # The statistics and both curves, per block (collaborator request).
+        from scipy.stats import f as f_dist
+
+        ra = gene_vs_genome(np.ones(4), np.full(4, 0.1))
+        assert x["lrt_vs_genome_treatment"] == pytest.approx(ra.deviance)
+        assert x["df_resid_vs_genome_treatment"] == 3
+        assert x["p_value_chi2_vs_genome_treatment"] == x["p_value_vs_genome_treatment"]
+        assert x["p_value_f_vs_genome_treatment"] == pytest.approx(
+            f_dist.sf(ra.deviance / ra.dispersion, 1, 3)
+        )
+        assert (
+            x["p_value_raw_chi2_vs_genome_treatment"]
+            == x["p_value_raw_vs_genome_treatment"]
+        )
+        assert x["p_value_raw_f_vs_genome_treatment"] == pytest.approx(
+            f_dist.sf(ra.deviance, 1, 3)
+        )
+        assert x["lrt_between"] == pytest.approx(5.5452, rel=1e-4)
+        assert x["p_value_f_between"] == x["p_value_between"]
+        assert x["p_value_chi2_between"] == pytest.approx(0.0185, rel=1e-2)
+        assert x["p_value_raw_chi2_between"] == x["p_value_raw_between"]
+        assert x["p_value_raw_f_between"] == pytest.approx(0.0567, rel=1e-2)
+        # Every twin is BH-corrected as its own family (user 2026-11-04): the
+        # headline twin's q equals the headline q, the other twin gets its own.
+        # Two genes are tested between the groups, so the smaller p doubles.
+        assert x["q_value_f_between"] == x["q_value_between"]
+        assert x["q_value_chi2_between"] == pytest.approx(2 * x["p_value_chi2_between"])
+        assert x["q_value_raw_chi2_between"] == x["q_value_raw_between"]
+        assert x["q_value_raw_f_between"] == pytest.approx(
+            2 * x["p_value_raw_f_between"]
+        )
+        assert x["q_value_chi2_vs_genome_treatment"] == x["q_value_vs_genome_treatment"]
+        assert x["q_value_f_vs_genome_treatment"] == pytest.approx(
+            x["p_value_f_vs_genome_treatment"]  # gX is the only treatment gene tested
+        )
         # gY: no events anywhere -> every test untestable, every q NaN
         y = out.set_index("gene_id").loc["gY"]
         for col in (
@@ -318,6 +379,21 @@ class TestTestEveryGene:
             "q_value_raw_vs_genome_treatment",
             "p_value_raw_between",
             "q_value_raw_between",
+            "lrt_vs_genome_treatment",
+            "p_value_chi2_vs_genome_treatment",
+            "p_value_f_vs_genome_treatment",
+            "p_value_raw_chi2_vs_genome_treatment",
+            "p_value_raw_f_vs_genome_treatment",
+            "lrt_between",
+            "p_value_chi2_between",
+            "p_value_f_between",
+            "p_value_raw_chi2_between",
+            "p_value_raw_f_between",
+            "q_value_chi2_between",
+            "q_value_f_between",
+            "q_value_raw_chi2_between",
+            "q_value_raw_f_between",
+            "q_value_f_vs_genome_treatment",
         ):
             assert math.isnan(y[col]), col
         assert (y["note_treatment"], y["note_control"], y["note_between"]) == (
@@ -427,7 +503,38 @@ class TestResultColumns:
             "p_value_raw_vs_genome_a",
             "q_value_raw_vs_genome_a",
         ]
-        assert cols[i + 3] == "note_a"
         j = cols.index("q_value_between")
         assert cols[j + 1 : j + 3] == ["p_value_raw_between", "q_value_raw_between"]
-        assert cols[j + 3] == "note_between"
+
+    def test_statistic_and_both_curves_sit_after_the_q_values_in_every_block(self):
+        """House picks (with q) first, then the diagnostic twins: the statistic
+        on both curves, discounted and raw, then the note."""
+        cols = result_columns(("a", "b"))
+        k = cols.index("dispersion_a")
+        assert cols[k + 1 : k + 3] == ["df_resid_vs_genome_a", "lrt_vs_genome_a"]
+        i = cols.index("q_value_raw_vs_genome_a")
+        assert cols[i + 1 : i + 10] == [
+            "p_value_chi2_vs_genome_a",
+            "q_value_chi2_vs_genome_a",
+            "p_value_f_vs_genome_a",
+            "q_value_f_vs_genome_a",
+            "p_value_raw_chi2_vs_genome_a",
+            "q_value_raw_chi2_vs_genome_a",
+            "p_value_raw_f_vs_genome_a",
+            "q_value_raw_f_vs_genome_a",
+            "note_a",
+        ]
+        m = cols.index("df_resid_between")
+        assert cols[m + 1] == "lrt_between"
+        j = cols.index("q_value_raw_between")
+        assert cols[j + 1 : j + 10] == [
+            "p_value_chi2_between",
+            "q_value_chi2_between",
+            "p_value_f_between",
+            "q_value_f_between",
+            "p_value_raw_chi2_between",
+            "q_value_raw_chi2_between",
+            "p_value_raw_f_between",
+            "q_value_raw_f_between",
+            "note_between",
+        ]

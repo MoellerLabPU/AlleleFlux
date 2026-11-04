@@ -1,3 +1,3 @@
 MAG_ID	domain	phylum	class	order	family	genus	species	total_sites_per_group_tTest	total_sites_per_group_Wilcoxon	total_sites_per_group_tTest_abs	total_sites_per_group_Wilcoxon_abs	significant_sites_per_group_tTest	significant_sites_per_group_Wilcoxon	significant_sites_per_group_tTest_abs	significant_sites_per_group_Wilcoxon_abs	score_tTest (%)	score_Wilcoxon (%)	score_tTest_abs (%)	score_Wilcoxon_abs (%)	grouped_by
-MAG_001	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides vulgatus	2938	2938	2938	2938	474	0	471	0	16.133424098025866	0.0	16.03131381892444	0.0	MAG_ID
-MAG_002	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides fragilis	2132	2132	2132	2132	392	0	315	0	18.386491557223263	0.0	14.77485928705441	0.0	MAG_ID
+MAG_001	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides vulgatus	2937	2937	2937	2937	435	0	410	0	14.81103166496425	0.0	13.959822948586996	0.0	MAG_ID
+MAG_002	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides fragilis	2130	2130	2130	2130	324	0	305	0	15.211267605633802	0.0	14.319248826291082	0.0	MAG_ID

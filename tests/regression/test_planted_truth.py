@@ -24,6 +24,12 @@ What is asserted, per scenario:
   is the only strain change (turnover table, pairwise ANI, classification);
 * the depth spikes are removed for exactly the spiked samples
   (per-sample sidecar + summary);
+* longitudinal only: the hot gene (one de novo event per strain-keeping
+  treatment mouse, none in control) is the only gene of its genome with
+  events, its between-group test is significant and its events are
+  ``de_novo`` in their cages, the block's positions are ``block_event`` in
+  every treatment cage; the strain-swapped cage contributes no de novo
+  event at all (its burst of new alleles is folded into blocks);
 * single only: pairwise ANI compared EVERY pair, and only the pairs touching
   the divergent sample fall below the same-strain line.
 """
@@ -33,6 +39,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -63,9 +70,9 @@ def _subject_of(sample_id: str) -> str:
     return stem.replace("sample", "subj")
 
 
-def _read(path: Path) -> pd.DataFrame:
+def _read(path: Path, **kwargs) -> pd.DataFrame:
     assert path.exists(), f"expected output missing: {path}"
-    return pd.read_csv(path, sep="\t")
+    return pd.read_csv(path, sep="\t", **kwargs)
 
 
 # --- significance ----------------------------------------------------------------
@@ -304,6 +311,122 @@ def test_swapped_mouse_is_the_only_strain_change(pipeline_run):
         assert (
             con[con["group"] == card["groups"]["control"]]["n_mice_changed"] == 0
         ).all()
+
+
+# --- gene-level de novo accumulation (longitudinal) ---------------------------------
+
+
+def _gene_de_novo_dir(run, card) -> Path:
+    return run.pipeline_data_dir / "gene_de_novo" / _comparison(card)
+
+
+def _replicate_of(run) -> dict:
+    """sample_id -> replicate letter, from the dataset's sample sheet (the card
+    names the carrier SAMPLES; the gene tables key cages by replicate)."""
+    sheet = pd.read_csv(
+        Path(run.example_dir) / "metadata" / "sample_metadata.tsv",
+        sep="\t",
+        dtype=str,
+    )
+    return dict(zip(sheet["sample_id"], sheet["replicate"]))
+
+
+@pytest.mark.regression
+def test_hot_gene_accumulates_in_treatment_and_no_other_gene_does(pipeline_run):
+    card = _card(pipeline_run)
+    if card["data_type"] != "longitudinal":
+        pytest.skip("gene-level de novo accumulation is longitudinal-only")
+    hot = card["hot_gene"]
+    treat, ctrl = card["groups"]["treatment"], card["groups"]["control"]
+    d = _gene_de_novo_dir(pipeline_run, card)
+
+    tests = _read(d / f"gene_de_novo_tests_{_comparison(card)}.tsv")
+    genome = tests[tests["mag_id"] == hot["mag"]]
+    row = genome[genome["gene_id"] == hot["gene_id"]]
+    assert len(row) == 1, row
+    row = row.iloc[0]
+    n_planted = len(hot["events"])
+    assert int(row[f"n_de_novo_{treat}"]) == n_planted
+    assert int(row[f"n_de_novo_{ctrl}"]) == 0
+    # Control cages collected no event anywhere in the genome, so the gene's
+    # expected count there is 0 for every cage: nothing to test against.
+    assert row[f"note_{ctrl}"] == "no_exposure", row[f"note_{ctrl}"]
+    # Test A, treatment: one event per strain-keeping cage where the gene's
+    # share of the genome predicts ~0.13 each (chi-square curve).
+    assert row[f"p_value_vs_genome_{treat}"] < 0.02, row[f"p_value_vs_genome_{treat}"]
+    # Test B: n vs 0 events over matched readable bases.  Raw: chi-square of
+    # 2 n ln 2 (3 events: 0.041).  Discounted: the same score on F(1, cages-2),
+    # which charges for estimating the dispersion from six spare cages (0.087).
+    assert np.isinf(row[f"rate_ratio_{treat}_vs_{ctrl}"])
+    assert row["p_value_raw_between"] < 0.05, row["p_value_raw_between"]
+    assert row["p_value_between"] < 0.1, row["p_value_between"]
+    assert row["note_between"] == "" or pd.isna(row["note_between"])
+    # No other gene of that genome collected a single event in either group:
+    # the block plant is excluded by rule and the noise never clears the bar.
+    others = genome[genome["gene_id"] != hot["gene_id"]]
+    assert len(others) > 0
+    assert (others[f"n_de_novo_{treat}"] == 0).all(), others
+    assert (others[f"n_de_novo_{ctrl}"] == 0).all(), others
+
+    # The events file: each planted position is a clean de novo event in its
+    # own cage and nowhere else.
+    # (low_memory=False: the strain-status column is blank on most rows and
+    # pandas would otherwise warn about mixed types while chunking.)
+    events = _read(d / f"{hot['mag']}_gene_de_novo_events.tsv", low_memory=False)
+    for e in hot["events"]:
+        m = events[
+            (events["contig"] == hot["contig"])
+            & (events["position"] == e["position"])
+            & (events["allele"] == e["rising_allele"])
+        ]
+        assert len(m) == 1, m
+        assert m.iloc[0]["replicate"] == e["replicate"]
+        assert m.iloc[0]["group"] == treat
+        assert m.iloc[0]["origin"] == "de_novo", m.iloc[0]["origin"]
+        assert m.iloc[0]["gene_id"] == hot["gene_id"]
+    # The block's three positions are block_event in EVERY treatment cage.
+    replicate_of = _replicate_of(pipeline_run)
+    treatment_cages = sorted(replicate_of[s] for s in card["carrier_samples"])
+    block = [s for s in card["significant_sites"] if s["label"] == "block"]
+    block_events = _read(
+        d / f"{block[0]['mag']}_gene_de_novo_events.tsv", low_memory=False
+    )
+    for s in block:
+        m = block_events[
+            (block_events["contig"] == s["contig"])
+            & (block_events["position"] == s["position"])
+            & (block_events["allele"] == s["rising_allele"])
+            & (block_events["group"] == treat)
+        ]
+        assert sorted(m["replicate"]) == treatment_cages, m
+        assert set(m["origin"]) == {"block_event"}, m["origin"].tolist()
+
+
+@pytest.mark.regression
+def test_strain_swapped_cage_contributes_no_de_novo_event(pipeline_run):
+    """A mouse whose strain was replaced shows new alleles at 2 % of every
+    contig's positions at once.  Per cage, the cluster rule folds them into
+    one block per contig, so that cage's genome-wide de novo total is 0 on
+    every genome and the gene tests never see the burst."""
+    card = _card(pipeline_run)
+    if card["data_type"] != "longitudinal":
+        pytest.skip("gene-level de novo accumulation is longitudinal-only")
+    swap = card["strain_swap"]
+    treat = card["groups"]["treatment"]
+    rep = _replicate_of(pipeline_run)[swap["sample_id"]]
+    d = _gene_de_novo_dir(pipeline_run, card)
+    for mag in sorted(swap["positions"]):
+        cages = _read(d / f"{mag}_gene_de_novo_cages.tsv")
+        mine = cages[(cages["group"] == treat) & (cages["replicate"] == rep)]
+        assert len(mine) == 1, mine
+        assert int(mine.iloc[0]["n_de_novo_total"]) == 0, mine
+        events = _read(d / f"{mag}_gene_de_novo_events.tsv", low_memory=False)
+        ev = events[(events["group"] == treat) & (events["replicate"] == rep)]
+        assert not ev["origin"].isin(["de_novo", "de_novo_below_detection"]).any(), ev[
+            ev["origin"].isin(["de_novo", "de_novo_below_detection"])
+        ]
+        # Folded, not missed: the burst is there as block events.
+        assert (ev["origin"] == "block_event").sum() >= 10, ev["origin"].value_counts()
 
 
 # --- depth spikes -----------------------------------------------------------------

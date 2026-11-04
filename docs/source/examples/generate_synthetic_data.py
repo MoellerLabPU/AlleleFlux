@@ -92,6 +92,11 @@ SPIKE_FACTOR = 10  # spike depth = this x the mean of the coverage range: the
 #   site-depth filter's default ceiling is 3 x the sample mean, so every
 #   spike position must be removed for that sample
 MIN_PLANT_MARGIN = 50  # keep plants this far from contig ends
+NOISE_MAX_READS = 1  # background reads per NON-dominant base at a position: one
+#   stray read is sequencer noise; three (the old cap) at depth 20-40 clear
+#   the baseline-presence bar (3 reads below depth 40) and read as a real
+#   minor allele, which turned every low-depth position into a fake de novo
+#   candidate for the gene-level analysis
 
 
 def generate_random_sequence(length: int) -> str:
@@ -498,6 +503,19 @@ def plan_the_plants(
       ``block_spacing_bp`` apart on one contig; the lone one sits on a
       different contig so no cluster window can reach it.  A single-timepoint
       design has no baseline, so its sites are all kind ``shift``.
+    * ``hot_gene`` (longitudinal only): the longest gene on the longest contig
+      that holds no de novo plant; every treatment mouse that KEEPS its
+      strain gets one event of its own inside it (a distinct position where
+      only that mouse's later sample carries the rising allele, at
+      ``shift_rising_fraction``; zero reads of it in every other sample).
+      One mouse's rise is never significant in the group tests, so these
+      are not ``significant_sites``; they are what the gene-level de novo
+      analysis counts per cage.  The strain-swapped mouse gets none: its
+      cage shows new alleles at 2 % of every contig at once, which the
+      per-cage cluster rule folds into one block per contig, and a single
+      event planted there would be folded with them.  The contig must be
+      free of the block and the lone allele for the same reason (the 1 kb
+      window would reach them in every cage).
     * ``strain_swap``: the last treatment mouse's later sample rotates its
       CONSENSUS at ``swap_fraction`` of each contig's positions (never at a
       planted site).
@@ -509,7 +527,9 @@ def plan_the_plants(
     sites, 1 lone + 3 block de novo sites, carrier_samples = the four
     ``treatment_subj*_post`` ids, standing_mouse = ``subj1`` (its pre and post
     samples, 15 % of reads), strain_swap on ``treatment_subj8_post``, spikes in
-    ``control_subj1_pre`` and ``control_subj2_post``.
+    ``control_subj1_pre`` and ``control_subj2_post``, hot_gene = the longest
+    gene on the third-longest contig with three events (subj5, subj6, subj7:
+    the carriers minus the swapped mouse).
     """
     if data_type not in ("single", "longitudinal"):
         raise ValueError(f"data_type must be single or longitudinal, got {data_type!r}")
@@ -551,6 +571,10 @@ def plan_the_plants(
 
     taken = set()  # (mag, contig, pos) already used by a plant
     sites = []
+    # The strain swap goes to the last carrier (decided here so the hot gene
+    # can leave that mouse out; the swap itself is planted further down).
+    swap_sample = carriers[-1]
+    hot_gene = None
 
     if data_type == "longitudinal":
         # The block goes on the longest contig (it needs 2 x spacing of room);
@@ -579,6 +603,59 @@ def plan_the_plants(
         sites.append(site(lone_mag, lone_contig, lone_pos, "de_novo", "lone"))
         taken.add((lone_mag, lone_contig, lone_pos))
         standing_kind = "standing"
+
+        # The hot gene: the longest gene on the longest contig with no de novo
+        # plant.  One event per strain-keeping treatment mouse at a distinct
+        # position inside the gene.  Planted AFTER the block and the lone
+        # allele so their random draws (and so their positions) are unchanged
+        # by this plant.
+        genes_of = {
+            (mag["mag_id"], contig["contig_id"]): contig["genes"]
+            for mag in mags
+            for contig in mag["contigs"]
+        }
+        de_novo_contigs = {(block_mag, block_contig), (lone_mag, lone_contig)}
+        hot_key = next(
+            (k for k in by_length if k not in de_novo_contigs and genes_of[k]),
+            None,
+        )
+        if hot_key is None:
+            raise ValueError(
+                "the longitudinal plan needs a third contig with a gene, clear of "
+                "the block and the lone de novo allele, for the hot gene"
+            )
+        gene = max(genes_of[hot_key], key=lambda g: g["end"] - g["start"])
+        keepers = [s for s in carriers if s["subjectID"] != swap_sample["subjectID"]]
+        if not keepers:
+            raise ValueError(
+                "the hot gene needs a treatment mouse that keeps its strain"
+            )
+        hot_mag, hot_contig = hot_key
+        hot_events = []
+        for mouse, pos in zip(
+            keepers,
+            sorted(random.sample(range(gene["start"], gene["end"]), len(keepers))),
+        ):
+            ref = seq_of[hot_key][pos]
+            hot_events.append(
+                {
+                    "position": pos,
+                    "ref_base": ref,
+                    "rising_allele": BASES[(BASES.index(ref) + 1) % 4],
+                    "sample_id": mouse["sample_id"],
+                    "subjectID": mouse["subjectID"],
+                    "replicate": mouse["replicate"],
+                }
+            )
+            taken.add((hot_mag, hot_contig, pos))
+        hot_gene = {
+            "mag": hot_mag,
+            "contig": hot_contig,
+            "gene_id": gene["gene_id"],
+            "gene_start": gene["start"],
+            "gene_end": gene["end"],  # half-open, like the Prodigal file's end + 1
+            "events": hot_events,
+        }
     else:
         standing_kind = "shift"
 
@@ -620,7 +697,6 @@ def plan_the_plants(
 
     # Strain swap: the last carrier's consensus rotates at SWAP_FRACTION of each
     # contig's positions, never at a planted site.
-    swap_sample = carriers[-1]
     swap_positions: Dict[str, Dict[str, List[int]]] = {}
     n_swap = 0
     for (mag_id, contig_id), length in sorted(len_of.items()):
@@ -652,6 +728,7 @@ def plan_the_plants(
         "depth_spikes": spikes,
     }
     if data_type == "longitudinal":
+        truth["hot_gene"] = hot_gene
         # The first control mouse, every one of its samples: the standing
         # allele is a stable minority there, not a pre-only visitor.
         subject = controls[0]["subjectID"]
@@ -719,16 +796,20 @@ def _background_counts(
     dominant_base: str, coverage: int, noise_bases: List[str]
 ) -> Dict[str, int]:
     """Monomorphic-with-noise counts: the dominant base takes 85-98 % of the
-    reads, the leftover is scattered over ``noise_bases`` at <= 3 reads each.
+    reads, the leftover is scattered over ``noise_bases`` at <= NOISE_MAX_READS
+    (one) read each.
 
     random.uniform(0.85, 0.98) keeps every position below a variant caller's
     minor-allele threshold but leaves a sliver of background reads.  The
-    3-read cap keeps each minor count below the usual polymorphism threshold
-    so it reads as sequencer noise.  The realised depth can fall a few reads
-    short of ``coverage`` when the minor rolls land on 0; total_coverage is
-    recomputed from the counts downstream, so the row stays consistent.
+    one-read cap keeps each minor count under the baseline-presence error
+    bar at every depth in the coverage range, so it reads as sequencer noise
+    and never as a present allele.  The realised depth falls a few reads
+    short of ``coverage`` (the leftover beyond the capped noise is dropped);
+    total_coverage is recomputed from the counts downstream, so the row stays
+    consistent.
 
-    Example: dominant A, coverage 50, noise over T/G/C -> A=46 T=2 G=1 C=0.
+    Example: dominant A, coverage 50, noise over T/G/C -> A=46 T=1 G=0 C=1
+    (total 48).
     """
     counts = {"A": 0, "T": 0, "G": 0, "C": 0}
     dominant_count = int(coverage * random.uniform(0.85, 0.98))
@@ -736,9 +817,29 @@ def _background_counts(
     remaining = coverage - dominant_count
     for b in noise_bases:
         if remaining > 0:
-            c = random.randint(0, min(remaining, 3))
+            c = random.randint(0, min(remaining, NOISE_MAX_READS))
             counts[b] = c
             remaining -= c
+    return counts
+
+
+def _rising_counts(
+    ref_base: str, rising: str, coverage: int, fraction: float
+) -> Dict[str, int]:
+    """A carrier's counts at a planted site: the rising allele takes
+    ``fraction`` of the reads, the reference the rest, no noise.
+
+    The cap keeps rising STRICTLY below the reference: at even depths <= 24,
+    round(0.48 x depth) equals half the depth and the consensus would be a
+    tie.  The consensus staying the reference is what keeps the shift from
+    counting as a strain change in the ANI step.
+
+    Example: ref A, rising T, coverage 50, fraction 0.48 -> A=26 T=24.
+    """
+    rising_n = min(round(coverage * fraction), (coverage - 1) // 2)
+    counts = {"A": 0, "T": 0, "G": 0, "C": 0}
+    counts[rising] = rising_n
+    counts[ref_base] = coverage - rising_n
     return counts
 
 
@@ -779,15 +880,20 @@ def generate_profile_data(
          on the two bases that are NEITHER ref NOR rising, and the rising
          allele has exactly 0 reads: a de novo allele is absent everywhere it
          should be, and a standing one is present in exactly one baseline mouse.
-    2. **Strain swap** (``truth["strain_swap"]``, that sample only): at the
+    2. **Hot-gene event** (``truth["hot_gene"]["events"]``, longitudinal): in
+       the event's ONE sample the rising allele takes ``shift_rising_fraction``
+       of the reads exactly as at a carrier's significant site; in every
+       other sample the reference is dominant with noise on the two bases
+       that are neither ref nor rising, so the rising allele has 0 reads.
+    3. **Strain swap** (``truth["strain_swap"]``, that sample only): at the
        listed positions the dominant base is rotated one step in the BASES
        cycle (ref A -> dominant T) with the usual noise -- a consensus change,
        which is what conANI counts.
-    3. **Depth spike** (``truth["depth_spikes"]``, that sample only): coverage
+    4. **Depth spike** (``truth["depth_spikes"]``, that sample only): coverage
        is the planted ``depth`` instead of a draw from ``coverage_range``;
        counts are otherwise background.
-    4. **Background** everywhere else: reference dominant, noise on the other
-       three bases.
+    5. **Background** everywhere else: reference dominant, noise on the other
+       three bases (at most ``NOISE_MAX_READS`` each).
 
     Returns dict mapping mag_id -> list of tab-separated row strings.
     """
@@ -799,6 +905,8 @@ def generate_profile_data(
 
     # Lookups for this sample, built once per call (a few hundred entries).
     site_at = {(s["contig"], s["position"]): s for s in truth["significant_sites"]}
+    hot = truth.get("hot_gene") or {}
+    hot_at = {(hot["contig"], e["position"]): e for e in hot.get("events", ())}
     swap = truth["strain_swap"]
     swap_at = set()
     if swap["sample_id"] == sample_id:
@@ -838,17 +946,9 @@ def generate_profile_data(
                 if site is not None:
                     rising = site["rising_allele"]
                     if is_carrier:
-                        # Rising allele just under half, reference the rest, no
-                        # noise.  The cap keeps rising STRICTLY below ref: at
-                        # even depths <= 24, round(0.48 x depth) equals half the
-                        # depth and the consensus would be a tie.
-                        rising_n = min(
-                            round(coverage * truth["shift_rising_fraction"]),
-                            (coverage - 1) // 2,
+                        counts = _rising_counts(
+                            ref_base, rising, coverage, truth["shift_rising_fraction"]
                         )
-                        counts = {"A": 0, "T": 0, "G": 0, "C": 0}
-                        counts[rising] = rising_n
-                        counts[ref_base] = coverage - rising_n
                     elif is_standing_mouse and site["kind"] == "standing":
                         coverage = max(coverage, STANDING_MIN_COVERAGE)
                         standing_n = round(coverage * standing_fraction)
@@ -858,6 +958,19 @@ def generate_profile_data(
                     else:
                         # Reference dominant; noise only on the bases that are
                         # neither ref nor rising, so the rising allele is 0.
+                        noise_bases = [b for b in BASES if b not in (ref_base, rising)]
+                        counts = _background_counts(ref_base, coverage, noise_bases)
+                elif key in hot_at:
+                    # One mouse's own de novo event: its later sample carries
+                    # the rising allele like a carrier does; everyone else
+                    # (this mouse's earlier sample included) has 0 reads of it.
+                    event = hot_at[key]
+                    rising = event["rising_allele"]
+                    if sample_id == event["sample_id"]:
+                        counts = _rising_counts(
+                            ref_base, rising, coverage, truth["shift_rising_fraction"]
+                        )
+                    else:
                         noise_bases = [b for b in BASES if b not in (ref_base, rising)]
                         counts = _background_counts(ref_base, coverage, noise_bases)
                 elif key in swap_at:
@@ -1049,6 +1162,15 @@ def write_config(
     # fewer than 3 determined mice would be strain_undetermined at the house
     # default; 1 keeps every carried allele judgeable on this small design.
     min_determined_carriers: 1
+  # Gene-level de novo accumulation: every cage's de novo events counted per
+  # gene and tested against the genome's pace and between the groups.  The
+  # planted hot gene (planted_truth.json: hot_gene) is the one gene with
+  # events; the block plant is folded away by block_rule exclude.
+  use_gene_de_novo: True
+  gene_de_novo:
+    block_rule: "exclude"
+    min_gene_covered_fraction: 0.0
+    min_determined_carriers: 1
   # Score heatmaps, boxplots and the HTML run report (images; excluded from
   # the regression comparison, but the rules run).
   figures:
@@ -1059,6 +1181,7 @@ def write_config(
   use_regional_contrast: False
   use_baseline_presence: False
   use_strain_turnover: False
+  use_gene_de_novo: False
   # Pairwise conANI/popANI between EVERY pair of samples (the between-mouse
   # strain-sharing question; the only mode with a meaning on one timepoint).
   # The planted divergent sample (planted_truth.json: strain_swap) is the one
@@ -1374,7 +1497,8 @@ def generate_dataset(
         f"`cd` into this directory before running the pipeline.\n\n"
         f"`planted_truth.json` lists every fact planted in the profiles\n"
         f"(significant sites, standing / de novo alleles, the strain-swapped\n"
-        f"sample, the depth spikes); the regression test asserts them.\n\n"
+        f"sample, the depth spikes, the hot gene); the regression test asserts\n"
+        f"them.\n\n"
         f"## Option A — pre-generated profiles (fastest; carries the planted facts)\n\n"
         f"```bash\n"
         f"cd {output_dir}\n"
