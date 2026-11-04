@@ -153,14 +153,14 @@ The **focus timepoint** represents the **derived** or **later** state in evoluti
 
 - **For dN/dS**: Focus = derived timepoint; the other = ancestral. AlleleFlux calculates changes in the direction ancestral -> derived.
 - **For CMH scores**: Measures sites that became significant at the focus timepoint but were not significant at the other timepoint.
-- **Rule of thumb**: Always set `focus` to the **later** timepoint.
+- **How it is set**: the later timepoint of each `timepoints_combinations` entry (`later:`) is the focus; there is no separate key.
 
 ```yaml
 timepoints_combinations:
-  - timepoint: ["pre", "post"]
-    focus: "post"       # "post" is the derived state
-  - timepoint: ["day0", "day30"]
-    focus: "day30"      # "day30" is the endpoint
+  - earlier: pre
+    later: post  # "post" is the derived state
+  - earlier: day0
+    later: day30  # "day30" is the endpoint
 ```
 
 If not specified, AlleleFlux defaults to the second timepoint in the list.
@@ -202,6 +202,7 @@ analysis:
   use_significance_tests: true   # Two-sample and single-sample tests
   use_lmm: false                 # Disable LMM
   use_cmh: false                 # Disable CMH
+  use_dnds: false                # Disable dN/dS (longitudinal only)
 ```
 
 **3. Run individual CLI tools standalone:**

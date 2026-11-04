@@ -1,0 +1,2 @@
+MAG_ID	domain	phylum	class	order	family	genus	species	total_sites_per_group_tTest	total_sites_per_group_MannWhitney	significant_sites_per_group_tTest	significant_sites_per_group_MannWhitney	score_tTest (%)	score_MannWhitney (%)	grouped_by
+MAG_001	Bacteria	Bacteroidota	Bacteroidia	Bacteroidales	Bacteroidaceae	Bacteroides	Bacteroides vulgatus	2908	2908	295	229	10.144429160935351	7.874828060522695	MAG_ID

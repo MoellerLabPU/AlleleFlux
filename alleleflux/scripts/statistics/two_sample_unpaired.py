@@ -108,9 +108,12 @@ def run_unpaired_tests(
             # In t-test if both groups have identical values, the p-value is NaN, eg. 5,5,5,5 and 5,5,5,5,5,5,5,5
             # I'm setting it 1 for consistency with Mann Whitney
             # np.ptp is the range of values (max - min), if it's 0 then all values are identical
-            const1 = np.isclose(np.ptp(group1[nuc_col]), 0.0, atol=1e-8, rtol=0)
-            const2 = np.isclose(np.ptp(group2[nuc_col]), 0.0, atol=1e-8, rtol=0)
-            means_equal = np.isclose(mean1, mean2, atol=1e-8, rtol=0)
+            # atol 1e-6: the allele-frequency cache stores float32 (rounding noise ~1e-8), so
+            # a 1e-8 window can let "flat" data through and t-test the noise; 1e-6 is still
+            # 1,000x below the smallest real change (1 read in a 1,000x sample).
+            const1 = np.isclose(np.ptp(group1[nuc_col]), 0.0, atol=1e-6, rtol=0)
+            const2 = np.isclose(np.ptp(group2[nuc_col]), 0.0, atol=1e-6, rtol=0)
+            means_equal = np.isclose(mean1, mean2, atol=1e-6, rtol=0)
             if const1 and const2 and means_equal:
                 p_values[f"{nucleotide}_p_value_tTest"] = 1
                 notes += f"{nucleotide}: identical values in both groups, p-value for t-test is set to 1; "
@@ -142,9 +145,9 @@ def run_unpaired_tests(
                 abs_mean1 = np.mean(abs_group1)
                 abs_mean2 = np.mean(abs_group2)
 
-                abs_const1 = np.isclose(np.ptp(abs_group1), 0.0, atol=1e-8, rtol=0)
-                abs_const2 = np.isclose(np.ptp(abs_group2), 0.0, atol=1e-8, rtol=0)
-                abs_means_equal = np.isclose(abs_mean1, abs_mean2, atol=1e-8, rtol=0)
+                abs_const1 = np.isclose(np.ptp(abs_group1), 0.0, atol=1e-6, rtol=0)
+                abs_const2 = np.isclose(np.ptp(abs_group2), 0.0, atol=1e-6, rtol=0)
+                abs_means_equal = np.isclose(abs_mean1, abs_mean2, atol=1e-6, rtol=0)
 
                 if abs_const1 and abs_const2 and abs_means_equal:
                     p_values[f"{nucleotide}_p_value_tTest_abs"] = 1

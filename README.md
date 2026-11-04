@@ -129,8 +129,8 @@ analysis:
   use_cmh: True                   # CMH test
 
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: "pre"
+      later: "post"
 
   groups_combinations:
     - ["treatment", "control"]
@@ -185,7 +185,7 @@ resources:
 | | `use_lmm` | Enable Linear Mixed Models |
 | | `use_significance_tests` | Enable two-sample/single-sample tests |
 | | `use_cmh` | Enable Cochran-Mantel-Haenszel tests |
-| | `timepoints_combinations` | Timepoint pairs with focus timepoint |
+| | `timepoints_combinations` | Timepoint pairs as `earlier` / `later` (the later one is the focus) |
 | | `groups_combinations` | Groups to compare |
 | **quality_control** | `min_sample_num` | Minimum samples required per MAG |
 | | `breadth_threshold` | Minimum coverage breadth (0-1) |

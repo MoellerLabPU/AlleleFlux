@@ -123,8 +123,8 @@ analysis:
   use_lmm: true
   use_cmh: true
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 
@@ -155,6 +155,14 @@ Generate a full config template with all options using:
 alleleflux init --output config.yml
 ```
 
+:::{tip}
+**Re-running on the same data?** Set `input.reuse_from` to a completed run's data-type
+output dir to skip re-profiling, QC, and the allele-frequency cache — only the
+group-dependent tail re-runs. This works standalone (add a comparison, change statistics,
+recover a crash) and also powers null/permutation runs. See
+[Artifact Reuse and Null Runs](artifact_reuse_and_null_runs.md).
+:::
+
 ### Data Type
 
 The `data_type` setting is the most important configuration choice:
@@ -164,8 +172,8 @@ The `data_type` setting is the most important configuration choice:
 analysis:
   data_type: "longitudinal"
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 
@@ -173,7 +181,7 @@ analysis:
 analysis:
   data_type: "single"
   timepoints_combinations:
-    - timepoint: ["baseline"]
+    - timepoint: baseline
   groups_combinations:
     - ["disease", "healthy"]
 ```

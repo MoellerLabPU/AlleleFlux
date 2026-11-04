@@ -1,0 +1,9 @@
+mag_id	group	replicate	n_de_novo_total	covered_bp_total
+MAG_002	control	A	0	2132
+MAG_002	control	B	0	2132
+MAG_002	control	C	0	2132
+MAG_002	control	D	0	2132
+MAG_002	treatment	A	1	2132
+MAG_002	treatment	B	1	2132
+MAG_002	treatment	C	1	2132
+MAG_002	treatment	D	0	2132
