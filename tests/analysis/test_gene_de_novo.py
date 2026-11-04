@@ -860,3 +860,355 @@ class TestGeneTables:
                 [_event("fat", "A", 150, "g9", "G")],
                 _readable({("fat", "A"): slice(0, 1200)}),
             )
+
+
+# ---------------------------------------------------------------------------
+# Task 6: the classifier in bulk, and the CLI end to end
+# ---------------------------------------------------------------------------
+
+import os
+import subprocess
+import sys
+
+from alleleflux.scripts.analysis.baseline_presence import (
+    assess_rows,
+    baseline_cutoff,
+    baseline_rows,
+)
+from alleleflux.scripts.analysis.gene_de_novo import (
+    CAGE_TOTAL_COLUMNS,
+    EVENT_COLUMNS,
+    GENE_CAGE_COLUMNS,
+)
+from alleleflux.scripts.statistics.poisson_rate_tests import result_columns
+
+
+def _reference_origin(rises, rows, sheet, scope):
+    """Stages 1-3 the slow way: Phase 2's functions called once per candidate.
+
+    The oracle for the bulk implementation; written out in full here so a
+    change to ``baseline_rows`` / ``baseline_cutoff`` / ``assess_rows`` that
+    the bulk path does not mirror shows up as a red test, not a silent drift.
+    """
+    rows = rows.copy()
+    rows["time"] = rows["timepoint"]
+    dates = sheet.set_index("sample_id")["collection_date"]
+    rows["collection_date"] = dates.reindex(rows["sample_id"]).to_numpy()
+    out = []
+    for r in rises.itertuples(index=False):
+        site = rows[(rows["contig"] == r.contig) & (rows["position"] == r.position)]
+        site = pd.concat([site, assess_rows(site, r.allele, MODEL, 0.05, 5)], axis=1)
+        later = site[
+            (site["time"] == "post")
+            & (site["group"] == r.group)
+            & (site["replicate"] == r.replicate)
+        ]
+        carriers = set(later.loc[later["allele_present"], "subjectID"])
+        if not carriers:
+            out.append("not_present_later")
+            continue
+        pool = site[site["group"] == r.group] if scope == "own_group" else site
+        t0 = baseline_rows(pool, scope, TPS, carriers, baseline_cutoff(later))
+        t0 = t0[t0["allele_status"] != "not_covered"]
+        if t0.empty:
+            out.append("baseline_not_covered")
+        elif t0["allele_present"].any():
+            out.append("standing_variation")
+        elif (t0["allele_status"] == "below_detection").any():
+            out.append("de_novo_below_detection")
+        else:
+            out.append("de_novo")
+    return out
+
+
+class TestClassifyInBulk:
+    """The bulk classifier gives the per-candidate answer at every site."""
+
+    @pytest.mark.parametrize(
+        "scope", ["cohort", "comparison", "own_group", "individual"]
+    )
+    def test_bulk_verdicts_match_the_per_candidate_oracle(self, scope):
+        rng = np.random.default_rng(7)
+        positions = list(range(100, 160))
+        counts = {}
+        for m in MICE:
+            for tp in ("pre", "post"):
+                for p in positions:
+                    # mostly A with a sprinkle of every other letter, so every
+                    # verdict word (present / below / absent / not_covered)
+                    # occurs somewhere in the grid
+                    depth = int(rng.choice([2, 8, 20, 40, 60]))
+                    other = rng.integers(0, 4, size=3)
+                    a = max(depth - int(other.sum()), 0)
+                    counts[(m, tp, p)] = (
+                        a,
+                        int(other[0]),
+                        int(other[1]),
+                        int(other[2]),
+                    )
+        rises = [
+            _rise(rep, group, p, allele)
+            for p in positions
+            for (rep, group) in {("cageA", "fat"), ("cageB", "fat"), ("cageC", "ctl")}
+            for allele in ("C", "G", "T")
+        ]
+        # blocks off (no cap on neighbours), gate off: stages 1-3 alone
+        out = _classify(
+            rises, counts, scope=scope, max_neighbours=10**6, strain_gate="none"
+        )
+        expected = _reference_origin(
+            pd.DataFrame(rises), _rows(counts), _sheet_rows(), scope
+        )
+        assert out["origin"].tolist() == expected
+        # the grid exercises more than one verdict word (not a trivially uniform case)
+        assert len(set(out["origin"])) >= 3
+
+
+# --- the CLI on a tiny run directory ---------------------------------------
+GENOME = 1000  # one contig of this many bases
+GENE_START1, GENE_END1 = 101, 400  # Prodigal's 1-based inclusive span
+CLI_MICE = {  # mouse -> (cage, group); one mouse per cage, two cages per group
+    "t1": ("A", "trt"),
+    "t2": ("B", "trt"),
+    "c1": ("C", "ctl"),
+    "c2": ("D", "ctl"),
+}
+CLI_DATES = {"pre": "2024-01-15", "post": "2024-04-15"}
+
+
+def _write_run(tmp, plant_control_standing=True):
+    """A run directory with one MAG, one gene, and one planted event per treatment cage.
+
+    Every sample reads 40 A at every base (readable everywhere); at 150 mouse
+    t1's post sample and at 250 mouse t2's post sample carry 20 T (the
+    plants); at 600 (between genes) cage C's post sample carries G which c1's
+    pre sample already had (standing variation, not an event).
+    """
+    tmp = str(tmp)
+    rng = np.random.default_rng(3)
+    ref = "".join(rng.choice(list("ACGT"), size=GENOME))
+    os.makedirs(os.path.join(tmp, "ref"))
+    with open(os.path.join(tmp, "ref", "mags.fasta"), "w") as fh:
+        fh.write(">M1_c1\n" + ref + "\n")
+    with open(os.path.join(tmp, "ref", "genes.fna"), "w") as fh:
+        fh.write(
+            f">M1_c1_1 # {GENE_START1} # {GENE_END1} # 1 # ID=1_1;partial=00\n"
+            + ref[GENE_START1 - 1 : GENE_END1]
+            + "\n"
+        )
+    pd.DataFrame({"mag_id": ["M1"], "contig_id": ["M1_c1"]}).to_csv(
+        os.path.join(tmp, "ref", "mag_mapping.tsv"), sep="\t", index=False
+    )
+    meta = pd.DataFrame(
+        [
+            (f"{m}_{tp}", m, group, cage, tp, CLI_DATES[tp])
+            for m, (cage, group) in CLI_MICE.items()
+            for tp in ("pre", "post")
+        ],
+        columns=[
+            "sample_id",
+            "subjectID",
+            "group",
+            "replicate",
+            "time",
+            "collection_date",
+        ],
+    )
+    meta.to_csv(os.path.join(tmp, "metadata.tsv"), sep="\t", index=False)
+    # the cache: one parquet per timepoint, every sample at every base
+    plants = {("t1", "post", 150): "T", ("t2", "post", 250): "T"}
+    if plant_control_standing:
+        plants[("c1", "post", 600)] = "G"
+        plants[("c1", "pre", 600)] = "G"
+    for tp in ("pre", "post"):
+        recs = []
+        for m, (cage, group) in CLI_MICE.items():
+            for p in range(GENOME):
+                a, c, g, t = 40, 0, 0, 0
+                letter = plants.get((m, tp, p))
+                if letter == "T":
+                    a, t = 20, 20
+                elif letter == "G":
+                    a, g = 20, 20
+                recs.append(
+                    dict(
+                        contig="M1_c1",
+                        position=p,
+                        ref_base=ref[p],
+                        gene_id=(
+                            "M1_c1_1" if GENE_START1 - 1 <= p <= GENE_END1 - 1 else ""
+                        ),
+                        total_coverage=40,
+                        A=a,
+                        C=c,
+                        G=g,
+                        T=t,
+                        sample_id=f"{m}_{tp}",
+                        group=group,
+                        subjectID=m,
+                        replicate=cage,
+                        A_frequency=a / 40,
+                        T_frequency=t / 40,
+                        G_frequency=g / 40,
+                        C_frequency=c / 40,
+                        time=tp,
+                    )
+                )
+        df = pd.DataFrame(recs)
+        for col in ("sample_id", "group", "subjectID", "replicate", "time"):
+            df[col] = df[col].astype("category")
+        d = os.path.join(tmp, "allele_freq_cache", tp)
+        os.makedirs(d)
+        df.to_parquet(os.path.join(d, f"M1_{tp}_allele_frequency.parquet"), index=False)
+    # the mean-change table: the letters that rose per cage
+    rows = [
+        ("M1_c1", "M1_c1_1", 150, "A", "trt", -0.5, 0.5, 0.0, 0.0, 1),
+        ("M1_c1", "M1_c1_1", 250, "B", "trt", -0.5, 0.5, 0.0, 0.0, 1),
+        ("M1_c1", "", 600, "C", "ctl", -0.5, 0.0, 0.5, 0.0, 1),
+        ("M1_c1", "M1_c1_1", 150, "C", "ctl", 0.0, 0.0, 0.0, 0.0, 1),  # flat: no rise
+    ]
+    mc = pd.DataFrame(
+        rows,
+        columns=["contig", "gene_id", "position", "replicate", "group"]
+        + [f"{b}_frequency_diff_mean" for b in ("A", "T", "G", "C")]
+        + ["subjectID_count"],
+    )
+    aa = os.path.join(tmp, "allele_analysis")
+    os.makedirs(aa)
+    mc.to_parquet(
+        os.path.join(aa, "M1_allele_frequency_changes_mean.parquet"), index=False
+    )
+    # a turnover table: t1 changed strain, t2 kept it, controls kept it
+    os.makedirs(os.path.join(tmp, "strain_turnover"))
+    pd.DataFrame(
+        {
+            "MAG_ID": "M1",
+            "subjectID": list(CLI_MICE),
+            "transition": "pre_post",
+            "sample_t2": [f"{m}_post" for m in CLI_MICE],
+            "dominant_strain_change": [True, False, False, False],
+        }
+    ).to_csv(
+        os.path.join(tmp, "strain_turnover", "M1_strain_turnover.tsv"),
+        sep="\t",
+        index=False,
+    )
+    return tmp
+
+
+def _run_cli(run, out, *extra):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alleleflux.scripts.analysis.gene_de_novo",
+            "--comparison",
+            "pre_post-trt_ctl",
+            "--cache_dir",
+            os.path.join(run, "allele_freq_cache"),
+            "--allele_analysis_dir",
+            os.path.join(run, "allele_analysis"),
+            "--metadata",
+            os.path.join(run, "metadata.tsv"),
+            "--prodigal_fasta",
+            os.path.join(run, "ref", "genes.fna"),
+            "--fasta",
+            os.path.join(run, "ref", "mags.fasta"),
+            "--mag_mapping",
+            os.path.join(run, "ref", "mag_mapping.tsv"),
+            "--output_dir",
+            out,
+            "--min_cages",
+            "2",
+            "--cpus",
+            "1",
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+class TestGeneDeNovoCLI:
+    def test_planted_events_reach_the_tests_table(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        out = str(tmp_path / "out")
+        done = _run_cli(run, out, "--strain_gate", "none")
+        assert done.returncode == 0, done.stderr
+        tests = pd.read_csv(
+            os.path.join(out, "gene_de_novo_tests_pre_post-trt_ctl.tsv"), sep="\t"
+        )
+        assert list(tests.columns) == result_columns(("trt", "ctl"))
+        assert len(tests) == 1
+        row = tests.iloc[0]
+        assert (row.mag_id, row.gene_id, row.gene_length) == ("M1", "M1_c1_1", 300)
+        # two treatment cages, one event each in 300 readable bases; the whole
+        # genome read: 1,000 bases per cage, one event per treatment cage
+        assert (
+            row.n_cages_trt,
+            row.n_de_novo_trt,
+            row.n_cages_ctl,
+            row.n_de_novo_ctl,
+        ) == (
+            2,
+            2,
+            2,
+            0,
+        )
+        assert row.expected_trt == pytest.approx(2 * 300 / 1000)
+        # the control cages caught nothing anywhere in the genome, so the
+        # gene's fair share there is 0: no expectation to test against
+        assert row.expected_ctl == 0 and row.note_ctl == "no_exposure"
+        assert np.isfinite(row.p_value_between) and 0 < row.p_value_between < 1
+        assert row.df_resid_between == 2 and np.isinf(row.rate_ratio_trt_vs_ctl)
+        # the three per-MAG files, with the pinned columns
+        events = pd.read_csv(os.path.join(out, "M1_gene_de_novo_events.tsv"), sep="\t")
+        assert list(events.columns) == EVENT_COLUMNS
+        assert sorted(events["origin"]) == ["de_novo", "de_novo", "standing_variation"]
+        genes = pd.read_csv(os.path.join(out, "M1_gene_de_novo_genes.tsv"), sep="\t")
+        assert list(genes.columns) == GENE_CAGE_COLUMNS and len(genes) == 4
+        assert (genes["covered_bp"] == 300).all()
+        cages = pd.read_csv(os.path.join(out, "M1_gene_de_novo_cages.tsv"), sep="\t")
+        assert list(cages.columns) == CAGE_TOTAL_COLUMNS
+        assert cages.set_index("replicate")["n_de_novo_total"].to_dict() == {
+            "A": 1,
+            "B": 1,
+            "C": 0,
+            "D": 0,
+        }
+        assert (cages["covered_bp_total"] == GENOME).all()
+
+    def test_carrier_gate_reads_the_turnover_table(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        out = str(tmp_path / "out")
+        done = _run_cli(
+            run,
+            out,
+            "--strain_gate",
+            "carrier",
+            "--turnover_dir",
+            os.path.join(run, "strain_turnover"),
+            "--min_determined_carriers",
+            "1",
+        )
+        assert done.returncode == 0, done.stderr
+        events = pd.read_csv(os.path.join(out, "M1_gene_de_novo_events.tsv"), sep="\t")
+        by_cage = events.set_index("replicate")["origin"].to_dict()
+        # t1 (cage A) changed strain -> its event is a new strain, not a mutation
+        assert (by_cage["A"], by_cage["B"]) == ("new_strain", "de_novo")
+        tests = pd.read_csv(
+            os.path.join(out, "gene_de_novo_tests_pre_post-trt_ctl.tsv"), sep="\t"
+        )
+        assert tests.iloc[0].n_de_novo_trt == 1
+
+    def test_group_gate_is_refused_at_the_command_line(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        done = _run_cli(run, str(tmp_path / "out"), "--strain_gate", "group")
+        assert done.returncode != 0
+        assert "invalid choice" in done.stderr
+
+    def test_carrier_gate_needs_the_turnover_dir(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        done = _run_cli(run, str(tmp_path / "out"), "--strain_gate", "carrier")
+        assert done.returncode != 0
+        assert "--turnover_dir" in done.stderr

@@ -1012,6 +1012,41 @@ Outputs `rising_origin_alleles.tsv` and `rising_origin_summary.tsv`; see [Output
 
 ---
 
+### `alleleflux-gene-de-novo` — gene-level de novo accumulation for one comparison
+
+```bash
+alleleflux-gene-de-novo --comparison LABEL --cache_dir DIR --allele_analysis_dir DIR \
+  --metadata TSV --prodigal_fasta FNA --fasta FASTA --mag_mapping TSV --output_dir DIR \
+  --min_cages N [--strain_gate carrier --turnover_dir DIR] [options]
+```
+
+For every MAG with a mean-change table in `--allele_analysis_dir`: the letters whose cage-average share rose are the candidates; each is judged per cage with the site-level de novo rules (presence rule, baseline scope, cluster rule within the cage, carrier strain gate); the counted events are filed by gene and divided by the readable bases of the gene in that cage (mice sampled at both timepoints, at least `--min_cov` reads at both); then Test A (gene vs its genome, per group) and Test B (gene between the groups) with Benjamini-Hochberg per family. See [Outputs](outputs.md#gene-level-de-novo-accumulation).
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--comparison` | required | `{earlier}_{later}-{group_a}_{group_b}`, e.g. `pre_post-fat_control`. |
+| `--cache_dir` | required | The run's `allele_freq_cache/` (QC-passing samples, site-filtered). |
+| `--allele_analysis_dir` | required | The comparison's `allele_analysis_{comparison}/` folder: one `{mag}_allele_frequency_changes_mean.parquet` per MAG = the MAGs analysed. |
+| `--metadata` | required | Sample sheet (`sample_id, subjectID, group, time[, replicate, collection_date]`). |
+| `--prodigal_fasta` | required | Prodigal gene file (`.fna`). |
+| `--fasta` | required | Reference FASTA (contig lengths; a `.fai` beside it is used when present). |
+| `--mag_mapping` | required | MAG-to-contig mapping (`mag_id, contig_id`). |
+| `--output_dir` | required | Output directory: the tests table and the three per-MAG files. |
+| `--min_cages` | required | Cages per group a gene needs before it is tested (`quality_control.min_sample_num`). |
+| `--turnover_dir` | — | `{mag}_strain_turnover.tsv` tables; required by `--strain_gate carrier`. |
+| `--baseline_scope` | `cohort` | As `alleleflux-baseline-presence`: `individual`, `own_group`, `comparison` or `cohort`. |
+| `--cluster_window_bp` | `1000` | Cluster rule: de novo alleles within this many bp on one contig **in one cage** are neighbours. |
+| `--max_de_novo_neighbours` | `0` | More de novo neighbours than this → `block_event`. |
+| `--strain_gate` | `carrier` | `carrier` (the event's own carriers' turnover verdicts) or `none`; the group vote has no cage-level meaning and is not offered. |
+| `--min_determined_carriers` | `1` | Carrier gate floor; fewer carriers with a verdict → `strain_undetermined`. |
+| `--block_rule` | `exclude` | `exclude` (blocks not counted) or `once` (every block row counts once). |
+| `--min_gene_covered_fraction` | `0.0` | A cage enters a gene only when at least this fraction of it is readable there. |
+| `--fdr_group_by_mag_id` | off | Benjamini-Hochberg per MAG instead of over every gene of the comparison. |
+| `--min_cov` / `--min_freq` / `--fdr` / `--min_base_quality` | `5` / `0.05` / `1e-6` / `30` | The presence rule, as pairwise ANI and baseline presence. |
+| `--cpus` | all | One worker per MAG. |
+
+---
+
 ### `alleleflux-baseline-presence` — was each significant allele present at baseline?
 
 ```bash

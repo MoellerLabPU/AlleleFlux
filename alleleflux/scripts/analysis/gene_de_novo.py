@@ -7,9 +7,15 @@ more entries than its share of the readable genome inside one group; Test B
 asks whether a gene collected entries per readable base faster in one group
 than in the other.  The cage is the replicate throughout.
 
-This module holds the COUNTING side as pure functions over frames (the CLI
-streams the real files through them; the two Poisson tests live in
-``statistics/poisson_rate_tests.py``):
+This module holds the COUNTING side as pure functions over frames and the
+command line that streams one comparison's files through them
+(``alleleflux-gene-de-novo``: ``hunt_the_hot_genes`` orchestrates, one
+``_count_one_mag`` worker per MAG); the two Poisson tests live in
+``statistics/poisson_rate_tests.py``.  Four files come out per comparison:
+``{mag}_gene_de_novo_events.tsv`` (every candidate rise with its verdict),
+``{mag}_gene_de_novo_genes.tsv`` (gene x cage), ``{mag}_gene_de_novo_cages.tsv``
+(cage totals) and ``gene_de_novo_tests_{comparison}.tsv`` (one row per MAG x
+gene, both tests, BH q-values).  The counting functions:
 
 * ``cage_rises``: from the pipeline's mean-change table (``allele_freq.py``,
   one row per position x cage: the cage-average change in each base's share,
@@ -48,7 +54,11 @@ past the contig length is an error, never silently dropped.
 
 from __future__ import annotations
 
+import argparse
+import glob
 import logging
+import multiprocessing
+import os
 
 import numpy as np
 import pandas as pd
@@ -56,6 +66,7 @@ import pandas as pd
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
     NUCLEOTIDES,
 )
+from alleleflux.scripts.analysis.ani.null_model import build_error_model
 from alleleflux.scripts.analysis.baseline_presence import (
     EVIDENCE_BELOW_DETECTION,
     EVIDENCE_NOT_COVERED,
@@ -63,6 +74,7 @@ from alleleflux.scripts.analysis.baseline_presence import (
     assess_rows,
     baseline_cutoff,
     baseline_rows,
+    parse_comparison,
 )
 from alleleflux.scripts.analysis.de_novo_rules import (
     BLOCK_EVENT,
@@ -74,7 +86,18 @@ from alleleflux.scripts.analysis.de_novo_rules import (
 )
 
 # load_genes is re-exported here: tests and callers import it from this module.
+from alleleflux.scripts.statistics.poisson_rate_tests import (
+    result_columns,
+    test_every_gene,
+)
+from alleleflux.scripts.utilities.cache_io import iter_cache_batches, load_cache_sites
 from alleleflux.scripts.utilities.genes import load_genes  # noqa: F401 (re-export)
+from alleleflux.scripts.utilities.logging_config import setup_logging
+from alleleflux.scripts.utilities.sample_metadata import (
+    META_OPTIONAL,
+    validate_collection_dates,
+)
+from alleleflux.scripts.utilities.utilities import build_contig_length_index
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +142,8 @@ RISE_COLUMNS = [
     "diff_mean",
     "subjectID_count",
 ]
+# The events file: every candidate rise with its verdict (``classify_cage_rises``).
+EVENT_COLUMNS = RISE_COLUMNS + VERDICT_COLUMNS
 
 
 def cage_rises(mean_changes: pd.DataFrame, groups: tuple[str, str]) -> pd.DataFrame:
@@ -376,6 +401,31 @@ def _cage_key(group: str, replicate: str) -> str:
     return f"{group}|{replicate}"
 
 
+def _cohort_cutoff(
+    dates: np.ndarray, cage_later: np.ndarray, status: np.ndarray, present: np.ndarray
+):
+    """``baseline_presence.baseline_cutoff`` on arrays: the date one cage's baseline is cut at.
+
+    ``dates`` are the site's rows' collection dates (NaT when blank),
+    ``cage_later`` flags the cage's later-timepoint rows, ``status`` /
+    ``present`` are the letter's verdicts.  The first carrier's date when the
+    cage has a covered carrier (None if any carrier is undated); otherwise the
+    cage's earliest later sampling day (None if any of those rows is undated
+    or there is none).  Returned as ``datetime64`` for a direct ``<``.
+
+    Example: carriers dated 2024-04-15 and 2024-05-01 -> 2024-04-15; the
+    second one blank -> None.
+    """
+    t1_cov = cage_later & (status != EVIDENCE_NOT_COVERED)
+    carriers = dates[t1_cov & present]
+    if len(carriers):
+        return None if np.isnat(carriers).any() else carriers.min()
+    later = dates[cage_later]
+    if not len(later) or np.isnat(later).any():
+        return None
+    return later.min()
+
+
 def classify_cage_rises(
     rises: pd.DataFrame,
     cache_rows: pd.DataFrame,
@@ -451,33 +501,55 @@ def classify_cage_rises(
     if rises.empty:
         return pd.DataFrame(columns=out_columns)
 
-    # --- the rows every verdict is read from: labels as text, dates and the
-    # sheet's ``time`` word attached by sample id (baseline_rows reads ``time``).
-    rows = cache_rows.copy()
-    for col in ("contig", "sample_id", "subjectID", "replicate", "group", "timepoint"):
-        rows[col] = rows[col].astype(str)
-    rows["position"] = rows["position"].astype("int64")
-    rows["time"] = rows["timepoint"]
+    # --- the rows every verdict is read from, as flat arrays.  The presence
+    # rule (assess_rows, already vectorised over rows) runs ONCE per letter over
+    # every loaded row instead of once per candidate: 70 k candidates through
+    # per-site frames took 167 s, the same verdicts in bulk take about a second.
+    # Labels become text (the cache stores categoricals), dates come from the
+    # sheet by sample id (the cohort baseline is cut by date), and each site's
+    # row positions are indexed once so a candidate is a few array lookups.
+    rows = cache_rows.reset_index(drop=True)
+    contig = rows["contig"].astype(str).to_numpy()
+    position = rows["position"].astype("int64").to_numpy()
+    subject = rows["subjectID"].astype(str).to_numpy()
+    replicate = rows["replicate"].astype(str).to_numpy()
+    group = rows["group"].astype(str).to_numpy()
+    time = rows["timepoint"].astype(str).to_numpy()
     meta = sheet.set_index(sheet["sample_id"].astype(str))
-    rows["collection_date"] = (
-        meta["collection_date"].reindex(rows["sample_id"]).to_numpy()
+    dated = (
+        pd.to_datetime(meta["collection_date"], format="%Y-%m-%d", errors="coerce")
         if "collection_date" in meta.columns
-        else np.nan
+        else pd.Series(pd.NaT, index=meta.index)
     )
+    dates = dated.reindex(rows["sample_id"].astype(str)).to_numpy(
+        dtype="datetime64[ns]"
+    )
+    is_later = time == str(tps.later)
+    is_earlier = time == str(tps.earlier)
+    # One verdict column per letter that rose anywhere: (status words, present flags).
+    verdict = {}
+    for letter in sorted(set(rises["allele"].astype(str))):
+        v = assess_rows(rows, letter, model, min_freq, min_cov)
+        verdict[letter] = (
+            v["allele_status"].to_numpy(),
+            v["allele_present"].to_numpy(dtype=bool),
+        )
     by_site = {
-        key: idx for key, idx in rows.groupby(["contig", "position"]).indices.items()
+        key: np.asarray(idx)
+        for key, idx in pd.DataFrame({"contig": contig, "position": position})
+        .groupby(["contig", "position"])
+        .indices.items()
     }
 
-    # --- stages 1-3, one candidate at a time (the per-site frames are tiny:
-    # one row per loaded sample).
+    # --- stages 1-3, one candidate at a time over the arrays.  The baseline
+    # selection mirrors baseline_presence.baseline_rows / baseline_cutoff word
+    # for word (the unit test TestClassifyInBulk pins the two against each
+    # other on random sites), so the cage-level and site-level analyses can
+    # never disagree on what "absent at baseline" means.
     records = []
     for rise in rises.itertuples(index=False):
-        contig, position = str(rise.contig), int(rise.position)
-        group, replicate, allele = (
-            str(rise.group),
-            str(rise.replicate),
-            str(rise.allele),
-        )
+        key = (str(rise.contig), int(rise.position))
+        g, r, letter = str(rise.group), str(rise.replicate), str(rise.allele)
         rec = {
             "carriers": "",
             "n_carriers": 0,
@@ -487,41 +559,47 @@ def classify_cage_rises(
             "n_baseline_samples_covered": 0,
             "n_baseline_samples_present": 0,
         }
-        idx = by_site.get((contig, position))
+        idx = by_site.get(key)
         if idx is None:
             # A candidate with no cache row anywhere is a contract violation:
             # the candidate list was derived from this very cache.
             raise ValueError(
-                f"{mag_id} {contig}:{position}: candidate rise but no cache row at the site"
+                f"{mag_id} {key[0]}:{key[1]}: candidate rise but no cache row at the site"
             )
-        site = rows.iloc[idx]
-        site = pd.concat(
-            [site, assess_rows(site, allele, model, min_freq, min_cov)], axis=1
-        )
-        later = site[
-            (site["time"] == tps.later)
-            & (site["group"] == group)
-            & (site["replicate"] == replicate)
-        ]
-        carriers = sorted(set(later.loc[later["allele_present"], "subjectID"]))
-        rec["carriers"] = ",".join(carriers)
-        rec["n_carriers"] = len(carriers)
-        if not carriers:
+        status, present = verdict[letter]
+        s_idx, p_idx = status[idx], present[idx]
+        # stage 2: the cage's later-timepoint mice that carry the letter.
+        cage_later = is_later[idx] & (group[idx] == g) & (replicate[idx] == r)
+        carriers = np.unique(subject[idx][cage_later & p_idx])
+        rec["carriers"] = ",".join(carriers.tolist())
+        rec["n_carriers"] = int(len(carriers))
+        if not len(carriers):
             rec["origin"] = ORIGIN_NOT_PRESENT_LATER
             records.append(rec)
             continue
-        # own_group judges on the cage's group only; the other scopes see every
-        # loaded sample and baseline_rows picks the earlier ones they define.
-        pool = site[site["group"] == group] if scope == "own_group" else site
-        t0 = baseline_rows(pool, scope, tps, set(carriers), baseline_cutoff(later))
-        t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
-        rec["n_baseline_samples_covered"] = int(len(t0_cov))
-        rec["n_baseline_samples_present"] = int(t0_cov["allele_present"].sum())
-        if t0_cov.empty:
+        # stage 3: which of the site's rows are the baseline (baseline_rows):
+        if scope == "individual":
+            base = is_earlier[idx] & np.isin(subject[idx], carriers)
+        elif scope == "own_group":
+            base = is_earlier[idx] & (group[idx] == g)
+        elif scope == "comparison":
+            base = is_earlier[idx]
+        else:  # cohort: every row dated before the cutoff (baseline_cutoff);
+            # an undated sheet narrows to the earlier timepoint, as baseline_rows does.
+            d_idx = dates[idx]
+            cutoff = _cohort_cutoff(d_idx, cage_later, s_idx, p_idx)
+            if cutoff is not None and not np.isnat(d_idx).any():
+                base = d_idx < cutoff
+            else:
+                base = is_earlier[idx]
+        covered = base & (s_idx != EVIDENCE_NOT_COVERED)
+        rec["n_baseline_samples_covered"] = int(covered.sum())
+        rec["n_baseline_samples_present"] = int((covered & p_idx).sum())
+        if not covered.any():
             rec["origin"] = ORIGIN_BASELINE_NOT_COVERED
-        elif t0_cov["allele_present"].any():
+        elif (covered & p_idx).any():
             rec["origin"] = ORIGIN_STANDING
-        elif (t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION).any():
+        elif (covered & (s_idx == EVIDENCE_BELOW_DETECTION)).any():
             rec["origin"] = ORIGIN_DE_NOVO_BELOW_DETECTION
         else:
             rec["origin"] = ORIGIN_DE_NOVO
@@ -774,3 +852,435 @@ def gene_tables(
         columns=CAGE_TOTAL_COLUMNS,
     )
     return gene_cage, totals
+
+
+# ---------------------------------------------------------------------------
+# Task 6: the command line (one comparison, every MAG of it)
+# ---------------------------------------------------------------------------
+
+MEAN_CHANGE_SUFFIX = "_allele_frequency_changes_mean.parquet"
+
+
+def _mags_in(allele_analysis_dir: str) -> list[str]:
+    """Every MAG with a mean-change table in the comparison's allele-analysis folder."""
+    paths = glob.glob(os.path.join(allele_analysis_dir, f"*{MEAN_CHANGE_SUFFIX}"))
+    mags = sorted(os.path.basename(p)[: -len(MEAN_CHANGE_SUFFIX)] for p in paths)
+    if not mags:
+        raise ValueError(
+            f"no *{MEAN_CHANGE_SUFFIX} in {allele_analysis_dir}: nothing to count"
+        )
+    return mags
+
+
+def _per_mag_paths(output_dir: str, mag_id: str) -> dict[str, str]:
+    return {
+        kind: os.path.join(output_dir, f"{mag_id}_gene_de_novo_{kind}.tsv")
+        for kind in ("events", "genes", "cages")
+    }
+
+
+def _read_turnover(turnover_dir: str, mag_id: str) -> pd.DataFrame | None:
+    """This MAG's per-mouse strain verdicts, or None (then every event is undetermined)."""
+    path = os.path.join(turnover_dir, f"{mag_id}_strain_turnover.tsv")
+    if not os.path.exists(path):
+        logger.warning(
+            f"{mag_id}: no turnover table at {path}; every de novo event of this "
+            f"MAG is strain_undetermined and not counted"
+        )
+        return None
+    return pd.read_csv(path, sep="\t", dtype=str)
+
+
+def _count_one_mag(job: dict) -> tuple[str, pd.DataFrame, pd.DataFrame, dict]:
+    """Worker: one MAG from its mean-change table and cache to its three files.
+
+    ``job`` carries the MAG id, its genes and contig lengths, the paths, the
+    comparison and every knob (see ``hunt_the_hot_genes``).  Steps: candidate
+    rises -> readable bases per cage (a streamed pass over the paired samples'
+    cache rows, every position) -> the candidates' cache rows for every loaded
+    sample -> verdicts -> gene x cage and cage tables -> written.  Returns the
+    two tables for the tests plus the origin tally for the log.
+    """
+    mag_id = job["mag_id"]
+    tps: Timepoints = job["tps"]
+    mean_changes = pd.read_parquet(job["mean_change_path"])
+    rises = cage_rises(mean_changes, job["groups"])
+
+    # Readable bases: one bit per position per cage and timepoint, from the
+    # paired mice only (decision 7), streamed so a large cache never sits in
+    # memory at once.
+    mask = CoverageMask(job["contig_lengths"], job["min_cov"])
+    for tp in (tps.earlier, tps.later):
+        for batch in iter_cache_batches(
+            job["cache_dir"],
+            mag_id,
+            tp,
+            sample_ids=job["paired_sample_ids"],
+            columns=["total_coverage", "group", "replicate"],
+        ):
+            mask.add(batch)
+    readable = mask.readable(tps.earlier, tps.later)
+
+    if rises.empty:
+        events = pd.DataFrame(columns=EVENT_COLUMNS)
+    else:
+        sites = rises[["contig", "position"]].drop_duplicates()
+        rows = load_cache_sites(
+            job["cache_dir"],
+            mag_id,
+            job["timepoints"],
+            sites=sites,
+            sample_ids=job["loaded_sample_ids"],
+            columns=[
+                "A",
+                "C",
+                "G",
+                "T",
+                "total_coverage",
+                "subjectID",
+                "replicate",
+                "group",
+            ],
+        )
+        turnover = (
+            _read_turnover(job["turnover_dir"], mag_id)
+            if job["strain_gate"] == "carrier"
+            else None
+        )
+        events = classify_cage_rises(
+            rises,
+            rows,
+            job["sheet"],
+            mag_id=mag_id,
+            tps=tps,
+            scope=job["baseline_scope"],
+            model=job["model"],
+            min_freq=job["min_freq"],
+            min_cov=job["min_cov"],
+            window_bp=job["cluster_window_bp"],
+            max_neighbours=job["max_de_novo_neighbours"],
+            strain_gate=job["strain_gate"],
+            min_determined_carriers=job["min_determined_carriers"],
+            turnover=turnover,
+        )
+    gene_cage, totals = gene_tables(
+        events,
+        readable,
+        job["genes"],
+        job["cages"],
+        mag_id=mag_id,
+        block_rule=job["block_rule"],
+        min_gene_covered_fraction=job["min_gene_covered_fraction"],
+    )
+    paths = _per_mag_paths(job["output_dir"], mag_id)
+    events[EVENT_COLUMNS].to_csv(paths["events"], sep="\t", index=False)
+    gene_cage.to_csv(paths["genes"], sep="\t", index=False)
+    totals.to_csv(paths["cages"], sep="\t", index=False)
+    tally = events["origin"].value_counts().to_dict() if len(events) else {}
+    return mag_id, gene_cage, totals, tally
+
+
+def hunt_the_hot_genes(args: argparse.Namespace) -> int:
+    """Orchestrator: one comparison -> per-MAG tables -> one tests table.
+
+    1. The sample sheet: the comparison's samples (both groups, both
+       timepoints) decide the cages and, through ``paired_samples``, the
+       denominators; under the cohort scope every sample of the sheet is
+       loaded as potential baseline, and its dates must be all-or-nothing
+       (a partly dated sheet is an error, an undated one narrows the baseline
+       to the earlier timepoint with a warning), as in baseline presence.
+    2. Genes and contig lengths once (``load_genes``,
+       ``build_contig_length_index``), split per MAG through the MAG mapping.
+    3. One worker per MAG (``_count_one_mag``), the MAGs being every
+       mean-change table in ``--allele_analysis_dir``.
+    4. ``poisson_rate_tests.test_every_gene`` over every MAG's tables ->
+       ``gene_de_novo_tests_{comparison}.tsv`` (one row per MAG x gene).
+    """
+    earlier, later, group_a, group_b = parse_comparison(args.comparison)
+    tps = Timepoints(earlier, later)
+    groups = (group_a, group_b)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # ---- 1. the sheet
+    meta = pd.read_csv(args.metadata, sep="\t", dtype=str)
+    if "replicate" not in meta.columns:
+        meta["replicate"] = meta["subjectID"]  # same default as mag_metadata.py
+    for col in META_OPTIONAL:
+        if col not in meta.columns:
+            meta[col] = np.nan
+    validate_collection_dates(meta)
+    in_comparison = meta["group"].isin(groups) & meta["time"].isin((earlier, later))
+    comparison_meta = meta[in_comparison]
+    if comparison_meta.empty:
+        raise ValueError(
+            f"no samples in {args.metadata} for groups {groups} at {earlier}/{later}"
+        )
+    for g in groups:
+        if not (comparison_meta["group"] == g).any():
+            raise ValueError(
+                f"group {g!r} has no sample at {earlier}/{later} in {args.metadata}"
+            )
+    paired = paired_samples(comparison_meta, earlier, later)
+    if paired.empty:
+        raise ValueError(
+            f"no mouse of groups {groups} is sampled at both {earlier} and {later}: "
+            f"nothing was searched for a rise (check subjectID spelling)"
+        )
+    cages = (
+        comparison_meta[["group", "replicate"]]
+        .drop_duplicates()
+        .sort_values(["group", "replicate"])
+        .reset_index(drop=True)
+    )
+    logger.info(
+        f"{len(paired)} paired samples ({paired['subjectID'].nunique()} mice) over "
+        f"{len(cages)} cages: "
+        + ", ".join(f"{g}={int((cages['group'] == g).sum())}" for g in groups)
+    )
+    # Which samples and timepoints the verdicts read: the comparison's own,
+    # plus every other sample of the sheet under a DATED cohort scope.
+    loaded = comparison_meta
+    timepoints = [earlier, later]
+    if args.baseline_scope == "cohort":
+        dated = meta["collection_date"].notna() & (
+            meta["collection_date"].astype(str).str.strip() != ""
+        )
+        if dated.any() and not dated.all():
+            missing = sorted(meta.loc[~dated, "sample_id"])
+            raise ValueError(
+                f"--baseline_scope cohort needs a collection_date (YYYY-MM-DD) for "
+                f"every sample or for none; {len(missing)} of {len(meta)} are blank: "
+                f"{missing}"
+            )
+        if dated.all():
+            loaded = meta
+            timepoints = list(dict.fromkeys(meta["time"]))
+            logger.info(
+                f"cohort scope: {len(meta) - len(comparison_meta)} samples outside "
+                f"the comparison loaded as potential baseline (timepoints {timepoints})"
+            )
+        else:
+            logger.warning(
+                f"cohort scope: no collection_date in the metadata, so the baseline "
+                f"is the comparison's earlier timepoint {earlier!r} only (as under "
+                f"--baseline_scope comparison).  Add a collection_date column to "
+                f"use the full cohort."
+            )
+
+    # ---- 2. genes and contig lengths, once, then per MAG
+    genes = load_genes(args.prodigal_fasta)
+    mapping = pd.read_csv(args.mag_mapping, sep="\t", dtype=str)
+    contig_lengths = build_contig_length_index(args.fasta, args.mag_mapping)
+    contigs_of = mapping.groupby("mag_id")["contig_id"].apply(list).to_dict()
+    mags = _mags_in(args.allele_analysis_dir)
+    logger.info(
+        f"{len(mags)} MAGs with a mean-change table in {args.allele_analysis_dir}; "
+        f"{len(genes)} genes in {args.prodigal_fasta}"
+    )
+    model = build_error_model(min_base_quality=args.min_base_quality, fdr=args.fdr)
+    jobs = []
+    for mag_id in mags:
+        contigs = contigs_of.get(mag_id)
+        if not contigs:
+            raise ValueError(f"MAG {mag_id} has no contig in {args.mag_mapping}")
+        missing = [c for c in contigs if c not in contig_lengths]
+        if missing:
+            raise ValueError(
+                f"MAG {mag_id}: contig(s) {missing[:5]} not in {args.fasta}"
+            )
+        jobs.append(
+            {
+                "mag_id": mag_id,
+                "mean_change_path": os.path.join(
+                    args.allele_analysis_dir, f"{mag_id}{MEAN_CHANGE_SUFFIX}"
+                ),
+                "genes": genes[genes["contig"].isin(contigs)].reset_index(drop=True),
+                "contig_lengths": {c: contig_lengths[c] for c in contigs},
+                "cages": cages,
+                "sheet": meta,
+                "groups": groups,
+                "tps": tps,
+                "timepoints": timepoints,
+                "paired_sample_ids": list(paired["sample_id"]),
+                "loaded_sample_ids": list(loaded["sample_id"]),
+                "cache_dir": args.cache_dir,
+                "turnover_dir": args.turnover_dir,
+                "output_dir": args.output_dir,
+                "model": model,
+                "min_cov": args.min_cov,
+                "min_freq": args.min_freq,
+                "baseline_scope": args.baseline_scope,
+                "cluster_window_bp": args.cluster_window_bp,
+                "max_de_novo_neighbours": args.max_de_novo_neighbours,
+                "strain_gate": args.strain_gate,
+                "min_determined_carriers": args.min_determined_carriers,
+                "block_rule": args.block_rule,
+                "min_gene_covered_fraction": args.min_gene_covered_fraction,
+            }
+        )
+
+    # ---- 3. one worker per MAG
+    gene_frames, cage_frames = [], []
+    with multiprocessing.Pool(processes=args.cpus) as pool:
+        for mag_id, gene_cage, totals, tally in pool.imap_unordered(
+            _count_one_mag, jobs
+        ):
+            gene_frames.append(gene_cage)
+            cage_frames.append(totals)
+            counted = int(totals["n_de_novo_total"].sum())
+            logger.info(
+                f"{mag_id}: {sum(tally.values()):,} candidate rises -> {tally}; "
+                f"{counted} events counted over {len(totals)} cages"
+            )
+
+    # ---- 4. the tests, over every MAG of the comparison
+    gene_cage = pd.concat(gene_frames, ignore_index=True)
+    totals = pd.concat(cage_frames, ignore_index=True)
+    tests = test_every_gene(
+        gene_cage,
+        totals,
+        groups,
+        min_cages=args.min_cages,
+        fdr_by_mag=args.fdr_group_by_mag_id,
+    )
+    path = os.path.join(args.output_dir, f"gene_de_novo_tests_{args.comparison}.tsv")
+    tests.to_csv(path, sep="\t", index=False)
+    n_between = int(tests["p_value_between"].notna().sum()) if len(tests) else 0
+    logger.info(
+        f"wrote {len(tests):,} MAG x gene rows to {path}; {n_between:,} genes tested "
+        f"between groups at the floor of {args.min_cages} cages per group"
+        + (
+            f"; smallest p_value_between {tests['p_value_between'].min():.3g} "
+            f"({tests.loc[tests['p_value_between'].idxmin(), 'gene_id']})"
+            if n_between
+            else ""
+        )
+    )
+    return 0
+
+
+def main():
+    setup_logging()
+    parser = argparse.ArgumentParser(
+        description="Gene-level de novo accumulation for one comparison: which genes "
+        "collect new alleles faster than their genome (per group) or than the other "
+        "group, with the cage as the replicate.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--comparison",
+        required=True,
+        help="Comparison label, e.g. pre_post-fat_control",
+    )
+    parser.add_argument(
+        "--cache_dir",
+        required=True,
+        help="The run's allele_freq_cache/ directory (QC-passing samples, site-filtered)",
+    )
+    parser.add_argument(
+        "--allele_analysis_dir",
+        required=True,
+        help="The comparison's allele_analysis folder: one "
+        "{mag}_allele_frequency_changes_mean.parquet per MAG = the MAGs analysed",
+    )
+    parser.add_argument(
+        "--metadata",
+        required=True,
+        help="Sample metadata TSV (sample_id, subjectID, group, time[, replicate, collection_date])",
+    )
+    parser.add_argument(
+        "--prodigal_fasta", required=True, help="Prodigal gene file (.fna)"
+    )
+    parser.add_argument(
+        "--fasta", required=True, help="Reference FASTA (contig lengths)"
+    )
+    parser.add_argument(
+        "--mag_mapping",
+        required=True,
+        help="MAG-to-contig mapping TSV (mag_id, contig_id)",
+    )
+    parser.add_argument("--output_dir", required=True)
+    parser.add_argument(
+        "--turnover_dir",
+        default=None,
+        help="alleleflux-strain-turnover outputs ({mag}_strain_turnover.tsv); the carrier gate reads them",
+    )
+    parser.add_argument(
+        "--baseline_scope",
+        choices=BASELINE_SCOPES,
+        default="cohort",
+        help="What 'absent at baseline' is judged against (as alleleflux-baseline-presence)",
+    )
+    parser.add_argument(
+        "--cluster_window_bp",
+        type=int,
+        default=1000,
+        help="cluster rule: de novo alleles within this many bp on one contig IN ONE CAGE are neighbours",
+    )
+    parser.add_argument(
+        "--max_de_novo_neighbours",
+        type=int,
+        default=0,
+        help="cluster rule: more de novo neighbours than this -> block_event",
+    )
+    parser.add_argument(
+        "--strain_gate",
+        choices=STRAIN_GATES,
+        default="carrier",
+        help="carrier = the event's own carriers' turnover verdicts (needs --turnover_dir); none = no gate",
+    )
+    parser.add_argument(
+        "--min_determined_carriers",
+        type=int,
+        default=1,
+        help="carrier gate: carriers with a verdict needed; fewer -> strain_undetermined",
+    )
+    parser.add_argument(
+        "--block_rule",
+        choices=BLOCK_RULES,
+        default="exclude",
+        help="block events: exclude (not counted) or once (one event per block row)",
+    )
+    parser.add_argument(
+        "--min_gene_covered_fraction",
+        type=float,
+        default=0.0,
+        help="a cage enters a gene only when at least this fraction of it is readable",
+    )
+    parser.add_argument(
+        "--min_cages",
+        type=int,
+        required=True,
+        help="cages per group a gene needs for a test (quality_control.min_sample_num)",
+    )
+    parser.add_argument(
+        "--fdr_group_by_mag_id",
+        action="store_true",
+        help="Benjamini-Hochberg per MAG instead of over every gene of the comparison",
+    )
+    parser.add_argument(
+        "--min_cov", type=int, default=5, help="Reads before any verdict"
+    )
+    parser.add_argument(
+        "--min_freq", type=float, default=0.05, help="Presence frequency floor"
+    )
+    parser.add_argument(
+        "--fdr", type=float, default=1e-6, help="Null-model false-discovery rate"
+    )
+    parser.add_argument(
+        "--min_base_quality",
+        type=int,
+        default=30,
+        help="Base quality the null model assumes",
+    )
+    parser.add_argument("--cpus", type=int, default=multiprocessing.cpu_count())
+    args = parser.parse_args()
+    if args.strain_gate == "carrier" and not args.turnover_dir:
+        parser.error("--strain_gate carrier needs --turnover_dir")
+    if args.min_cages < 1:
+        parser.error("--min_cages must be >= 1")
+    return hunt_the_hot_genes(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -67,6 +67,7 @@ alleleflux-strain-turnover = "alleleflux.scripts.analysis.ani.strain_turnover:ma
 alleleflux-replacement-classification = "alleleflux.scripts.analysis.ani.replacement_classification:main"
 alleleflux-baseline-presence = "alleleflux.scripts.analysis.baseline_presence:main"
 alleleflux-rising-origin = "alleleflux.scripts.analysis.rising_origin:main"
+alleleflux-gene-de-novo = "alleleflux.scripts.analysis.gene_de_novo:main"
 alleleflux-plot-scores = "alleleflux.scripts.visualization.plot_scores:main"
 alleleflux-run-report = "alleleflux.scripts.visualization.run_report:main"
 

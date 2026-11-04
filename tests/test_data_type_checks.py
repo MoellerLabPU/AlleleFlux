@@ -81,6 +81,11 @@ class TestCheckDataTypeFeatures:
         with pytest.raises(ValueError, match="use_dnds"):
             fns["check_data_type_features"](_cfg("single", use_dnds=True))
 
+    def test_single_with_gene_de_novo_on_is_refused_naming_it(self):
+        cfg = _cfg("single", use_gene_de_novo=True)
+        with pytest.raises(ValueError, match="use_gene_de_novo"):
+            _load()["check_data_type_features"](cfg)
+
     def test_single_with_absent_longitudinal_flags_passes(self):
         # Absent means "default", and the default for single data is off; only
         # an explicit True is a user mistake worth stopping the run for.

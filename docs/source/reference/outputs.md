@@ -377,6 +377,30 @@ The first four are verdicts; `block_event`, `strain_undetermined` and the last t
 
 Summary: one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the four verdicts). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
 
+## Gene-Level De Novo Accumulation
+
+**Path:** `gene_de_novo/{comparison}/gene_de_novo_tests_{comparison}.tsv` (one per comparison) plus three files per MAG: `{mag}_gene_de_novo_events.tsv`, `{mag}_gene_de_novo_genes.tsv`, `{mag}_gene_de_novo_cages.tsv`
+
+Written by `alleleflux-gene-de-novo` when `use_gene_de_novo` is on (longitudinal only). The cage (`group` × `replicate`) is the replicate throughout; see the [Gene De Novo guide](../usage/gene_de_novo_analysis.md) for the method.
+
+**Events** (`{mag}_gene_de_novo_events.tsv`): one row per candidate rise, a (cage, contig, position, letter) whose cage-average share went up in the mean-change table, with the columns of the rise (`contig`, `position`, `gene_id`, blank between genes, `replicate`, `group`, `allele`, `diff_mean`, `subjectID_count`) and the verdict: `origin` (`de_novo`, `de_novo_below_detection`, `standing_variation`, `block_event`, `new_strain`, `strain_undetermined`, `not_present_later`, `baseline_not_covered`; the same words as [rising origin](#rising-origin), judged per cage), `block_id` (`{mag}:{contig}:{group}|{replicate}:{k}`: blocks never span two cages), `n_de_novo_neighbours`, `carriers` (the cage's later-timepoint mice carrying the letter), `n_carriers`, `carrier_strain_status`, `n_carriers_determined`, `n_carriers_strain_changed`, `n_baseline_samples_covered`, `n_baseline_samples_present`. The two de novo flavours count as events; a `block_event` counts only under `block_rule: once`.
+
+**Genes** (`{mag}_gene_de_novo_genes.tsv`): one row per gene × cage, zero rows kept: `n_de_novo` (counted events in the gene), `n_block_excluded` (block rows dropped by `block_rule: exclude`), `covered_bp` (readable bases of the gene in that cage: the denominator, never the gene length), `gene_length`, `covered_fraction`, `entered` (readable above `min_gene_covered_fraction`; a cage that does not enter reports `covered_bp` 0 and `n_de_novo` 0 so the tests never see it), `rate` (`n_de_novo / covered_bp`, blank when not entered).
+
+**Cages** (`{mag}_gene_de_novo_cages.tsv`): one row per cage: `n_de_novo_total` (every counted event of the cage, between genes included) and `covered_bp_total` (readable bases of the whole genome). These are the "fair share" numbers of Test A.
+
+**Tests** (`gene_de_novo_tests_{comparison}.tsv`): one row per MAG × gene over every MAG of the comparison. Per group `{g}`: `n_cages_{g}` (entered cages), `n_de_novo_{g}`, `expected_{g}` (the sum over cages of the cage's genome-wide events × the gene's share of the cage's readable genome), `rate_ratio_vs_genome_{g}`, `dispersion_{g}` (quasi-Poisson scale, floored at 1), `p_value_vs_genome_{g}` (Test A: chi-square with 1 df on the dispersion-scaled likelihood-ratio statistic), `q_value_vs_genome_{g}`, `note_{g}`. Between the groups: `rate_{a}`, `rate_{b}` (pooled events per readable base), `rate_ratio_{a}_vs_{b}`, `dispersion_between`, `df_resid_between` (cages − 2), `p_value_between` (Test B: F(1, `df_resid_between`) on the scaled statistic), `q_value_between`, `note_between`. Also `gene_length` and `min_covered_fraction` (the smallest covered fraction among the entered cages).
+
+| note | meaning |
+|---|---|
+| (blank) | tested |
+| `below_cage_floor` | fewer entered cages than `quality_control.min_sample_num` in that group (Test B: in either group); nothing tested |
+| `no_events` | the group's cages have no event in the gene but a non-zero expectation; rate ratio 0, no p-value |
+| `no_exposure` | the expectation is zero (the group's cages have no event anywhere in the genome, or no readable base in the gene); nothing to compare against |
+| `no_residual_df` | Test B with one cage per group: the dispersion cannot be estimated; the rate ratio is reported, no p-value |
+
+Benjamini-Hochberg runs within each of three families (Test A per group, Test B) over the tested genes only, per MAG when `statistics.fdr_group_by_mag_id` is true, otherwise over every gene of the comparison. Untested genes keep a blank q-value; they are never given p = 1.
+
 ## Figures and run report
 
 Written by the local rules `plot_scores` and `run_report` when `analysis.figures.enabled` is on (the default), for every comparison that has combined MAG score tables; nothing when `analysis.allele_analysis_only` is on. See the [Score Figures and Run Report guide](../usage/figures_and_report.md).

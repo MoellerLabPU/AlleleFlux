@@ -74,7 +74,7 @@ Core analysis settings.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). Checked while the Snakefile is read: every `timepoints_combinations` entry must be spelled `timepoint: "name"` for `single` and `earlier:` + `later:` for `longitudinal` (see below), and on `single` data an explicit `use_dnds`, `use_regional_contrast`, `use_baseline_presence` or `use_strain_turnover: true` stops the run before any job starts (these compare a sample with an earlier one, which single data does not have). Leaving those keys out is fine: absent means off for single data. |
+| `data_type` | `longitudinal` | Type of analysis: `single` (one timepoint) or `longitudinal` (multiple timepoints). Checked while the Snakefile is read: every `timepoints_combinations` entry must be spelled `timepoint: "name"` for `single` and `earlier:` + `later:` for `longitudinal` (see below), and on `single` data an explicit `use_dnds`, `use_regional_contrast`, `use_baseline_presence`, `use_strain_turnover` or `use_gene_de_novo: true` stops the run before any job starts (these compare a sample with an earlier one, which single data does not have). Leaving those keys out is fine: absent means off for single data. |
 | `allele_analysis_only` | `false` | If true, only run allele frequency analysis without statistical tests. |
 | `use_lmm` | `true` | Enable Linear Mixed Models (LMM) for repeated measures/longitudinal data. Best for accounting for subject-level variation. |
 | `use_significance_tests` | `true` | Enable two-sample (t-test, Mann-Whitney) and single-sample statistical tests. Best for simple comparisons. |
@@ -83,6 +83,7 @@ Core analysis settings.
 | `use_pairwise_ani` | `false` | Pairwise conANI/popANI between QC-passing sample pairs, one job per tested MAG (see [`pairwise_ani`](#pairwise_ani-strain_turnover-and-baseline_presence)). |
 | `use_strain_turnover` | `false` | Per-mouse strain-background verdicts per MAG plus the all-MAG classification. Requires `use_pairwise_ani` and longitudinal data. |
 | `use_baseline_presence` | `false` | For each significant site, was the allele present at the earlier timepoint? One job per comparison, after the statistics. |
+| `use_gene_de_novo` | `false` | Gene-level de novo accumulation: which genes collect new alleles faster than their genome (per group) or than the other group, with the cage as the replicate. One job per comparison, after the allele-frequency step; longitudinal only, off under `allele_analysis_only`. See the [Gene De Novo guide](../usage/gene_de_novo_analysis.md) and [`gene_de_novo`](#gene_de_novo). |
 | `figures.enabled` | `true` | Score heatmaps and boxplots per comparison and test family, plus one HTML run report, once the scores exist (see the [Score Figures and Run Report guide](../usage/figures_and_report.md)). `false` = no figures, no report. Off automatically under `allele_analysis_only`. Heatmap stars use `statistics.p_value_threshold`. |
 | `figures.families` | `[]` | Families to draw: a subset of `ttest`, `ttest_unpaired`, `wilcoxon`, `mannwhitney`, `lmm`, `cmh`; `[]` = every family that has a score table. |
 | `figures.tree_path` | `""` | Optional Newick tree with MAG ids as tip names; heatmap rows follow its tip order instead of taxonomy, MAGs absent from the tree go below a divider. An input of the figure rule, so a new tree redraws the figures. |
@@ -345,6 +346,18 @@ Settings for the strain-turnover branch (see the [Strain Turnover and Baseline P
 | `baseline_presence.strain_gate` | `carrier` | Which strain verdict decides whether a de novo allele stands: `carrier` (the allele's own carriers' per-mouse turnover verdicts), `group` (the across-cage classification vote), `both` (one undetermined verdict → undetermined, else one swap verdict → `new_strain`), `none`. Every gate but `none` requires `use_strain_turnover`; both verdicts are written to every row regardless. See [outputs](outputs.md#rising-origin). |
 | `baseline_presence.min_determined_carriers` | 3 | Carrier gate: carriers with a per-mouse verdict needed before their strain is called; fewer → `strain_undetermined`, not de novo. |
 | `baseline_presence.baseline_scope` | `cohort` | Which earlier samples "absent at baseline" is judged against: `individual` (the carrier mice's own), `own_group` (the site's own group; within-group tests only), `comparison` (both groups), `cohort` (every QC-passing sample of the run, any group, any age, collected before the first carrier sample; needs a `collection_date` column, `YYYY-MM-DD`, for every sample: a partly dated sheet is an error, a sheet with no dates narrows the baseline to the comparison's earlier timepoint with a warning). See the [usage guide](../usage/strain_turnover_analysis.md#which-samples-are-the-baseline-baseline_scope). |
+
+### gene_de_novo
+
+Settings for the gene-level de novo analysis (see the [Gene De Novo guide](../usage/gene_de_novo_analysis.md)), under `analysis:`. The analysis reuses `baseline_presence.baseline_scope`, `cluster_window_bp`, `max_de_novo_neighbours` and `strain_gate` (only `carrier` or `none`: a cage has no across-cage vote, so `group` and `both` stop the run at parse time naming `gene_de_novo`), `quality_control.min_sample_num` as the number of cages per group a gene needs before it is tested, and `statistics.fdr_group_by_mag_id` for the Benjamini-Hochberg families. Three knobs are its own:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `gene_de_novo.block_rule` | `exclude` | What a block of neighbouring de novo alleles in one cage counts for: `exclude` (one imported or recombined chunk, not a mutation: not counted) or `once` (every block row counts as one event). |
+| `gene_de_novo.min_gene_covered_fraction` | 0.0 | A cage enters a gene only when at least this fraction of the gene is readable in it (readable = at least `pairwise_ani.min_cov` reads at both timepoints in a mouse sampled at both). `0.0` = any readable base; the fraction is reported for every gene × cage either way. |
+| `gene_de_novo.min_determined_carriers` | 1 | The carrier gate's floor for this analysis: carrier mice with a strain-turnover verdict needed before the event's strain is called; fewer → `strain_undetermined`, not counted. The site-level analysis keeps its own floor (`baseline_presence.min_determined_carriers`, default 3). |
+
+Resource overrides use the rule name `gene_de_novo`.
 
 The MAG universe of this branch is the set of **tested** MAGs: the union over every comparison and enabled test of the MAGs the eligibility (and preprocessing, when enabled) checkpoints admitted. Resource overrides use the rule names `pairwise_ani` and `baseline_presence`; `strain_turnover` and `replacement_classification` run locally.
 

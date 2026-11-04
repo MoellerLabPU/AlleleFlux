@@ -447,6 +447,7 @@ def check_data_type_features(config):
         "use_regional_contrast",
         "use_baseline_presence",
         "use_strain_turnover",
+        "use_gene_de_novo",
     )
     analysis = config["analysis"]
     data_type = analysis.get("data_type")
@@ -493,8 +494,8 @@ def check_data_type_features(config):
             raise ValueError(
                 f"analysis.{', analysis.'.join(on)} cannot run on single-timepoint "
                 f"data: there is no earlier timepoint to compare against (dN/dS, "
-                f"regional contrast, baseline presence / de novo and strain "
-                f"turnover all compare a mouse with its own past).  Set the "
+                f"regional contrast, baseline presence / de novo, strain "
+                f"turnover and gene de novo all compare a mouse with its own past).  Set the "
                 f"flag(s) to false or use data_type: longitudinal."
             )
 
@@ -1634,6 +1635,123 @@ if config.get("analysis", {}).get("use_baseline_presence", False):
 else:
     DE_NOVO_RULE_PARAMS = None
     DE_NOVO_RULE_ARGS = ""
+
+
+def gene_de_novo_params():
+    """``analysis.gene_de_novo``'s knobs on top of the shared de novo rules, checked.
+
+    The gene-level analysis (one job per comparison, ``alleleflux-gene-de-novo``)
+    asks Phase 2's questions of every rise with the CAGE as the unit.  It
+    reuses the shared rules of ``analysis.baseline_presence`` through
+    ``de_novo_rule_params`` (baseline scope, cluster window, strain gate) and
+    adds three of its own under ``analysis.gene_de_novo``:
+
+    * ``block_rule`` -- ``exclude`` (default: a block of neighbouring de novo
+      alleles in one cage is one imported chunk, not counted) or ``once``
+      (every block row counts as one event);
+    * ``min_gene_covered_fraction`` -- a cage enters a gene only when at least
+      this fraction of the gene is readable in it (default 0.0: any readable
+      base; the covered fraction is reported either way);
+    * ``min_determined_carriers`` -- the carrier gate's floor for THIS
+      analysis (default 1: one carrier mouse with a strain verdict decides;
+      the site-level analysis keeps its own, default 3).
+
+    A cage has no across-cage strain vote, so ``strain_gate`` ``group`` / ``both``
+    stop here naming the block; ``carrier`` still needs ``use_strain_turnover``
+    (checked by ``de_novo_rule_params``).
+
+    Example: a config with no ``gene_de_novo`` block and the house
+    ``baseline_presence`` defaults -> ``{"baseline_scope": "cohort",
+    "cluster_window_bp": 1000, "max_de_novo_neighbours": 0, "strain_gate":
+    "carrier", "min_determined_carriers": 1, "block_rule": "exclude",
+    "min_gene_covered_fraction": 0.0}``.
+    """
+    BLOCK_RULES = ("exclude", "once")
+    shared = de_novo_rule_params()
+    if shared["strain_gate"] in ("group", "both"):
+        raise ValueError(
+            f"analysis.baseline_presence.strain_gate {shared['strain_gate']!r} is a "
+            f"group vote; analysis.gene_de_novo works per cage and accepts only "
+            f"carrier or none"
+        )
+    block = (config.get("analysis", {}) or {}).get("gene_de_novo", {}) or {}
+    p = {
+        "baseline_scope": shared["baseline_scope"],
+        "cluster_window_bp": shared["cluster_window_bp"],
+        "max_de_novo_neighbours": shared["max_de_novo_neighbours"],
+        "strain_gate": shared["strain_gate"],
+        "min_determined_carriers": int(block.get("min_determined_carriers", 1)),
+        "block_rule": str(block.get("block_rule", "exclude")),
+        "min_gene_covered_fraction": float(block.get("min_gene_covered_fraction", 0.0)),
+    }
+    if p["block_rule"] not in BLOCK_RULES:
+        raise ValueError(
+            f"analysis.gene_de_novo.block_rule must be one of {BLOCK_RULES}, "
+            f"got {p['block_rule']!r}"
+        )
+    if not 0.0 <= p["min_gene_covered_fraction"] <= 1.0:
+        raise ValueError(
+            f"analysis.gene_de_novo.min_gene_covered_fraction must be within [0, 1], "
+            f"got {p['min_gene_covered_fraction']}"
+        )
+    if p["min_determined_carriers"] < 1:
+        raise ValueError("analysis.gene_de_novo.min_determined_carriers must be >= 1")
+    return p
+
+
+def gene_de_novo_cli_args():
+    """The gene-de-novo rule's knob flags built from ``gene_de_novo_params``, once.
+
+    Example: defaults -> ``"--baseline_scope cohort --cluster_window_bp 1000
+    --max_de_novo_neighbours 0 --strain_gate carrier --min_determined_carriers 1
+    --block_rule exclude --min_gene_covered_fraction 0.0"``.
+    """
+    p = gene_de_novo_params()
+    return (
+        f"--baseline_scope {p['baseline_scope']} "
+        f"--cluster_window_bp {p['cluster_window_bp']} "
+        f"--max_de_novo_neighbours {p['max_de_novo_neighbours']} "
+        f"--strain_gate {p['strain_gate']} "
+        f"--min_determined_carriers {p['min_determined_carriers']} "
+        f"--block_rule {p['block_rule']} "
+        f"--min_gene_covered_fraction {p['min_gene_covered_fraction']}"
+    )
+
+
+# Evaluated once at parse time, only when the feature is on (same guard as
+# DE_NOVO_RULE_PARAMS: a config without use_gene_de_novo must never trip the
+# gate-vs-turnover check).
+if config.get("analysis", {}).get("use_gene_de_novo", False):
+    # A permuted (null) run switches strain turnover off (label-blind, see
+    # switch_off_label_blind_extras), so the carrier gate has nothing to read;
+    # the shared check inside gene_de_novo_params would then say "set
+    # use_strain_turnover: true", which a null run cannot do, hence this check
+    # FIRST, on the config's own gate word (carrier when absent), with the
+    # right advice.
+    _gate_word = str(
+        (config["analysis"].get("baseline_presence", {}) or {}).get("strain_gate", "carrier")
+    )
+    if IS_PERMUTED_RUN and _gate_word == "carrier":
+        raise ValueError(
+            "analysis.use_gene_de_novo in a permuted run: strain turnover is off in "
+            "null runs, so analysis.baseline_presence.strain_gate carrier cannot be "
+            "used; set strain_gate: none or use_gene_de_novo: false"
+        )
+    GENE_DE_NOVO_PARAMS = gene_de_novo_params()
+    GENE_DE_NOVO_ARGS = gene_de_novo_cli_args()
+else:
+    GENE_DE_NOVO_PARAMS = None
+    GENE_DE_NOVO_ARGS = ""
+
+
+def get_gene_de_novo_tests_path(timepoints="{timepoints}", groups="{groups}"):
+    """The one tests table of a comparison: gene_de_novo/{comparison}/gene_de_novo_tests_{comparison}.tsv."""
+    return os.path.join(
+        OUTDIR,
+        "gene_de_novo",
+        f"{timepoints}-{groups}",
+        f"gene_de_novo_tests_{timepoints}-{groups}.tsv",
+    )
 
 
 def get_strain_turnover_output_path(mag_wildcard="{mag}"):

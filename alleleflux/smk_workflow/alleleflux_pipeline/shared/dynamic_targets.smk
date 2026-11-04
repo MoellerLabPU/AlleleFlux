@@ -1277,3 +1277,27 @@ def generate_baseline_presence_targets(tp, gr):
         return []
     stem = get_baseline_presence_stem(timepoints=tp, groups=gr)
     return [f"{stem}.tsv.gz", f"{stem}_summary.tsv", f"{stem}_rising.tsv"]
+
+
+def generate_gene_de_novo_targets(tp, gr):
+    """The gene de novo tests table of one comparison, when the feature is on.
+
+    Longitudinal only (the parse-time check already refuses the flag on single
+    data) and only where at least one MAG passed QC for the comparison: the
+    rule reads every mean-change table of the comparison, so it needs the
+    same QC-eligible universe as generate_allele_analysis_targets.  Off under
+    allele_analysis_only, like every other downstream analysis (user
+    decision 2026-11-04).
+
+    Example: use_gene_de_novo True, pre_post x fat_control with 80 eligible
+    MAGs -> [".../gene_de_novo/pre_post-fat_control/gene_de_novo_tests_pre_post-fat_control.tsv"].
+    """
+    if not config["analysis"].get("use_gene_de_novo", False):
+        return []
+    if config["analysis"].get("allele_analysis_only", False):
+        return []
+    if DATA_TYPE != "longitudinal":
+        return []
+    if not _get_mags_by_eligibility(tp, gr, eligibility_type="all"):
+        return []
+    return [get_gene_de_novo_tests_path(timepoints=tp, groups=gr)]

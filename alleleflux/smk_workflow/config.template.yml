@@ -117,6 +117,21 @@ analysis:
     min_determined_carriers: 3     # carrier gate: carriers with a per-mouse verdict needed before their strain is
                                    # called; fewer -> strain_undetermined (not de novo)
                                    # depth gate / presence rule reuse pairwise_ani.min_cov, min_freq, fdr
+  use_gene_de_novo: False          # Gene-level de novo accumulation (alleleflux-gene-de-novo): which genes collect
+                                   # new alleles faster than their genome (per group) or than the other group,
+                                   # with the cage as the replicate.  One job per comparison, after the
+                                   # allele-frequency step; longitudinal only.  Reuses baseline_presence's
+                                   # baseline_scope, cluster_window_bp, max_de_novo_neighbours and strain_gate
+                                   # (carrier or none only: a cage has no group vote) and quality_control.
+                                   # min_sample_num as the cages-per-group floor; BH per statistics.fdr_group_by_mag_id
+  gene_de_novo:
+    block_rule: "exclude"          # exclude = a block of neighbouring de novo alleles in one cage is one imported
+                                   # chunk and is not counted; once = every block row counts as one event
+    min_gene_covered_fraction: 0.0 # a cage enters a gene only when at least this fraction of it is readable in
+                                   # that cage (readable = >= min_cov reads at both timepoints in a paired mouse);
+                                   # 0.0 = any readable base; the fraction is reported either way
+    min_determined_carriers: 1     # carrier gate floor for THIS analysis: one carrier mouse with a strain-turnover
+                                   # verdict decides (fewer -> strain_undetermined, not counted)
   figures:                         # Score heatmaps + boxplots per comparison and test family, and one HTML run report
     enabled: True                  # False = no figures, no report
     families: []                   # [] = every family with a score table; else a subset of
@@ -327,6 +342,11 @@ resources:
 #   baseline_presence:             # Rule: baseline_presence (per comparison; loads every sample's profile
 #                                  # once per MAG with significant sites; measured: one pre_end comparison of
 #                                  # 57 MAGs x 60 samples took 23 min on 8 threads, 6.4 GB)
+#     threads_per_job: 8
+#     mem_per_job: "16G"
+#     time: "04:00:00"
+#   gene_de_novo:                  # Rule: gene_de_novo (per comparison; one worker per MAG streams the paired
+#                                  # samples' cache rows once and reads the candidate sites for every sample)
 #     threads_per_job: 8
 #     mem_per_job: "16G"
 #     time: "04:00:00"
