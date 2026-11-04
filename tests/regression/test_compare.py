@@ -187,6 +187,34 @@ def test_nondeterministic_diag_column_value_is_ignored(tmp_path):
     compare_tables(a_path, g_path)  # must not raise
 
 
+def test_absolute_file_path_column_is_compared_on_presence_only(tmp_path):
+    """The QC tables record each profile's ABSOLUTE path (``file_path``), which
+    differs between checkouts of the same commit (the dev tree, a frozen clone,
+    CI) while every number beside it is identical.  Found 2026-11-04 when the
+    regression was run from the cohort clone against a golden captured in the
+    dev tree: 24 rows "mismatched" on that one column.  Like the per-MAG sample
+    sheets (excluded outright), the path is an input in disguise: present, not
+    compared on value."""
+    g = pd.DataFrame(
+        {
+            "sample_id": ["m1", "m2"],
+            "MAG_ID": ["MAG_001", "MAG_001"],
+            "file_path": ["/tree/a/profiles/m1.tsv.gz", "/tree/a/profiles/m2.tsv.gz"],
+            "breadth": [0.97, 0.99],
+        }
+    )
+    a = g.copy()
+    a["file_path"] = ["/tree/b/profiles/m1.tsv.gz", "/tree/b/profiles/m2.tsv.gz"]
+    a_path, g_path = tmp_path / "a.tsv", tmp_path / "g.tsv"
+    _write_tsv(a_path, a)
+    _write_tsv(g_path, g)
+    compare_tables(a_path, g_path)  # must not raise
+    a["breadth"] = [0.97, 0.98]  # a real number beside the path still fails
+    _write_tsv(a_path, a)
+    with pytest.raises(AssertionError):
+        compare_tables(a_path, g_path)
+
+
 def test_real_value_diff_beside_ignored_diag_still_fails(tmp_path):
     """Skipping diagnostic columns must not blind the comparator to the science.
 

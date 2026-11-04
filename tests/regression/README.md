@@ -70,7 +70,9 @@ Skipped (`FULL_EXCLUDE_SUBSTRINGS`):
 
 Skipped on value only (`IGNORE_VALUE_SUBSTRINGS`): the LMM convergence
 diagnostics (`*_warnings`, `*_converged_LMM`), whose values vary run to run
-while the fitted statistics beside them do not.  The columns must still exist.
+while the fitted statistics beside them do not, and the QC tables' `file_path`
+(each profile's absolute path, which differs between checkouts of the same
+commit).  The columns must still exist.
 
 Everything else is compared: tables (`.tsv`, `.tsv.gz`, `.parquet`) row by
 row after sorting both sides by their identity columns as plain strings, JSON

@@ -28,9 +28,15 @@ from __future__ import annotations
 # (the comparator's schema gate catches a dropped/renamed column); only their
 # *values* are skipped.  ``"_warnings"`` also matches ``"_n_warnings"`` as a
 # substring, so one token covers both the warning text and the count.
+# ``file_path`` is a different kind of non-determinism: the QC tables record
+# each profile's ABSOLUTE path, which differs between checkouts of the same
+# commit (dev tree, frozen clone, CI) while every number beside it is the same.
+# The column must still exist; its value is an input in disguise, like the
+# per-MAG sample sheets excluded below.
 IGNORE_VALUE_SUBSTRINGS = (
     "_warnings",  # {NUC}_warnings (text) and {NUC}_n_warnings (count)
     "_converged_LMM",  # per-fit convergence flag
+    "file_path",  # absolute profile path in the QC tables
 )
 
 

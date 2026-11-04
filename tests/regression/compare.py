@@ -51,7 +51,8 @@ def _is_ignored_value_column(col: str) -> bool:
 
     Matches any column whose name contains a token in
     ``IGNORE_VALUE_SUBSTRINGS`` (defined in _scope.py — the LMM
-    convergence-warning and converged-flag columns).  Such columns must still
+    convergence-warning and converged-flag columns, and the QC tables'
+    absolute ``file_path``).  Such columns must still
     EXIST in both files — the schema gate enforces that — but their cell values
     are not compared, because the statsmodels optimizer produces a run-dependent
     warning count / converged flag on near-degenerate fits while the p-value
