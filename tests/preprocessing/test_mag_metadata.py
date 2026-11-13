@@ -385,5 +385,137 @@ class TestMagMetadataCLI(unittest.TestCase):
         self.assertEqual(list(a["sample_id"]), ["s1", "s2", "s3", "s4"])
 
 
+class TestPerTimepointMetadata(unittest.TestCase):
+    """One timepoint per call, and an explicit file for EVERY genome of the run.
+
+    The workflow runs the metadata step once per timepoint (QC and the
+    allele-frequency caches are per timepoint).  Two contracts follow:
+
+    * longitudinal data accept ONE timepoint (the old rule was exactly two);
+    * a genome that has a profile somewhere in the run but no sample at this
+      timepoint still gets a ``{mag}_metadata.tsv``, header only.  "Looked,
+      nothing here" is a file with no rows; a missing file means a step failed.
+
+    Layout used below: two genomes; MAG_A is profiled in every sample, MAG_B
+    only in the two ``pre`` samples, so at ``end`` it has no sample at all.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.root = os.path.join(self.tmp, "profiles")
+        self.out = os.path.join(self.tmp, "inputMetadata")
+        self.meta = os.path.join(self.tmp, "metadata.tsv")
+        _profiles(self.root, ["s1", "s3"], mags=("MAG_A", "MAG_B"))  # the pre samples
+        _profiles(self.root, ["s2", "s4"], mags=("MAG_A",))  # the end samples
+        _sheet(
+            [
+                _row("s1", "m1", "A", "pre", replicate="r1"),
+                _row("s2", "m1", "A", "end", replicate="r1"),
+                _row("s3", "m2", "B", "pre", replicate="r2"),
+                _row("s4", "m2", "B", "end", replicate="r2"),
+                # In the sheet at a third timepoint, but never profiled.
+                _row("s5", "m3", "A", "mid", replicate="r3"),
+            ],
+            self.meta,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _run(self, *timepoints, data_type="longitudinal"):
+        cmd = [
+            "alleleflux-metadata",
+            "--rootDir",
+            self.root,
+            "--metadata",
+            self.meta,
+            "--outDir",
+            self.out,
+            "--groups",
+            "A",
+            "B",
+            "--data_type",
+            data_type,
+        ]
+        if timepoints:
+            cmd += ["--timepoints", *timepoints]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def _read(self, mag):
+        return pd.read_csv(
+            os.path.join(self.out, f"{mag}_metadata.tsv"), sep="\t", dtype=str
+        )
+
+    def test_longitudinal_accepts_one_timepoint_and_writes_the_time_column(self):
+        done = self._run("pre")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        a = self._read("MAG_A")
+        # Only the pre samples, and the time column is there for QC to read.
+        self.assertEqual(list(a["sample_id"]), ["s1", "s3"])
+        self.assertEqual(list(a["time"]), ["pre", "pre"])
+
+    def test_longitudinal_without_timepoints_is_refused(self):
+        done = self._run()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("--timepoints", done.stderr)
+        self.assertFalse(os.path.isdir(self.out))
+
+    def test_genome_with_no_sample_at_the_timepoint_gets_a_header_only_file(self):
+        done = self._run("end")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # MAG_A has its two end samples; MAG_B has none there but still has a file.
+        self.assertEqual(list(self._read("MAG_A")["sample_id"]), ["s2", "s4"])
+        b = self._read("MAG_B")
+        self.assertEqual(len(b), 0)
+        self.assertEqual(
+            list(b.columns),
+            [
+                "sample_id",
+                "subjectID",
+                "time",
+                "group",
+                "replicate",
+                "file_path",
+                "bam_path",
+            ],
+        )
+        # The index lists samples only, so the empty genome adds no row to it.
+        idx = pd.read_csv(
+            os.path.join(self.out, "summary_mag_index.tsv"), sep="\t", dtype=str
+        )
+        self.assertEqual(set(idx["mag_id"]), {"MAG_A"})
+
+    def test_merge_metadata_keeps_every_discovered_genome(self):
+        merged = merge_metadata(
+            find_mag_files(self.root),
+            self.meta,
+            timepoints=["end"],
+            groups=["A", "B"],
+            data_type="longitudinal",
+        )
+        self.assertEqual(sorted(merged), ["MAG_A", "MAG_B"])
+        self.assertEqual(sorted(s["sample_id"] for s in merged["MAG_A"]), ["s2", "s4"])
+        self.assertEqual(merged["MAG_B"], [])
+
+    def test_timepoint_with_no_profiled_sample_at_all_is_an_error(self):
+        # "mid" is in the sheet (s5) but nothing was profiled there: every file
+        # would be header only, which can only mean the profiles are missing.
+        done = self._run("mid")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("mid", done.stderr)
+        self.assertIn("no profiled sample", done.stderr)
+        self.assertFalse(os.path.isdir(self.out))
+
+    def test_header_only_file_in_single_mode_has_no_time_column(self):
+        write_output_files({"MAG_B": []}, self.out, "single")
+        b = self._read("MAG_B")
+        self.assertEqual(len(b), 0)
+        self.assertNotIn("time", b.columns)
+        self.assertEqual(
+            list(b.columns),
+            ["sample_id", "subjectID", "group", "replicate", "file_path", "bam_path"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -103,7 +103,12 @@ def merge_metadata(
         data_type (str): Type of analysis to perform, either 'single' or 'longitudinal'.
 
     Returns:
-        dict: The updated mag_dict with metadata fields added to each sample information dictionary.
+        dict: One key per discovered MAG.  Each value lists the MAG's samples that
+              passed the timepoint/group filter, with the metadata fields added;
+              the list is EMPTY for a MAG with no such sample (it is kept so the
+              writer can give it a header-only file).  Example: MAG_B is profiled
+              in the "pre" samples only; a call for timepoint "end" returns
+              ``{"MAG_A": [s2, s4], "MAG_B": []}``.
     """
     # --- 1. Load and Validate Metadata Structure ---
     # Every column is read as TEXT, exactly as written.  Letting pandas sniff
@@ -247,7 +252,15 @@ def merge_metadata(
     # --- 5. Merge and Report ---
     # Convert the filtered DataFrame to a dictionary for fast lookups, using sample_id as the key.
     metadata_dict = metadata_df.set_index("sample_id").to_dict(orient="index")
-    filtered_mag_dict = defaultdict(list)
+    # EVERY discovered MAG keeps its key, with an empty list when none of its
+    # profiled samples survives the timepoint/group filter.  The step runs once
+    # per timepoint, and a MAG profiled at other timepoints only must still get
+    # a (header-only) file here: downstream, "looked, nothing here" is a file
+    # with no rows, and a missing file means a step failed.  Dropping the key,
+    # as this function used to, made the two indistinguishable.
+    # Example: MAG_B has profiles in the two "pre" samples only; a call for
+    # timepoint "end" returns {"MAG_A": [s2, s4], "MAG_B": []}.
+    filtered_mag_dict = {mag_id: [] for mag_id in mag_dict}
 
     # Iterate through each MAG and its associated sample files.
     for mag_id, sample_info_list in mag_dict.items():
@@ -260,7 +273,7 @@ def merge_metadata(
                 # and add it to our final dictionary.
                 filtered_mag_dict[mag_id].append(sample_info)
 
-    # Return the final dictionary containing only the MAGs with valid, merged metadata.
+    # Every discovered MAG, each with the samples that passed the filter (maybe none).
     return filtered_mag_dict
 
 
@@ -274,11 +287,22 @@ def write_output_files(
     a TSV file for each MAG ID. Each TSV file contains sample information
     including sample ID, subjectID, replicate, group, and file path.
 
+    A MAG whose list is empty (no sample of it at the requested timepoint and
+    groups) still gets its file, with the header and no rows: every MAG of the
+    run has a file in every timepoint's folder, so a missing file always means
+    a failed step, never "no sample".
+
+    Example (longitudinal): ``{"MAG_A": [s2, s4], "MAG_B": []}`` writes
+    ``MAG_A_metadata.tsv`` with two rows and ``MAG_B_metadata.tsv`` with only
+    the header ``sample_id, subjectID, time, group, replicate, file_path,
+    bam_path``.
+
     Parameters:
     mag_dict (dict): A dictionary where keys are MAG IDs and values are lists
-                     of dictionaries containing sample information. Each sample
-                     information dictionary should have the keys "sample_id",
-                     "subjectID", "group", "replicate" and "file_path".
+                     of dictionaries containing sample information (possibly
+                     empty). Each sample information dictionary should have the
+                     keys "sample_id", "subjectID", "group", "replicate" and
+                     "file_path".
     output_dir (str): The directory where the output files will be written.
     data_type (str): Type of analysis to perform, either 'single' or 'longitudinal'.
 
@@ -297,8 +321,19 @@ def write_output_files(
         sort_keys.append("time")
 
     for mag_id, sample_info_list in mag_dict.items():
+        output_file_path = output_dir / f"{mag_id}_metadata.tsv"
         if not sample_info_list:
-            logger.info(f"No samples left for MAG {mag_id} after filtering. Skipping.")
+            # No sample of this MAG at the requested timepoint(s)/groups: write
+            # the header alone.  The QC step turns it into a header-only QC
+            # table and the cache step into a zero-row cache, so every later
+            # reader finds a file that says "no sample" instead of no file.
+            pd.DataFrame(columns=columns).to_csv(
+                output_file_path, sep="\t", index=False
+            )
+            logger.info(
+                f"No samples left for MAG {mag_id} after filtering: "
+                f"header-only file written: {output_file_path}"
+            )
             continue
 
         output_df = pd.DataFrame(sample_info_list)
@@ -312,7 +347,6 @@ def write_output_files(
         # Sort for deterministic output
         output_df.sort_values(by=sort_keys, inplace=True)
 
-        output_file_path = output_dir / f"{mag_id}_metadata.tsv"
         output_df.to_csv(
             output_file_path,
             sep="\t",
@@ -391,7 +425,8 @@ def main():
     parser.add_argument(
         "--timepoints",
         nargs="*",
-        help="Timepoints to include. Required for longitudinal data (exactly 2).\n"
+        help="Timepoints to include. Required for longitudinal data (one or more;\n"
+        "the workflow passes exactly one, so each timepoint gets its own folder).\n"
         "Optional for single data (at most 1).",
     )
 
@@ -420,12 +455,15 @@ def main():
     )
     args = parser.parse_args()
 
-    # Validate arguments based on data type
-    if args.data_type == "longitudinal" and (
-        not args.timepoints or len(args.timepoints) != 2
-    ):
+    # Validate arguments based on data type.  Longitudinal data need at least
+    # one timepoint: the workflow calls this step once PER timepoint (QC and the
+    # allele-frequency caches are per timepoint), so the old "exactly two" rule
+    # is gone; several timepoints in one call are still accepted and filtered
+    # together.
+    if args.data_type == "longitudinal" and not args.timepoints:
         raise ValueError(
-            "--timepoints is required for longitudinal data type and must be exactly two"
+            "--timepoints is required for longitudinal data type (one or more "
+            "timepoint labels; the workflow passes exactly one per call)"
         )
 
     if args.data_type == "single" and args.timepoints:
@@ -442,11 +480,18 @@ def main():
     filtered_mag_dict = merge_metadata(
         mag_dict, args.metadata, args.timepoints, args.groups, args.data_type
     )
-    if not filtered_mag_dict:
-        logger.warning(
-            "No MAGs remained after merging with metadata. No output files will be written."
+    # merge_metadata keeps every discovered MAG, so "nothing left" now shows as
+    # every list being empty.  One MAG without a sample here is normal (it gets
+    # a header-only file); NO profiled sample at all for the requested
+    # timepoint(s) and groups can only mean the profiles are missing or the
+    # request is wrong, and writing a folder of header-only files would let the
+    # run carry on with nothing.  Stop, naming what was asked for.
+    if not any(filtered_mag_dict.values()):
+        raise ValueError(
+            f"no profiled sample for timepoint(s) {args.timepoints} in group(s) "
+            f"{args.groups}: every MAG's metadata file would be empty.  Check that "
+            f"the samples of this timepoint were profiled under {args.rootDir}"
         )
-        return
     write_output_files(filtered_mag_dict, args.outDir, args.data_type)
     write_summary_index(filtered_mag_dict, args.outDir)
 
