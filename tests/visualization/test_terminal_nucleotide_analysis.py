@@ -21,7 +21,6 @@ import pytest
 
 from alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis import (
     NUCLEOTIDES,
-    find_profile_files,
     get_terminal_samples,
     perform_majority_voting,
     process_single_mag,
@@ -186,21 +185,40 @@ class TestTerminalNucleotideAnalysis(unittest.TestCase):
             },
         }
 
-        # Create directory structure and files
+        # The cache is the single per-site source after QC: one file per (MAG, timepoint)
+        self.cache_dir = Path(self.temp_dir) / "allele_freq_cache"
         for sample_id, mag_data in sample_data.items():
-            sample_dir = self.profile_dir / sample_id
-            sample_dir.mkdir(exist_ok=True)
-
             for mag_id, positions in mag_data.items():
-                # Create regular TSV file
-                tsv_file = sample_dir / f"{sample_id}_{mag_id}_profiled.tsv"
-                df = pd.DataFrame(positions)
-                df.to_csv(tsv_file, sep="\t", index=False)
+                self._write_cache_rows(
+                    sample_id,
+                    mag_id,
+                    pd.DataFrame(positions),
+                    sample_id.rsplit("_", 1)[1],
+                )
 
-                # Create compressed version as well
-                gz_file = sample_dir / f"{sample_id}_{mag_id}_profiled.tsv.gz"
-                with gzip.open(gz_file, "wt") as f:
-                    df.to_csv(f, sep="\t", index=False)
+    def _write_cache_rows(self, sample_id, mag_id, data, timepoint):
+        """Append one sample's rows (contig, position, total_coverage, A, C, G, T) to a cache file."""
+        from alleleflux.scripts.utilities.cache_io import cache_path
+
+        df = pd.DataFrame(data)
+        df["gene_id"] = "g"
+        df["sample_id"] = sample_id
+        df["group"] = "x"
+        df["subjectID"] = sample_id
+        df["replicate"] = sample_id
+        for nuc in NUCLEOTIDES:
+            df[f"{nuc}_frequency"] = df[nuc] / df["total_coverage"]
+        df["time"] = timepoint
+        path = Path(cache_path(str(self.cache_dir), mag_id, timepoint))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            old = pd.read_parquet(path)
+            for col in ("sample_id", "group", "subjectID", "replicate"):
+                old[col] = old[col].astype(str)
+            df = pd.concat([old[old["sample_id"] != sample_id], df], ignore_index=True)
+        for col in ("sample_id", "group", "subjectID", "replicate"):
+            df[col] = df[col].astype("category")
+        df.to_parquet(path, index=False)
 
     def _create_significant_sites_data(self):
         """Create significant sites data for testing."""
@@ -225,87 +243,6 @@ class TestTerminalNucleotideAnalysis(unittest.TestCase):
         pd.DataFrame(significant_sites).to_csv(
             self.significant_sites_file, sep="\t", index=False
         )
-
-
-class TestFindProfileFiles(TestTerminalNucleotideAnalysis):
-    """Test the find_profile_files function."""
-
-    def test_find_profile_files_with_valid_data(self):
-        """Test finding profile files with valid sample and MAG data."""
-        sample_ids = ["sample_A_T1", "sample_B_T1"]
-        mag_ids = ["MAG001", "MAG002"]
-
-        result = find_profile_files(self.profile_dir, sample_ids, mag_ids)
-
-        # Should find files for both samples
-        self.assertEqual(len(result), 2)
-        self.assertIn("sample_A_T1", result)
-        self.assertIn("sample_B_T1", result)
-
-        # Each sample should have files for both MAGs (may have both .tsv and .tsv.gz formats)
-        self.assertEqual(
-            len(result["sample_A_T1"]), 4
-        )  # MAG001(.tsv, .tsv.gz) and MAG002(.tsv, .tsv.gz)
-        self.assertEqual(
-            len(result["sample_B_T1"]), 4
-        )  # MAG001(.tsv, .tsv.gz) and MAG002(.tsv, .tsv.gz)
-
-        # Check that files exist
-        for sample_files in result.values():
-            for file_path in sample_files:
-                self.assertTrue(Path(file_path).exists())
-
-    def test_find_profile_files_with_nonexistent_directory(self):
-        """Test handling of non-existent profile directory."""
-        nonexistent_dir = Path(self.temp_dir) / "nonexistent"
-
-        with self.assertRaises(FileNotFoundError) as context:
-            find_profile_files(nonexistent_dir, ["sample_A_T1"], ["MAG001"])
-
-        self.assertIn("not found", str(context.exception))
-
-    def test_find_profile_files_with_empty_sample_list(self):
-        """Test with empty sample list."""
-        result = find_profile_files(self.profile_dir, [], ["MAG001"])
-
-        # Should return empty dict
-        self.assertEqual(len(result), 0)
-
-    def test_find_profile_files_with_nonexistent_samples(self):
-        """Test with sample IDs that don't exist."""
-        sample_ids = ["nonexistent_sample"]
-        mag_ids = ["MAG001"]
-
-        result = find_profile_files(self.profile_dir, sample_ids, mag_ids)
-
-        # Should return empty dict
-        self.assertEqual(len(result), 0)
-
-    def test_find_profile_files_with_nonexistent_mags(self):
-        """Test with MAG IDs that don't exist."""
-        sample_ids = ["sample_A_T1"]
-        mag_ids = ["nonexistent_MAG"]
-
-        result = find_profile_files(self.profile_dir, sample_ids, mag_ids)
-
-        # Should return empty dict for that sample
-        self.assertEqual(len(result), 0)
-
-    def test_find_profile_files_with_compressed_files(self):
-        """Test that function finds both regular and compressed files."""
-        sample_ids = ["sample_A_T1"]
-        mag_ids = ["MAG001"]
-
-        result = find_profile_files(self.profile_dir, sample_ids, mag_ids)
-
-        # Should find both .tsv and .tsv.gz files
-        sample_files = result["sample_A_T1"]
-        self.assertEqual(len(sample_files), 2)  # One for .tsv, one for .tsv.gz
-
-        # Check file extensions - check for .gz instead of .tsv.gz
-        extensions = [Path(f).suffix for f in sample_files]
-        self.assertIn(".tsv", extensions)
-        self.assertIn(".gz", extensions)
 
 
 class TestGetTerminalSamples(TestTerminalNucleotideAnalysis):
@@ -440,7 +377,9 @@ class TestPerformMajorityVoting(TestTerminalNucleotideAnalysis):
 class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
     """Test worker wrapper and MAG processing functions."""
 
-    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
+    @patch(
+        "alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger"
+    )
     def test_process_single_mag_basic(self, mock_logger):
         """Test basic MAG processing functionality."""
         # Create test data
@@ -454,25 +393,19 @@ class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
             }
         )
 
-        profile_files = {
-            "sample_A_T1": [
-                str(
-                    self.profile_dir / "sample_A_T1" / "sample_A_T1_MAG001_profiled.tsv"
-                )
-            ],
-            "sample_B_T1": [
-                str(
-                    self.profile_dir / "sample_B_T1" / "sample_B_T1_MAG001_profiled.tsv"
-                )
-            ],
-        }
         sample_ids = ["sample_A_T1", "sample_B_T1"]
         p_value_column = "q_value"
         output_dir = str(self.output_dir)
 
         # Process the MAG
         result = process_single_mag(
-            mag_id, mag_sites, profile_files, sample_ids, p_value_column, output_dir
+            mag_id,
+            mag_sites,
+            str(self.cache_dir),
+            sample_ids,
+            "T1",
+            p_value_column,
+            output_dir,
         )
 
         # Verify result structure
@@ -502,8 +435,10 @@ class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
         for nuc in majority_counts.keys():
             self.assertIn(nuc, NUCLEOTIDES)
 
-    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
-    def test_process_single_mag_with_missing_profile_files(self, mock_logger):
+    @patch(
+        "alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger"
+    )
+    def test_process_single_mag_with_sample_missing_from_cache(self, mock_logger):
         """Test MAG processing when some profile files are missing."""
         mag_id = "MAG001"
         mag_sites = pd.DataFrame(
@@ -516,43 +451,42 @@ class TestWorkerFunctions(TestTerminalNucleotideAnalysis):
         )
 
         # Profile files for non-existent sample - file doesn't exist
-        profile_files = {
-            "nonexistent_sample": [
-                str(
-                    self.profile_dir
-                    / "nonexistent_sample"
-                    / "nonexistent_sample_MAG001_profiled.tsv"
-                )
-            ]
-        }
         sample_ids = ["nonexistent_sample"]
         p_value_column = "q_value"
         output_dir = str(self.output_dir)
 
         # Process should raise FileNotFoundError when file doesn't exist
-        with self.assertRaises(FileNotFoundError):
-            result = process_single_mag(
-                mag_id, mag_sites, profile_files, sample_ids, p_value_column, output_dir
-            )
+        # a sample with no cache rows for the MAG did not pass QC: skipped, not an error
+        result = process_single_mag(
+            mag_id,
+            mag_sites,
+            str(self.cache_dir),
+            sample_ids,
+            "T1",
+            p_value_column,
+            output_dir,
+        )
+        self.assertEqual(result["samples_processed"], 0)
 
-    @patch("alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger")
+    @patch(
+        "alleleflux.scripts.visualization.accessory.terminal_nucleotide_analysis.logger"
+    )
     def test_process_single_mag_with_empty_sites(self, mock_logger):
         """Test MAG processing with empty sites DataFrame."""
         mag_id = "MAG001"
         mag_sites = pd.DataFrame()  # Empty DataFrame
-        profile_files = {
-            "sample_A_T1": [
-                str(
-                    self.profile_dir / "sample_A_T1" / "sample_A_T1_MAG001_profiled.tsv"
-                )
-            ]
-        }
         sample_ids = ["sample_A_T1"]
         p_value_column = "q_value"
         output_dir = str(self.output_dir)
 
         result = process_single_mag(
-            mag_id, mag_sites, profile_files, sample_ids, p_value_column, output_dir
+            mag_id,
+            mag_sites,
+            str(self.cache_dir),
+            sample_ids,
+            "T1",
+            p_value_column,
+            output_dir,
         )
 
         # Should handle empty sites gracefully
@@ -577,12 +511,6 @@ class TestIntegrationWorkflow(TestTerminalNucleotideAnalysis):
         self.assertEqual(terminal_samples[0], "sample_A_T1")
 
         # Step 2: Find profile files
-        mag_ids = ["MAG001", "MAG002"]
-        profile_files = find_profile_files(self.profile_dir, terminal_samples, mag_ids)
-        self.assertIn("sample_A_T1", profile_files)
-        self.assertEqual(
-            len(profile_files["sample_A_T1"]), 4
-        )  # Both MAGs (.tsv and .tsv.gz each)
 
         # Step 3: Test majority voting
         major_alleles = ["A", "A", "C"]  # A should win
@@ -600,17 +528,12 @@ class TestIntegrationWorkflow(TestTerminalNucleotideAnalysis):
         )
 
         # Filter profile files to use only .tsv files (not .tsv.gz) to avoid multiple file error
-        filtered_profile_files = {
-            sample: [
-                f for f in files if f.endswith(".tsv") and not f.endswith(".tsv.gz")
-            ]
-            for sample, files in profile_files.items()
-        }
 
         result = process_single_mag(
             mag_id="MAG001",
             mag_sites=mag_sites,
-            profile_files=filtered_profile_files,
+            cache_dir=str(self.cache_dir),
+            timepoint="T1",
             sample_ids=terminal_samples,
             p_value_column="q_value",
             output_dir=str(self.output_dir),
@@ -638,23 +561,11 @@ class TestIntegrationWorkflow(TestTerminalNucleotideAnalysis):
         # Mean frequencies: A=(10+12)/2=11, C=(20+8)/2=14 (C wins)
         # Majority voting: ["C", "A"] -> tie between C and A
 
-        profile_files = {
-            "sample_A_T1": [
-                str(
-                    self.profile_dir / "sample_A_T1" / "sample_A_T1_MAG001_profiled.tsv"
-                )
-            ],
-            "sample_B_T1": [
-                str(
-                    self.profile_dir / "sample_B_T1" / "sample_B_T1_MAG001_profiled.tsv"
-                )
-            ],
-        }
-
         result = process_single_mag(
             mag_id="MAG001",
             mag_sites=mag_sites,
-            profile_files=profile_files,
+            cache_dir=str(self.cache_dir),
+            timepoint="T1",
             sample_ids=["sample_A_T1", "sample_B_T1"],
             p_value_column="q_value",
             output_dir=str(self.output_dir),
@@ -692,22 +603,6 @@ class TestEdgeCases(TestTerminalNucleotideAnalysis):
         # Test with mixed valid and invalid
         result = perform_majority_voting(["A", "X", "A"])
         self.assertEqual(result, "A")  # A should still win
-
-    def test_find_profile_files_with_nested_directories(self):
-        """Test finding profile files with nested directory structure."""
-        # Create nested structure
-        nested_dir = self.profile_dir / "nested" / "deep"
-        nested_dir.mkdir(parents=True)
-
-        # Copy an existing file to nested location
-        sample_dir = self.profile_dir / "sample_A_T1"
-        original_file = sample_dir / "sample_A_T1_MAG001_profiled.tsv"
-        nested_file = nested_dir / "sample_A_T1_MAG001_profiled.tsv"
-        shutil.copy2(original_file, nested_file)
-
-        # Should still find files in the main structure
-        result = find_profile_files(self.profile_dir, ["sample_A_T1"], ["MAG001"])
-        self.assertIn("sample_A_T1", result)
 
     def test_get_terminal_samples_case_sensitivity(self):
         """Test case sensitivity in group and timepoint matching."""
@@ -762,28 +657,19 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
         }
 
         # Create test profile files
-        sample_1_dir = self.profile_dir / "sample_test_1"
-        sample_1_dir.mkdir()
-        sample_1_file = sample_1_dir / "sample_test_1_VALIDATION_MAG_profiled.tsv"
-        pd.DataFrame(profile_data_1).to_csv(sample_1_file, sep="\t", index=False)
+        self._write_cache_rows("sample_test_1", "VALIDATION_MAG", profile_data_1, "T1")
 
-        sample_2_dir = self.profile_dir / "sample_test_2"
-        sample_2_dir.mkdir()
-        sample_2_file = sample_2_dir / "sample_test_2_VALIDATION_MAG_profiled.tsv"
-        pd.DataFrame(profile_data_2).to_csv(sample_2_file, sep="\t", index=False)
+        self._write_cache_rows("sample_test_2", "VALIDATION_MAG", profile_data_2, "T1")
 
-        profile_files = {
-            "sample_test_1": [str(sample_1_file)],
-            "sample_test_2": [str(sample_2_file)],
-        }
         sample_ids = ["sample_test_1", "sample_test_2"]
 
         # Process the MAG
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -882,31 +768,22 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
             "T": [20],
         }
 
-        sample_1_dir = self.profile_dir / "coverage_sample_1"
-        sample_1_dir.mkdir()
-        sample_1_file = (
-            sample_1_dir / "coverage_sample_1_COVERAGE_TEST_MAG_profiled.tsv"
+        self._write_cache_rows(
+            "coverage_sample_1", "COVERAGE_TEST_MAG", profile_data_1, "T1"
         )
-        pd.DataFrame(profile_data_1).to_csv(sample_1_file, sep="\t", index=False)
 
-        sample_2_dir = self.profile_dir / "coverage_sample_2"
-        sample_2_dir.mkdir()
-        sample_2_file = (
-            sample_2_dir / "coverage_sample_2_COVERAGE_TEST_MAG_profiled.tsv"
+        self._write_cache_rows(
+            "coverage_sample_2", "COVERAGE_TEST_MAG", profile_data_2, "T1"
         )
-        pd.DataFrame(profile_data_2).to_csv(sample_2_file, sep="\t", index=False)
 
-        profile_files = {
-            "coverage_sample_1": [str(sample_1_file)],
-            "coverage_sample_2": [str(sample_2_file)],
-        }
         sample_ids = ["coverage_sample_1", "coverage_sample_2"]
 
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -966,38 +843,36 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
             "T": [25],
         }
 
-        sample_1_dir = self.profile_dir / "missing_sample_1"
-        sample_1_dir.mkdir()
-        sample_1_file = sample_1_dir / "missing_sample_1_MISSING_SITE_MAG_profiled.tsv"
-        pd.DataFrame(profile_data_1).to_csv(sample_1_file, sep="\t", index=False)
+        self._write_cache_rows(
+            "missing_sample_1", "MISSING_SITE_MAG", profile_data_1, "T1"
+        )
 
         # Sample 2: Create file but without the position
-        sample_2_dir = self.profile_dir / "missing_sample_2"
-        sample_2_dir.mkdir()
-        sample_2_file = sample_2_dir / "missing_sample_2_MISSING_SITE_MAG_profiled.tsv"
-        pd.DataFrame(
-            {
-                "contig": ["other_contig"],
-                "position": [100],
-                "total_coverage": [50],
-                "A": [30],
-                "C": [10],
-                "G": [5],
-                "T": [5],
-            }
-        ).to_csv(sample_2_file, sep="\t", index=False)
+        self._write_cache_rows(
+            "missing_sample_2",
+            "MISSING_SITE_MAG",
+            pd.DataFrame(
+                {
+                    "contig": ["other_contig"],
+                    "position": [100],
+                    "total_coverage": [50],
+                    "A": [30],
+                    "C": [10],
+                    "G": [5],
+                    "T": [5],
+                }
+            ),
+            "T1",
+        )
 
-        profile_files = {
-            "missing_sample_1": [str(sample_1_file)],
-            "missing_sample_2": [str(sample_2_file)],
-        }
         sample_ids = ["missing_sample_1", "missing_sample_2"]
 
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -1053,20 +928,19 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
             "T": [0],
         }
 
-        sample_1_dir = self.profile_dir / "zero_sample_1"
-        sample_1_dir.mkdir()
-        sample_1_file = sample_1_dir / "zero_sample_1_ZERO_COVERAGE_MAG_profiled.tsv"
-        pd.DataFrame(profile_data_1).to_csv(sample_1_file, sep="\t", index=False)
+        self._write_cache_rows(
+            "zero_sample_1", "ZERO_COVERAGE_MAG", profile_data_1, "T1"
+        )
 
-        profile_files = {"zero_sample_1": [str(sample_1_file)]}
         sample_ids = ["zero_sample_1"]
 
         # Should handle zero coverage gracefully (filtered out)
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -1101,19 +975,17 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
             "T": [5],
         }
 
-        sample_dir = self.profile_dir / "complete_sample"
-        sample_dir.mkdir()
-        profile_file = sample_dir / "complete_sample_COMPLETENESS_MAG_profiled.tsv"
-        pd.DataFrame(profile_data).to_csv(profile_file, sep="\t", index=False)
-
-        profile_files = {"complete_sample": [str(profile_file)]}
+        self._write_cache_rows(
+            "complete_sample", "COMPLETENESS_MAG", profile_data, "T1"
+        )
         sample_ids = ["complete_sample"]
 
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -1198,19 +1070,15 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
             }
         )
 
-        sample_dir = self.profile_dir / "method1_sample"
-        sample_dir.mkdir()
-        profile_file = sample_dir / "method1_sample_METHOD1_TEST_MAG_profiled.tsv"
-        profile_data.to_csv(profile_file, sep="\t", index=False)
-
-        profile_files = {"method1_sample": [str(profile_file)]}
+        self._write_cache_rows("method1_sample", "METHOD1_TEST_MAG", profile_data, "T1")
         sample_ids = ["method1_sample"]
 
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -1266,9 +1134,6 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
                 sample_data_configs,
             )
         ):
-            sample_dir = self.profile_dir / sample_id
-            sample_dir.mkdir()
-            profile_file = sample_dir / f"{sample_id}_COMPARISON_MAG_profiled.tsv"
 
             # Create individual sample data
             sample_data = pd.DataFrame(
@@ -1282,38 +1147,16 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
                     "T": [0],
                 }
             )
-            sample_data.to_csv(profile_file, sep="\t", index=False)
+            self._write_cache_rows(sample_id, "COMPARISON_MAG", sample_data, "T1")
 
-        profile_files = {
-            "compare_sample_1": [
-                str(
-                    self.profile_dir
-                    / "compare_sample_1"
-                    / "compare_sample_1_COMPARISON_MAG_profiled.tsv"
-                )
-            ],
-            "compare_sample_2": [
-                str(
-                    self.profile_dir
-                    / "compare_sample_2"
-                    / "compare_sample_2_COMPARISON_MAG_profiled.tsv"
-                )
-            ],
-            "compare_sample_3": [
-                str(
-                    self.profile_dir
-                    / "compare_sample_3"
-                    / "compare_sample_3_COMPARISON_MAG_profiled.tsv"
-                )
-            ],
-        }
         sample_ids = ["compare_sample_1", "compare_sample_2", "compare_sample_3"]
 
         result = process_single_mag(
             mag_id,
             mag_sites,
-            profile_files,
+            str(self.cache_dir),
             sample_ids,
+            "T1",
             "q_value",
             str(self.output_dir),
         )
@@ -1347,46 +1190,48 @@ class TestProcessSingleMagValidation(TestTerminalNucleotideAnalysis):
         )
 
         # Update profile files with new data
-        sample_1_dir = self.profile_dir / "compare_sample_1"
-        profile_file_1 = sample_1_dir / "compare_sample_1_COMPARISON_MAG_profiled.tsv"
-        pd.DataFrame(
-            {
-                "contig": ["compare_contig2"],
-                "position": [6001],
-                "total_coverage": [100],
-                "A": [50],  # A=0.5, A is major
-                "C": [30],  # C=0.3
-                "G": [20],  # G=0.2
-                "T": [0],
-            }
-        ).to_csv(profile_file_1, sep="\t", index=False)
+        self._write_cache_rows(
+            "compare_sample_1",
+            "COMPARISON_MAG",
+            pd.DataFrame(
+                {
+                    "contig": ["compare_contig2"],
+                    "position": [6001],
+                    "total_coverage": [100],
+                    "A": [50],  # A=0.5, A is major
+                    "C": [30],  # C=0.3
+                    "G": [20],  # G=0.2
+                    "T": [0],
+                }
+            ),
+            "T1",
+        )
 
-        sample_2_dir = self.profile_dir / "compare_sample_2"
-        profile_file_2 = sample_2_dir / "compare_sample_2_COMPARISON_MAG_profiled.tsv"
-        pd.DataFrame(
-            {
-                "contig": ["compare_contig2"],
-                "position": [6001],
-                "total_coverage": [100],
-                "A": [30],  # A=0.3
-                "C": [50],  # C=0.5, C is major
-                "G": [20],  # G=0.2
-                "T": [0],
-            }
-        ).to_csv(profile_file_2, sep="\t", index=False)
+        self._write_cache_rows(
+            "compare_sample_2",
+            "COMPARISON_MAG",
+            pd.DataFrame(
+                {
+                    "contig": ["compare_contig2"],
+                    "position": [6001],
+                    "total_coverage": [100],
+                    "A": [30],  # A=0.3
+                    "C": [50],  # C=0.5, C is major
+                    "G": [20],  # G=0.2
+                    "T": [0],
+                }
+            ),
+            "T1",
+        )
 
-        # Update profile files to point to new data
-        profile_files_2 = {
-            "compare_sample_1": [str(profile_file_1)],
-            "compare_sample_2": [str(profile_file_2)],
-        }
         sample_ids_2 = ["compare_sample_1", "compare_sample_2"]
 
         result_2 = process_single_mag(
             "COMPARISON_MAG",
             mag_sites_2,
-            profile_files_2,
+            str(self.cache_dir),
             sample_ids_2,
+            "T1",
             "q_value",
             str(self.output_dir),
         )

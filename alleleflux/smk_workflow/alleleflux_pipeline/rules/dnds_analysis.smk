@@ -15,7 +15,7 @@ def get_significant_sites_df_path():
         OUTDIR,
         "p_value_summary",
         "{timepoints}-{groups}",
-        f"p_value_summary_{test_type_str}_{{timepoints}}.tsv"
+        f"p_value_summary_{test_type_str}_{{timepoints}}-{{groups}}.tsv"
     )
 
 rule dnds_from_timepoints:
@@ -27,28 +27,36 @@ rule dnds_from_timepoints:
     input:
         # P-value summary file for the specified test type
         significant_sites=get_significant_sites_df_path(),
-        # Profile directory containing all sample profiles
-        # Uses PROFILES_DIR which points to either existing profiles (if profiles_path
-        # is specified in config) or newly generated profiles in OUTDIR/profiles
-        profile_dir=PROFILES_DIR,
+        # The comparison's cache files (every QC-eligible MAG at both timepoints):
+        # the two samples' counts come from these; declared so a missing or stale
+        # cache re-runs the cache job rather than failing inside the command.
+        caches=lambda wildcards: allele_freq_cache_files_for_comparison(
+            wildcards.timepoints, wildcards.groups
+        ),
         # Prodigal gene predictions
         prodigal_fasta=config["input"]["prodigal_path"],
     output:
-        directory(
-            os.path.join(
-                OUTDIR,
-                "dnds_analysis",
-                "{timepoints}-{groups}",
-                "{subject_id}"
-            )
-        )
+        # Sentinel marker (see common.smk) — replaces directory() output so
+        # interrupted dN/dS jobs do not erase existing per-subject results.
+        sentinel=dnds_sentinel("{timepoints}", "{groups}", "{subject_id}"),
     params:
         p_value_column=config["dnds"]["p_value_column"],
         p_value_threshold=config["statistics"]["p_value_threshold"],  # Use from statistics section
         dn_ds_test_type=DN_DS_TEST_TYPE,
         log_level=config.get("log_level", "INFO"),
+        # The allele-frequency cache (QC-passing samples, site-filtered): the two
+        # samples' counts come from here, never from raw profiles.
+        cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
+        outdir=os.path.join(
+            OUTDIR,
+            "dnds_analysis",
+            "{timepoints}-{groups}",
+            "{subject_id}",
+        ),
+    retries: get_retries("dnds_from_timepoints")
     resources:
         time=get_time("dnds_from_timepoints"),
+        runtime=get_runtime("dnds_from_timepoints"),
         mem_mb=get_mem_mb("dnds_from_timepoints"),
     threads: get_threads("dnds_from_timepoints")
     run:
@@ -58,8 +66,10 @@ rule dnds_from_timepoints:
         import pandas as pd
         from snakemake.logging import logger
 
-        outdir = Path(str(output[0]))
-        
+        outdir = Path(params.outdir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        sentinel_path = Path(output.sentinel)
+
         valid_p_value_columns = ["min_p_value", "q_value"]
         if params.p_value_column not in valid_p_value_columns:
             raise ValueError(
@@ -113,11 +123,11 @@ rule dnds_from_timepoints:
 
 
         if not eligible_mags:
-            # If no MAGs are eligible, create an empty output directory and touch a sentinel file
-            outdir.mkdir(parents=True, exist_ok=True)
+            # No MAGs are eligible — record that fact for traceability and
+            # touch the sentinel so Snakemake considers the rule complete.
             (outdir / "no_eligible_mags").touch()
             logger.info(f"No eligible MAGs for {wildcards.timepoints}-{wildcards.groups}. Created empty directory.")
-            # Stop further execution of the rule
+            sentinel_path.touch()
             return
 
         mag_ids_str = " ".join(eligible_mags)
@@ -134,6 +144,8 @@ rule dnds_from_timepoints:
             raise ValueError(f"No sample pair found for subject {wildcards.subject_id}")
         
         ancestral_sample_id, derived_sample_id = subject_pair
+        # the comparison's two timepoint labels name the cache files
+        ancestral_timepoint, derived_timepoint = wildcards.timepoints.split("_")
         
         # Log which samples are ancestral and derived
         logger.info(
@@ -152,9 +164,11 @@ rule dnds_from_timepoints:
             {group_analyzed_flag} \\
             --ancestral_sample_id {ancestral_sample_id} \\
             --derived_sample_id {derived_sample_id} \\
-            --profile_dir {input.profile_dir} \\
+            --cache_dir {params.cache_dir} \\
+            --ancestral_timepoint {ancestral_timepoint} \\
+            --derived_timepoint {derived_timepoint} \\
             --prodigal_fasta {input.prodigal_fasta} \\
-            --outdir {output} \\
+            --outdir {outdir} \\
             --prefix {wildcards.subject_id} \\
             --cpus {threads} \\
             --log-level {params.log_level}
@@ -162,9 +176,13 @@ rule dnds_from_timepoints:
 
         # Bypass Snakemake's shell() logging which is causing TypeError
         logger.info(f"Executing command: {cmd}")
-        
+
         try:
             subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
         except subprocess.CalledProcessError as e:
             logger.error(f"Command failed with exit code {e.returncode}")
             raise e
+
+        # Touch the sentinel only after the subprocess succeeded so an
+        # interrupted job is correctly re-run on the next invocation.
+        sentinel_path.touch()

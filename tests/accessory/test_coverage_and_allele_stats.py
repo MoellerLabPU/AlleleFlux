@@ -9,6 +9,9 @@ from alleleflux.scripts.accessory.coverage_and_allele_stats import (
     compute_allele_frequencies,
     compute_grouped_statistics,
     compute_overall_statistics,
+    compute_stats,
+    process_metadata_file_worker,
+    read_mag_metadata,
 )
 
 
@@ -616,3 +619,72 @@ def test_comprehensive_workflow_with_zeros_and_grouping():
     assert "n_samples_group_A" in result_grouped.columns
     assert "n_present_group_A_time_1" in result_grouped.columns
     assert "n_samples_group_A_time_1" in result_grouped.columns
+
+
+# --- a genome with no sample at this timepoint --------------------------------
+#
+# The metadata step writes one {mag}_metadata.tsv per genome of the run in every
+# timepoint's folder: header-only when the genome has no sample there.  This
+# tool then has nothing to average for that genome.  It already has an answer
+# for "no sample left" (the QC filter can remove them all): a stats table with
+# the header and no rows.  A header-only metadata file gets the same answer.
+
+METADATA_HEADER = "sample_id\tsubjectID\ttime\tgroup\treplicate\tfile_path\tbam_path\n"
+
+# The nine columns every stats table starts with, in written order.
+BASE_COLUMNS = [
+    "contig",
+    "position",
+    "total_coverage",
+    "mean_coverage",
+    "std_coverage",
+    "mean_coverage_with_zeros",
+    "std_coverage_with_zeros",
+    "n_present",
+    "n_samples",
+]
+
+
+def test_header_only_metadata_file_reads_as_zero_samples(tmp_path):
+    metadata = tmp_path / "MAG_B_metadata.tsv"
+    metadata.write_text(METADATA_HEADER)
+
+    meta = read_mag_metadata(metadata)
+
+    assert len(meta) == 0
+    assert {"sample_id", "file_path", "group", "time"} <= set(meta.columns)
+
+
+def test_header_only_metadata_file_gives_an_empty_stats_table(tmp_path):
+    metadata = tmp_path / "MAG_B_metadata.tsv"
+    metadata.write_text(METADATA_HEADER)
+
+    stats = compute_stats(metadata)
+
+    assert len(stats) == 0
+    assert list(stats.columns) == BASE_COLUMNS
+
+
+def test_header_only_metadata_file_writes_a_header_only_stats_file(tmp_path):
+    metadata = tmp_path / "MAG_B_metadata.tsv"
+    metadata.write_text(METADATA_HEADER)
+    out_dir = tmp_path / "stats"
+    out_dir.mkdir()
+
+    written = process_metadata_file_worker(str(metadata), str(out_dir))
+
+    # One file per genome, as for every other genome: a rule waiting for
+    # MAG_B_stats.tsv finds it.
+    assert written == str(out_dir / "MAG_B_stats.tsv")
+    lines = (out_dir / "MAG_B_stats.tsv").read_text().splitlines()
+    assert lines == ["\t".join(BASE_COLUMNS)]
+
+
+def test_metadata_file_missing_a_required_column_is_still_an_error(tmp_path):
+    # Guard: only "no rows" is tolerated.  A file without file_path is not a
+    # metadata table and must keep stopping the tool.
+    metadata = tmp_path / "MAG_B_metadata.tsv"
+    metadata.write_text("sample_id\tgroup\ttime\n")
+
+    with pytest.raises(ValueError, match="file_path"):
+        compute_stats(metadata)

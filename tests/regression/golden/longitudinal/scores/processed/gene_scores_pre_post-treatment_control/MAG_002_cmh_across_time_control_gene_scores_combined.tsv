@@ -1,0 +1,8 @@
+gene_id	total_sites_per_group_CMH	significant_sites_per_group_CMH	score_CMH (%)
+MAG_002.fa_contig1_gene1	225	1	0.4444444444444444
+MAG_002.fa_contig1_gene2	201	2	0.9950248756218906
+MAG_002.fa_contig1_gene3	258	3	1.1627906976744187
+MAG_002.fa_contig2_gene1	204	2	0.9803921568627451
+MAG_002.fa_contig2_gene2	267	1	0.37453183520599254
+MAG_002.fa_contig2_gene3	213	3	1.4084507042253522
+	764	5	0.6544502617801047

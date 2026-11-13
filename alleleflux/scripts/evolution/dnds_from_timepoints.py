@@ -41,7 +41,8 @@ Usage:
                                   --p_value_threshold 0.05 \
                                   --ancestral_sample_id pre_sample \
                                   --derived_sample_id post_sample \
-                                  --profile_dir /path/to/profiles \
+                                  --cache_dir /path/to/allele_freq_cache \
+                                  --ancestral_timepoint pre --derived_timepoint post \
                                   --prodigal_fasta genes.fasta \
                                   --outdir results/
 """
@@ -62,14 +63,21 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm import tqdm
 
+from alleleflux.scripts.utilities.cache_io import load_cache_sites
+
+# COMPLEMENT_MAP lives with the shared gene helpers now; it is re-exported from
+# this module's namespace so existing importers keep working.
+from alleleflux.scripts.utilities.genes import (  # noqa: F401 (re-export)
+    COMPLEMENT_MAP,
+    coding_index,
+    parse_prodigal_records,
+)
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 # Set up logger for this script
 logger = logging.getLogger(__name__)
 
 # --- Global Constants ---
-# Defines the complement for each DNA base. Used for reverse strand genes.
-COMPLEMENT_MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
 
 # NCBI genetic code table 11 (bacterial/archaeal) used throughout the script
 GENETIC_CODE_TABLE = CodonTable.unambiguous_dna_by_id[11]
@@ -801,14 +809,27 @@ def get_codon_from_site(position, gene_info, sequence):
         A tuple of (codon_string, pos_in_gene) or (None, None) if the position is invalid.
     """
     strand = gene_info["strand"]
-    # Calculate the 0-indexed position within the gene's sequence.
-    if strand == 1:
-        pos_in_gene = position - (gene_info["start"] - 1)
-    elif strand == -1:
-        pos_in_gene = (gene_info["end"] - 1) - position
-    else:
+    # The strand is checked up front so the warning text stays what it always
+    # was; coding_index would also reject it, but with a different message.
+    if strand not in (1, -1):
         logger.warning(
             f"Unknown strand '{strand}' for gene {gene_info['record'].id}. Cannot get codon."
+        )
+        return None, None
+    # Calculate the 0-indexed position within the gene's sequence through the
+    # shared helper (0-based ends, hence the -1 on Prodigal's 1-based ones).
+    # A position outside the header span raises there; this function's
+    # contract is (None, None) plus a warning, never an exception, so the
+    # error is turned into the same out-of-bounds warning as before.  (With
+    # a real Prodigal file the span equals the sequence length, so the two
+    # checks agree; the second one below still guards a shorter sequence.)
+    try:
+        pos_in_gene = coding_index(
+            position, gene_info["start"] - 1, gene_info["end"] - 1, strand
+        )
+    except ValueError:
+        logger.warning(
+            f"Contig position {position} for gene {gene_info['record'].id} is outside the gene span (gene len: {len(sequence)})."
         )
         return None, None
     # Validate that the calculated position is within the bounds of the sequence.
@@ -1702,6 +1723,47 @@ def write_output_files(
         )
 
 
+# ref_base is the reference genome's base at the position (the cache carries it
+# for exactly this script): the Prodigal-vs-reference sanity check and the
+# major-allele tie-breaker below read it.
+COUNT_COLUMNS = [
+    "contig",
+    "position",
+    "ref_base",
+    "gene_id",
+    "total_coverage",
+    "A",
+    "C",
+    "G",
+    "T",
+]
+
+
+def load_sample_counts(cache_dir, mag_id, timepoint, sample_id):
+    """One sample's per-position counts of one MAG, from the allele-frequency cache.
+
+    The cache is the single per-site source after QC: site-filtered, QC-passing
+    samples only.  Returns the columns the ancestral reconstruction uses
+    (``COUNT_COLUMNS``), sorted by contig and position, or None when the sample
+    has no rows in that MAG's cache (it did not pass QC for the MAG).
+
+    Example: ``load_sample_counts(cache, "MAG_A", "pre", "s1_pre")`` -> a frame
+    with one row per covered position of MAG_A in sample s1_pre at "pre".
+    """
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        [timepoint],
+        sample_ids=[sample_id],
+        columns=["ref_base", "gene_id", "total_coverage", "A", "C", "G", "T"],
+    )
+    if rows.empty:
+        return None
+    return (
+        rows[COUNT_COLUMNS].sort_values(["contig", "position"]).reset_index(drop=True)
+    )
+
+
 def process_mag(mag_id, args, prodigal_records):
     """Process a single MAG and write output files."""
     # logger.info(f"--- Processing MAG: {mag_id} ---")
@@ -1728,24 +1790,27 @@ def process_mag(mag_id, args, prodigal_records):
         #     write_output_files(None, None, mag_args, None, None, None, None)
         return
 
-    # 2. Load profile data for this MAG
-    ancestral_profile_path = (
-        mag_args.profile_dir
-        / f"{mag_args.ancestral_sample_id}/{mag_args.ancestral_sample_id}_{mag_id}_profiled.tsv.gz"
+    # 2. The two samples' counts, from the cache (QC-passing, site-filtered).
+    ancestral_profile_df = load_sample_counts(
+        mag_args.cache_dir,
+        mag_id,
+        mag_args.ancestral_timepoint,
+        mag_args.ancestral_sample_id,
     )
-    derived_profile_path = (
-        mag_args.profile_dir
-        / f"{mag_args.derived_sample_id}/{mag_args.derived_sample_id}_{mag_id}_profiled.tsv.gz"
+    derived_profile_df = load_sample_counts(
+        mag_args.cache_dir,
+        mag_id,
+        mag_args.derived_timepoint,
+        mag_args.derived_sample_id,
     )
-
-    if not ancestral_profile_path.exists() or not derived_profile_path.exists():
+    if ancestral_profile_df is None or derived_profile_df is None:
         logger.warning(
-            f"Profile file(s) for MAG {mag_id} not found at {ancestral_profile_path} or {derived_profile_path}. Skipping."
+            f"MAG {mag_id}: no cache rows for sample(s) "
+            f"{mag_args.ancestral_sample_id if ancestral_profile_df is None else ''} "
+            f"{mag_args.derived_sample_id if derived_profile_df is None else ''} "
+            f"(did not pass QC for this MAG). Skipping."
         )
         return
-
-    ancestral_profile_df = pd.read_csv(ancestral_profile_path, sep="\t")
-    derived_profile_df = pd.read_csv(derived_profile_path, sep="\t")
 
     # 3. Reconstruct Ancestral Sequences
     logger.info(
@@ -1897,10 +1962,20 @@ def main():
         help="The sample ID for the DERIVED timepoint for comparison.",
     )
     parser.add_argument(
-        "--profile_dir",
+        "--cache_dir",
         required=True,
         type=Path,
-        help="Directory containing the profile files from profile_mags.py.",
+        help="The run's allele_freq_cache/ directory (the single per-site source after QC).",
+    )
+    parser.add_argument(
+        "--ancestral_timepoint",
+        required=True,
+        help="Timepoint label of the ancestral sample (names its cache file).",
+    )
+    parser.add_argument(
+        "--derived_timepoint",
+        required=True,
+        help="Timepoint label of the derived sample (names its cache file).",
     )
     parser.add_argument(
         "--prodigal_fasta",
@@ -1936,21 +2011,14 @@ def main():
 
     # Load Prodigal records once for all MAGs
     logger.info("Loading gene annotation file...")
-    prodigal_raw = SeqIO.to_dict(SeqIO.parse(args.prodigal_fasta, "fasta"))
-    prodigal_records = {}
-    for rec in prodigal_raw.values():
-        header_parts = [p.strip() for p in rec.description.split("#")]
-        prodigal_records[rec.id] = {
-            "record": rec,
-            "start": int(header_parts[1]),
-            "end": int(header_parts[2]),
-            "strand": int(header_parts[3]),
-        }
+    # Shared reader: {gene_id: {"record", "start", "end", "strand"}} with
+    # Prodigal's 1-based inclusive ends kept as written.
+    prodigal_records = parse_prodigal_records(args.prodigal_fasta)
 
     # Determine number of CPUs to use, ensuring it doesn't exceed the number of MAGs
     num_cpus = min(args.cpus, len(args.mag_ids))
     logger.info(f"Using {num_cpus} CPUs to process {len(args.mag_ids)} MAGs")
-    
+
     # Log which samples are being used as ancestral and derived
     logger.info(
         f"Sample configuration for dN/dS analysis: "
