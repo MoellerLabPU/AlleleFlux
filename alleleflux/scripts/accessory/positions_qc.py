@@ -398,7 +398,14 @@ def process_mag(args):
     Returns
     -------
     tuple
-        (group_summary_df, group_time_summary_df, overall_summary_df)
+        (group_summary_df, group_time_summary_df, overall_summary_df).
+        ``(None, None, None)`` for a genome whose metadata file has no sample
+        row: nothing is measured and no ``{mag}_positions_QC.tsv`` is written.
+
+    Example: ``MAG_A_metadata.tsv`` lists samples s1 and s2 -> one table with
+    two rows and three summaries.  ``MAG_B_metadata.tsv`` is header-only (the
+    genome has no sample at this timepoint) -> a warning and
+    ``(None, None, None)``.
     """
     (
         mag_id,
@@ -421,10 +428,18 @@ def process_mag(args):
         metadata_file, mag_id, breadth_threshold, coverage_threshold, data_type
     )
 
+    # A metadata file with a header and no rows is a normal input: the metadata
+    # step writes one file per genome of the run in every timepoint's folder,
+    # header-only when the genome has no sample at that timepoint.  There is
+    # nothing to measure, so the genome is skipped and said so; main() stops if
+    # this is true of EVERY genome.  (A file that lacks a required column was
+    # already refused by load_mag_metadata_file above.)
     if not sample_files_with_mag_id:
-        raise ValueError(
-            f"No samples found in metadata file {metadata_file} for MAG {mag_id}"
+        logger.warning(
+            f"MAG {mag_id}: no sample in {metadata_file} (the genome has no "
+            f"sample at this timepoint); skipped, no positions QC table written"
         )
+        return None, None, None
 
     num_procs = min(cpus, len(sample_files_with_mag_id))
     logger.info(
@@ -618,6 +633,18 @@ def main():
             all_group_time.append(group_time_df)
         if overall_df is not None:
             all_overall.append(overall_df)
+
+    # One genome without a sample is normal; NO genome with a sample is not.
+    # Every genome that has at least one sample yields an overall summary row
+    # (aggregate_mag_stats falls back to all samples when none passes), so an
+    # empty list means every metadata file was header-only: nothing to report,
+    # and a silent exit would look like a finished run.
+    if not all_overall:
+        raise ValueError(
+            f"no sample in any of the {len(metadata_files)} metadata file(s) of "
+            f"{args.metadata_dir} whose genome is in {args.positions_file}: "
+            f"nothing to report"
+        )
 
     # Write combined summary files
     summaries = [

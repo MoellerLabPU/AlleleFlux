@@ -78,6 +78,23 @@ logger = logging.getLogger(__name__)
 # Constants
 ALLELES = ["A", "C", "G", "T"]
 
+# The columns every {mag}_stats.tsv starts with, in written order: the site,
+# then coverage over the samples that cover it ("present") and over all samples
+# ("with_zeros"), then the two sample counts.  Per-group columns follow them
+# when the metadata carries groups.  A genome with no sample to read gets a
+# table with exactly these columns and no rows.
+BASE_STATS_COLUMNS = [
+    "contig",
+    "position",
+    "total_coverage",
+    "mean_coverage",
+    "std_coverage",
+    "mean_coverage_with_zeros",
+    "std_coverage_with_zeros",
+    "n_present",
+    "n_samples",
+]
+
 
 def read_mag_metadata(metadata_path: Path) -> pd.DataFrame:
     """
@@ -90,10 +107,16 @@ def read_mag_metadata(metadata_path: Path) -> pd.DataFrame:
         metadata_path: Path to the TSV metadata file.
 
     Returns:
-        A pandas DataFrame with normalized string columns.
+        A pandas DataFrame with normalized string columns.  A header-only file
+        (the metadata step writes one for a genome with no sample at the
+        timepoint) gives a frame with the columns and no rows; the caller
+        decides what "no sample" means.
 
     Raises:
-        ValueError: If required columns are missing or the file is empty.
+        ValueError: If required columns are missing.
+
+    Example: a file listing samples s1 and s2 -> 2 rows; a file holding only
+    the header line -> 0 rows, same columns.
     """
     # Load the metadata from TSV
     df = pd.read_csv(metadata_path, sep="\t")
@@ -112,9 +135,8 @@ def read_mag_metadata(metadata_path: Path) -> pd.DataFrame:
         df["group"] = df["group"].astype(str).str.strip()
     if "time" in df.columns:
         df["time"] = df["time"].astype(str).str.strip()
-    # Ensure not empty
-    if df.empty:
-        raise ValueError(f"No rows in MAG metadata file: {metadata_path}")
+    # No "is it empty?" check here: zero rows is a valid file (see docstring),
+    # and compute_stats answers it with an empty stats table.
     return df
 
 
@@ -712,6 +734,17 @@ def compute_stats(mag_metadata: Path, qc_dir: str = None) -> pd.DataFrame:
     meta = read_mag_metadata(mag_metadata)
     mag_id = os.path.basename(mag_metadata).split("_metadata")[0]
 
+    # A header-only metadata file: the genome is part of the run but has no
+    # sample at this timepoint.  Same answer as when the QC filter below leaves
+    # no sample: a stats table with the header and no rows, so one file is
+    # written per genome whatever its sample count.
+    if meta.empty:
+        logger.warning(
+            f"MAG {mag_id}: no sample in {mag_metadata} (the genome has no "
+            f"sample at this timepoint). Returning empty result."
+        )
+        return pd.DataFrame(columns=BASE_STATS_COLUMNS)
+
     # Apply QC filtering if requested
     qc_filtered_samples = None
     if qc_dir:
@@ -742,19 +775,7 @@ def compute_stats(mag_metadata: Path, qc_dir: str = None) -> pd.DataFrame:
     # Handle case where no data was found
     if df.empty:
         logger.warning("No coverage data found in any sample. Returning empty result.")
-        return pd.DataFrame(
-            columns=[
-                "contig",
-                "position",
-                "total_coverage",
-                "mean_coverage",
-                "std_coverage",
-                "mean_coverage_with_zeros",
-                "std_coverage_with_zeros",
-                "n_present",
-                "n_samples",
-            ]
-        )
+        return pd.DataFrame(columns=BASE_STATS_COLUMNS)
 
     # Compute allele frequencies and prepare data for statistical calculations
     logger.info(f"Computing allele frequencies for MAG: {mag_id}")
@@ -768,17 +789,7 @@ def compute_stats(mag_metadata: Path, qc_dir: str = None) -> pd.DataFrame:
     result = compute_grouped_statistics(df, meta, result, mag_id)
 
     # Finalize and return results
-    base = [
-        "contig",
-        "position",
-        "total_coverage",
-        "mean_coverage",
-        "std_coverage",
-        "mean_coverage_with_zeros",
-        "std_coverage_with_zeros",
-        "n_present",
-        "n_samples",
-    ]
+    base = BASE_STATS_COLUMNS
 
     # Collect all group-related columns dynamically by prefix
     groupish = [
