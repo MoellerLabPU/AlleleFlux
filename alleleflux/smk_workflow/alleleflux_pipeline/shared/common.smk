@@ -403,6 +403,207 @@ def check_timepoint_order(meta, earlier, later):
     )
 
 
+def sheet_fully_dated(meta_sheet):
+    """Does every sample of the metadata sheet carry a collection date?
+
+    The ``cohort`` baseline scope orders ALL samples of the sheet by calendar
+    date (a witness is a sample dated before the first carrier), so it only
+    works on a sheet where every row has a date.  The de novo CLIs make the
+    same check on the same sheet and narrow the scope themselves when it
+    fails; this is the workflow's copy of that question, asked at parse time
+    to decide whether extra timepoints need QC and caches at all.
+
+    Returns True only when the ``collection_date`` column exists and no cell
+    is blank.  Whether the dates are well-formed is checked where they are
+    used (``check_timepoint_order``, ``extra_cache_timepoints``).
+
+    Example: 4 samples, all with a date -> True; the same sheet with one
+    empty cell, or without the column -> False.
+    """
+    if "collection_date" not in meta_sheet.columns:
+        return False
+    dates = meta_sheet["collection_date"]
+    # The sheet is read with dtype=str, so an empty TSV cell arrives as NaN;
+    # a cell holding only spaces arrives as text and is just as blank.
+    blank = dates.isna() | (dates.astype(str).str.strip() == "")
+    return not bool(blank.any())
+
+
+def extra_cache_timepoints(meta_sheet, comparison_timepoints):
+    """The sheet's timepoints that sit in no comparison, earliest-collected first.
+
+    Under a dated ``cohort`` baseline scope every sample of the sheet dated
+    before the first carrier is a baseline witness, whatever its timepoint.  A
+    timepoint that is in the sheet but in no ``timepoints_combinations`` entry
+    has no QC and no allele-frequency cache unless the workflow asks for them;
+    this function names those timepoints so it can.
+
+    Parameters: ``meta_sheet`` is the metadata sheet read as text (columns
+    ``sample_id``, ``time``, ``collection_date``); ``comparison_timepoints``
+    are the single timepoints of every configured comparison.  Both sides are
+    compared as text, so a sheet cell ``5`` and a config value 5 are the same
+    timepoint.
+
+    Returns the extra labels ordered by the first collection date of each
+    (ties broken by label, so the order never depends on row order).
+
+    Raises ``ValueError`` when: a ``time`` cell is blank (naming the samples);
+    an extra label is not a plain token of ASCII letters, digits, ``.`` and
+    ``-`` (naming the labels); a date at an extra timepoint is not
+    ``YYYY-MM-DD`` (naming the dates).  Only call it on a fully dated sheet
+    (``sheet_fully_dated``).
+
+    Example: comparisons use ``a`` and ``b``; the sheet also has ``x`` (first
+    sample 2019-06-01) and ``y`` (first sample 2021-01-01) -> ``["x", "y"]``.
+    A sheet whose every timepoint is compared -> ``[]``.
+    """
+    # A blank time cell would become the text "nan" below and turn into a
+    # timepoint of its own: stop here, naming the rows.
+    blank_time = meta_sheet["time"].isna() | (
+        meta_sheet["time"].astype(str).str.strip() == ""
+    )
+    if blank_time.any():
+        raise ValueError(
+            "blank time cell in the metadata sheet for sample(s) "
+            f"{sorted(meta_sheet.loc[blank_time, 'sample_id'].astype(str))}"
+        )
+    compared = {str(t) for t in comparison_timepoints}
+    times = meta_sheet["time"].astype(str).str.strip()
+    extra = sorted(set(times) - compared)
+    if not extra:
+        return []
+    # An extra label becomes a wildcard value and a folder name
+    # (QC_{timepoint}, allele_freq_cache/{timepoint}).  "_" is refused because
+    # comparison labels are two timepoints joined by "_" and split back on it;
+    # anything outside ASCII letters, digits, "." and "-" is refused because it
+    # would be a regex operator in the wildcard constraint or an unsafe path
+    # segment.  A constraint that silently never matches is worse than a stop.
+    bad = [
+        t
+        for t in extra
+        if not (t.isascii() and t.replace(".", "").replace("-", "").isalnum())
+    ]
+    if bad:
+        raise ValueError(
+            f"timepoint label(s) {bad} in the metadata sheet cannot be used as a "
+            "wildcard value: a timepoint label may hold only ASCII letters, digits, "
+            "'.' and '-' (no '_', spaces or slashes).  They sit in no "
+            "timepoints_combinations entry but the cohort baseline scope needs QC "
+            "and caches there; rename them in the sheet"
+        )
+    # Strict ISO parse, as in check_timepoint_order (which only read the
+    # comparison timepoints' rows): a day/month mix-up would reorder the list.
+    rows = times.isin(extra)
+    raw = meta_sheet.loc[rows, "collection_date"].astype(str)
+    parsed = pd.to_datetime(raw, format="%Y-%m-%d", errors="coerce")
+    if parsed.isna().any():
+        raise ValueError(
+            "collection_date must be YYYY-MM-DD; cannot read "
+            f"{sorted(set(raw[parsed.isna()]))} at timepoint(s) {extra}"
+        )
+    # First collection date per extra timepoint; the label breaks ties.
+    first = parsed.groupby(times[rows]).min()
+    return sorted(extra, key=lambda t: (first[t], t))
+
+
+def cohort_caches_every_timepoint(data_type, baseline_scope, use_baseline_presence,
+                                  use_gene_de_novo, sheet_dated):
+    """Should QC and allele-frequency caches cover EVERY timepoint of the sheet?
+
+    Only when all four hold (user rule 2026-11-13: no extra work unless a de
+    novo analysis asks for it):
+
+    * the data are longitudinal (single-timepoint data have no de novo analysis);
+    * the baseline scope is ``cohort`` (every other scope reads the
+      comparison's own samples only);
+    * the sheet is fully dated (on an undated sheet the de novo CLIs narrow
+      the scope themselves, so there is nothing extra to read);
+    * baseline presence or the gene-level de novo analysis is switched on
+      (they are the only readers of the extra caches).
+
+    Example: ``("longitudinal", "cohort", True, False, True)`` -> True;
+    the same with ``sheet_dated`` False, scope ``"comparison"``, data type
+    ``"single"`` or both analyses off -> False.
+    """
+    return bool(
+        data_type == "longitudinal"
+        and baseline_scope == "cohort"
+        and sheet_dated
+        and (use_baseline_presence or use_gene_de_novo)
+    )
+
+
+# Defined this early (it used to sit with the other de novo helpers further
+# down) because the cache-timepoint list below reads its baseline scope before
+# the wildcard constraints are declared.  Body unchanged.
+def de_novo_rule_params():
+    """``analysis.baseline_presence``'s de novo knobs with the house defaults, checked.
+
+    The knobs of the de novo analysis (spec 2.2-2.4), read ONCE so the
+    baseline_presence and rising_origin rules can never disagree:
+
+    * ``baseline_scope`` -- what "absent at baseline" is judged against
+      (``cohort`` by default: every sample of the run dated before the first
+      carrier; needs ``collection_date`` in the metadata);
+    * ``cluster_window_bp`` / ``max_de_novo_neighbours`` -- the cluster rule
+      (de novo alleles within the window on one contig in one group are one
+      block event; more than the tolerated neighbours -> block_event);
+    * ``strain_gate`` / ``min_determined_carriers`` -- which strain verdict
+      decides whether a de novo allele stands (``carrier`` by default: the
+      allele's own carriers' per-mouse turnover verdicts, at least the floor
+      of them determined).
+
+    Every gate but ``none`` reads strain-turnover outputs (the per-mouse tables
+    for ``carrier``, the classification table for ``group``, both for
+    ``both``), so those gates require ``use_strain_turnover`` and the run stops
+    at parse time otherwise, not after the statistics.  Unknown words and
+    negative numbers stop it too.
+
+    Example: a config with only ``summary`` in the block ->
+    ``{"baseline_scope": "cohort", "cluster_window_bp": 1000,
+    "max_de_novo_neighbours": 0, "strain_gate": "carrier",
+    "min_determined_carriers": 3}``.
+    """
+    # The two vocabularies, spelled here (not module-level) so the function is
+    # self-contained: the slice tests exec it alone, and the CLIs own the words.
+    BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+    STRAIN_GATES = ("carrier", "group", "both", "none")
+    analysis = config.get("analysis", {}) or {}
+    block = analysis.get("baseline_presence", {}) or {}
+    p = {
+        "baseline_scope": str(block.get("baseline_scope", "cohort")),
+        "cluster_window_bp": int(block.get("cluster_window_bp", 1000)),
+        "max_de_novo_neighbours": int(block.get("max_de_novo_neighbours", 0)),
+        "strain_gate": str(block.get("strain_gate", "carrier")),
+        "min_determined_carriers": int(block.get("min_determined_carriers", 3)),
+    }
+    if p["baseline_scope"] not in BASELINE_SCOPES:
+        raise ValueError(
+            f"analysis.baseline_presence.baseline_scope must be one of "
+            f"{BASELINE_SCOPES}, got {p['baseline_scope']!r}"
+        )
+    if p["strain_gate"] not in STRAIN_GATES:
+        raise ValueError(
+            f"analysis.baseline_presence.strain_gate must be one of {STRAIN_GATES}, "
+            f"got {p['strain_gate']!r}"
+        )
+    if p["strain_gate"] != "none" and not analysis.get("use_strain_turnover", False):
+        raise ValueError(
+            f"analysis.baseline_presence.strain_gate {p['strain_gate']!r} reads the "
+            f"strain-turnover outputs (per-mouse tables and/or the classification "
+            f"table): set analysis.use_strain_turnover: true (and use_pairwise_ani), "
+            f"or strain_gate: none"
+        )
+    if p["cluster_window_bp"] < 0 or p["max_de_novo_neighbours"] < 0:
+        raise ValueError(
+            "analysis.baseline_presence.cluster_window_bp and max_de_novo_neighbours "
+            "must be >= 0"
+        )
+    if p["min_determined_carriers"] < 1:
+        raise ValueError("analysis.baseline_presence.min_determined_carriers must be >= 1")
+    return p
+
+
 def check_data_type_features(config):
     """Refuse, while the Snakefile is still being read, every setting that cannot
     mean anything for the configured data type.  Returns the checked data type.
@@ -876,7 +1077,8 @@ if DATA_TYPE == "longitudinal":
                 "collection_date column for these timepoints, so the listed order "
                 "(earlier first) is taken on trust"
             )
-    del _meta_sheet
+    # _meta_sheet stays alive: the cache-timepoint list below (after
+    # unique_timepoints) reads it once more and deletes it there.
 
 # Define valid focus timepoint values for each timepoint label
 valid_focus_timepoints = {}
@@ -945,6 +1147,50 @@ for tp_label in timepoints_labels:
             _seen_tps.add(tp)
             unique_timepoints.append(tp)
 
+# CACHE_TIMEPOINTS: every single timepoint that gets QC and an allele-frequency
+# cache, and the values the {timepoint} wildcard may take.
+#
+# Normally that is unique_timepoints (the comparison timepoints).  Under a dated
+# cohort baseline scope with a de novo analysis on, the de novo CLIs read EVERY
+# sample of the sheet dated before the first carrier as a baseline witness, so
+# the sheet's timepoints that sit in no comparison are added (first-collection-
+# date order).  No config knob: the sheet is the contract (design D2).
+#
+# Example: comparisons a_b and a_c; the sheet also holds timepoint x, collected
+# before everything else.  Flag off -> ["a", "b", "c"].  Flag on -> ["a", "b",
+# "c", "x"], and x gets metadata, QC and caches like the others.
+COHORT_CACHES_EVERY_TIMEPOINT = False
+EXTRA_CACHE_TIMEPOINTS = []
+if DATA_TYPE == "longitudinal":
+    _analysis = config.get("analysis", {}) or {}
+    _use_baseline_presence = bool(_analysis.get("use_baseline_presence", False))
+    _use_gene_de_novo = bool(_analysis.get("use_gene_de_novo", False))
+    # The scope is read ONLY when a de novo analysis is on: de_novo_rule_params()
+    # also checks the strain gate against use_strain_turnover, and a config with
+    # no de novo analysis must never trip that check.
+    if _use_baseline_presence or _use_gene_de_novo:
+        COHORT_CACHES_EVERY_TIMEPOINT = cohort_caches_every_timepoint(
+            DATA_TYPE,
+            de_novo_rule_params()["baseline_scope"],
+            _use_baseline_presence,
+            _use_gene_de_novo,
+            sheet_fully_dated(_meta_sheet),
+        )
+    if COHORT_CACHES_EVERY_TIMEPOINT:
+        EXTRA_CACHE_TIMEPOINTS = extra_cache_timepoints(_meta_sheet, unique_timepoints)
+    # Say so only when there IS an extra timepoint: every job re-reads this file,
+    # so a line that reports "none" would land in every job log for nothing.
+    if EXTRA_CACHE_TIMEPOINTS:
+        _n_extra_samples = int(
+            _meta_sheet["time"].astype(str).str.strip().isin(EXTRA_CACHE_TIMEPOINTS).sum()
+        )
+        logger.info(
+            "cohort scope: QC and caches at every sheet timepoint; extra "
+            f"timepoint(s) {EXTRA_CACHE_TIMEPOINTS} ({_n_extra_samples} samples)"
+        )
+    del _meta_sheet
+CACHE_TIMEPOINTS = unique_timepoints + EXTRA_CACHE_TIMEPOINTS
+
 # =============================================================================
 # Cache Path Resolution Logic (2B Refactor)
 # =============================================================================
@@ -979,7 +1225,9 @@ for tp_label in timepoints_labels:
 wildcard_constraints:
     groups=f"({'|'.join(groups_labels)})",
     timepoints=f"({'|'.join(timepoints_labels)})",
-    timepoint=f"({'|'.join(unique_timepoints)})",
+    # Every timepoint with QC and a cache: the comparison timepoints, plus the
+    # sheet-only ones under the cohort condition (CACHE_TIMEPOINTS above).
+    timepoint=f"({'|'.join(CACHE_TIMEPOINTS)})",
     taxon="(" + "|".join(TAXONOMY_LEVELS) + "|domain)",
     test_type="(" + "|".join(ALL_TEST_TYPES) + "|)",
     sub_test="(MannWhitney|Wilcoxon|tTest|LMM|CMH|)",
@@ -1560,74 +1808,6 @@ FIGURES = figures_params()  # score heatmaps/boxplots + the run report (analysis
 
 # Evaluated once at parse time; the three profile-reading rules reference it in params.
 SITE_DEPTH_FILTER_ARGS = site_depth_filter_cli_args()
-
-
-def de_novo_rule_params():
-    """``analysis.baseline_presence``'s de novo knobs with the house defaults, checked.
-
-    The knobs of the de novo analysis (spec 2.2-2.4), read ONCE so the
-    baseline_presence and rising_origin rules can never disagree:
-
-    * ``baseline_scope`` -- what "absent at baseline" is judged against
-      (``cohort`` by default: every sample of the run dated before the first
-      carrier; needs ``collection_date`` in the metadata);
-    * ``cluster_window_bp`` / ``max_de_novo_neighbours`` -- the cluster rule
-      (de novo alleles within the window on one contig in one group are one
-      block event; more than the tolerated neighbours -> block_event);
-    * ``strain_gate`` / ``min_determined_carriers`` -- which strain verdict
-      decides whether a de novo allele stands (``carrier`` by default: the
-      allele's own carriers' per-mouse turnover verdicts, at least the floor
-      of them determined).
-
-    Every gate but ``none`` reads strain-turnover outputs (the per-mouse tables
-    for ``carrier``, the classification table for ``group``, both for
-    ``both``), so those gates require ``use_strain_turnover`` and the run stops
-    at parse time otherwise, not after the statistics.  Unknown words and
-    negative numbers stop it too.
-
-    Example: a config with only ``summary`` in the block ->
-    ``{"baseline_scope": "cohort", "cluster_window_bp": 1000,
-    "max_de_novo_neighbours": 0, "strain_gate": "carrier",
-    "min_determined_carriers": 3}``.
-    """
-    # The two vocabularies, spelled here (not module-level) so the function is
-    # self-contained: the slice tests exec it alone, and the CLIs own the words.
-    BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
-    STRAIN_GATES = ("carrier", "group", "both", "none")
-    analysis = config.get("analysis", {}) or {}
-    block = analysis.get("baseline_presence", {}) or {}
-    p = {
-        "baseline_scope": str(block.get("baseline_scope", "cohort")),
-        "cluster_window_bp": int(block.get("cluster_window_bp", 1000)),
-        "max_de_novo_neighbours": int(block.get("max_de_novo_neighbours", 0)),
-        "strain_gate": str(block.get("strain_gate", "carrier")),
-        "min_determined_carriers": int(block.get("min_determined_carriers", 3)),
-    }
-    if p["baseline_scope"] not in BASELINE_SCOPES:
-        raise ValueError(
-            f"analysis.baseline_presence.baseline_scope must be one of "
-            f"{BASELINE_SCOPES}, got {p['baseline_scope']!r}"
-        )
-    if p["strain_gate"] not in STRAIN_GATES:
-        raise ValueError(
-            f"analysis.baseline_presence.strain_gate must be one of {STRAIN_GATES}, "
-            f"got {p['strain_gate']!r}"
-        )
-    if p["strain_gate"] != "none" and not analysis.get("use_strain_turnover", False):
-        raise ValueError(
-            f"analysis.baseline_presence.strain_gate {p['strain_gate']!r} reads the "
-            f"strain-turnover outputs (per-mouse tables and/or the classification "
-            f"table): set analysis.use_strain_turnover: true (and use_pairwise_ani), "
-            f"or strain_gate: none"
-        )
-    if p["cluster_window_bp"] < 0 or p["max_de_novo_neighbours"] < 0:
-        raise ValueError(
-            "analysis.baseline_presence.cluster_window_bp and max_de_novo_neighbours "
-            "must be >= 0"
-        )
-    if p["min_determined_carriers"] < 1:
-        raise ValueError("analysis.baseline_presence.min_determined_carriers must be >= 1")
-    return p
 
 
 def de_novo_rule_cli_args():
