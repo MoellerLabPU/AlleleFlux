@@ -90,16 +90,29 @@ def sample_counts(metadata_path: str) -> pd.DataFrame:
     return out
 
 
-def mags_with_profiles(metadata_dir: str, timepoints: str) -> int | None:
-    """Distinct MAGs in ``inputMetadata_{timepoints}/summary_mag_index.tsv``, or None."""
-    path = os.path.join(
-        metadata_dir, f"inputMetadata_{timepoints}", "summary_mag_index.tsv"
-    )
-    if not os.path.exists(path):
-        return None
-    return int(
-        pd.read_csv(path, sep="\t", dtype=str, usecols=["mag_id"])["mag_id"].nunique()
-    )
+def mags_with_profiles(metadata_dir: str, timepoints: list[str]) -> int | None:
+    """Distinct MAGs with a profiled sample at any of the given timepoints, or None.
+
+    The metadata step writes one folder per single timepoint, each with a
+    ``summary_mag_index.tsv`` listing (MAG, sample) for every profiled sample.
+    A comparison's count is the number of distinct MAGs over the folders of its
+    timepoints.  None when one of the index files is not there: a count over
+    the folders that do exist would look complete and be too low.
+
+    Example: M1 profiled at ``pre`` and ``end``, M2 at ``end`` only ->
+    ``mags_with_profiles(dir, ["pre", "end"])`` is 2, ``(dir, ["pre"])`` is 1.
+    """
+    mags: set[str] = set()
+    for timepoint in timepoints:
+        path = os.path.join(
+            metadata_dir, f"inputMetadata_{timepoint}", "summary_mag_index.tsv"
+        )
+        if not os.path.exists(path):
+            return None
+        mags.update(
+            pd.read_csv(path, sep="\t", dtype=str, usecols=["mag_id"])["mag_id"]
+        )
+    return len(mags)
 
 
 def _true_counts(path: str) -> dict[str, int]:
@@ -289,8 +302,14 @@ def _funnel(args, cfg: dict, comparison: str) -> list[tuple[str, object]]:
             rows.append((label, int(r.n_samples)))
     else:
         rows.append(("samples in the metadata sheet", None))
+    # The comparison label is EARLIER_LATER for longitudinal data and the
+    # timepoint itself for single data; metadata folders are per timepoint.
+    timepoints = tp.split("_") if args.data_type == "longitudinal" else [tp]
     rows.append(
-        (f"MAGs with profiles ({tp})", mags_with_profiles(args.metadata_dir, tp))
+        (
+            f"MAGs with profiles ({tp})",
+            mags_with_profiles(args.metadata_dir, timepoints),
+        )
     )
     elig = eligibility_counts(
         os.path.join(args.run_dir, f"eligibility_table_{comparison}.tsv")

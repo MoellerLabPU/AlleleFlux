@@ -677,7 +677,6 @@ def aggregate_mag_stats(
     - Returns None if df_results is empty or group_cols is empty (when overall=False)
 
     Metrics aggregated (when present in input):
-    - subjects_per_group, replicates_per_group, paired_replicates_per_group
     - breadth, breadth_genome
     - average_coverage, average_coverage_including_zeros, average_coverage_genome
     - median_coverage, median_coverage_including_zeros
@@ -725,10 +724,6 @@ def aggregate_mag_stats(
             "coverage_std",
             "coverage_std_including_zeros",
             "length_weighted_coverage",
-            # Subject/replicate counts
-            "subjects_per_group",
-            "replicates_per_group",
-            "paired_replicates_per_group",
         ]
         if c in passing.columns
     ]

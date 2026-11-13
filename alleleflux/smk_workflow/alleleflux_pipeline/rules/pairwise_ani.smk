@@ -19,7 +19,8 @@ rule pairwise_ani:
     input:
         # Depend on the QC sentinels rather than the QC TSVs so an interrupted QC
         # job cannot leave a half-written directory that looks complete.
-        qc_sentinels=[qc_sentinel(tp) for tp in timepoints_labels],
+        # One per comparison timepoint: the tables get_all_qc_files_for_mag lists.
+        qc_sentinels=[qc_sentinel(tp) for tp in unique_timepoints],
         # The MAG's cache files (one per timepoint it is QC-eligible at): the
         # single per-site source after QC, already site-depth-filtered.
         caches=lambda wildcards: allele_freq_cache_files_for_mag(wildcards.mag),

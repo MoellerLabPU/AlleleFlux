@@ -973,9 +973,6 @@ class TestAggregateMagStats(TestQCMetrics):
                 "coverage_std": [15.0, 20.0],
                 "coverage_std_including_zeros": [25.0, 30.0],
                 "length_weighted_coverage": [48.0, 58.0],
-                "subjects_per_group": [5, 5],
-                "replicates_per_group": [3, 3],
-                "paired_replicates_per_group": [2, 2],
             }
         )
 
@@ -990,9 +987,6 @@ class TestAggregateMagStats(TestQCMetrics):
             "coverage_std_mean",
             "coverage_std_including_zeros_mean",
             "length_weighted_coverage_mean",
-            "subjects_per_group_mean",
-            "replicates_per_group_mean",
-            "paired_replicates_per_group_mean",
         ]
 
         for col in expected_cols:

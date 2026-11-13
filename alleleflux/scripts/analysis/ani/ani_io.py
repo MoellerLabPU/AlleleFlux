@@ -64,30 +64,30 @@ _DENSE_MAX = np.iinfo(_DENSE_DTYPE).max
 def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
     """Samples that cleared AlleleFlux QC for this MAG, unioned across QC files.
 
-    One QC file exists per MAG **per timepoint combination** and lists EVERY
-    sample of that combination (passing or not).  Combinations overlap on shared
-    timepoints, so the same sample can be judged in several files; the union keeps
-    a sample wherever it passed at least once, collapsed to one row per
-    ``sample_id``.
+    One QC file exists per MAG **per timepoint** and lists EVERY sample of that
+    timepoint (passing or not); it is header-only when the MAG has no profiled
+    sample there.  The union keeps every sample that passed, one row per
+    ``sample_id``.  (A sample listed in several files, as happens when the same
+    file is given twice, is kept once.)
 
-    Worked example (combinations pre_end and pre_post share "pre")::
+    Worked example (comparisons pre_end and pre_post, so three timepoints)::
 
-        QC/QC_pre_end/MAG_X_QC.tsv    60 rows, 30 pass   (pre and end samples)
-        QC/QC_pre_post/MAG_X_QC.tsv   60 rows, 29 pass   (pre and post samples)
+        QC/QC_pre/MAG_X_QC.tsv    30 rows, 16 pass
+        QC/QC_end/MAG_X_QC.tsv    30 rows, 14 pass
+        QC/QC_post/MAG_X_QC.tsv   header only (no profiled sample at post)
 
-        qc_passing_samples([qc_pre_end, qc_pre_post], "MAG_X")
-        -> 43 rows: 59 passing rows minus 16 "pre" samples that passed in both
-           files (their duplicate rows are identical, so first-wins loses nothing)
+        qc_passing_samples([qc_pre, qc_end, qc_post], "MAG_X")
+        -> 30 rows: the 16 + 14 passing samples; the header-only table adds none
 
     Note the caller chooses the scope: pass ONE file and the roster is exactly
-    that combination's samples; pass all files (what the Snakemake rule does) and
+    that timepoint's samples; pass all files (what the Snakemake rule does) and
     the roster spans every timepoint, which is what within-subject cross-timepoint
     pairs need.
 
     Parameters
     ----------
     qc_files : list of str
-        Per-MAG QC TSVs (``{mag}_QC.tsv``), one per timepoint combination --
+        Per-MAG QC TSVs (``{mag}_QC.tsv``), one per timepoint --
         quality_control.py's real output files.
     mag_id : str
         Only used for log/error context; the files are already per-MAG.
@@ -128,11 +128,16 @@ def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
     if not frames:
         raise ValueError(f"No QC files supplied for MAG {mag_id}")
 
-    # A sample judged usable at several timepoint combinations appears in several
-    # files; keep its first row. Safe because group/subject/time come from the one
-    # input metadata sheet, so duplicate rows carry identical values.
+    # Zero-row frames stay out of the concat.  One read from a header-only table
+    # has text columns only, and pandas would turn genome_size (a number the CLI
+    # cross-checks against the reference) into text for every other row.  When
+    # every frame is empty the first one stands in, so the columns are kept.
+    with_rows = [frame for frame in frames if not frame.empty] or frames[:1]
+    # A sample listed in several files is kept once (its first row).  Safe
+    # because group/subject/time come from the one input metadata sheet, so
+    # duplicate rows carry identical values.
     combined = (
-        pd.concat(frames, ignore_index=True)
+        pd.concat(with_rows, ignore_index=True)
         .drop_duplicates(subset=["sample_id"])
         .reset_index(drop=True)
     )

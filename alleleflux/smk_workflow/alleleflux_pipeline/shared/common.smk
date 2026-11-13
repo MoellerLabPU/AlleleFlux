@@ -994,24 +994,69 @@ def profile_sentinel(sample):
     return os.path.join(PROFILES_DIR, sample, SENTINEL_PROFILE)
 
 
-def metadata_sentinel(timepoints):
-    """Path to the sentinel marker for a per-timepoint inputMetadata directory.
+def metadata_sentinel(timepoint):
+    """Path to the "done" marker of ONE timepoint's inputMetadata folder.
+
+    Metadata is built once per single timepoint (``pre``), not per comparison
+    (``pre_post``): a comparison reads the folders of its two timepoints.
 
     Resolves under REUSE_DIR so a reuse_from run reads the real run's existing
     sentinel (already on disk) and the generate_metadata rule drops from the DAG.
+
+    Example: ``metadata_sentinel("pre")`` ->
+    ``<run>/inputMetadata/inputMetadata_pre/.metadata_done``.
     """
     return os.path.join(
-        REUSE_DIR, "inputMetadata", f"inputMetadata_{timepoints}", SENTINEL_METADATA
+        REUSE_DIR, "inputMetadata", f"inputMetadata_{timepoint}", SENTINEL_METADATA
     )
 
 
-def qc_sentinel(timepoints):
-    """Path to the sentinel marker for a per-timepoint QC directory.
+def qc_dir_of(timepoint):
+    """The QC folder of ONE timepoint: one ``{mag}_QC.tsv`` per genome of the run.
+
+    The single spelling of the QC layout: the QC marker, the per-genome table
+    path and the eligibility rule's ``--qc_dirs`` all build on it.  Under
+    REUSE_DIR, like the marker, because QC is reused by a permuted run.
+
+    Example: ``qc_dir_of("pre")`` -> ``<run>/QC/QC_pre``.
+    """
+    return os.path.join(REUSE_DIR, "QC", f"QC_{timepoint}")
+
+
+def qc_sentinel(timepoint):
+    """Path to the "done" marker of ONE timepoint's QC folder.
 
     Resolves under REUSE_DIR so a reuse_from run reads the real run's existing
     QC sentinel and the quality_control rule drops from the DAG.
+
+    Example: ``qc_sentinel("pre")`` -> ``<run>/QC/QC_pre/.qc_done``.
     """
-    return os.path.join(REUSE_DIR, "QC", f"QC_{timepoints}", SENTINEL_QC)
+    return os.path.join(qc_dir_of(timepoint), SENTINEL_QC)
+
+
+def comparison_timepoints(timepoints_label):
+    """The single timepoints of one comparison label, earlier first.
+
+    Longitudinal comparisons are labelled ``{earlier}_{later}``; single-timepoint
+    data use the timepoint itself as the label.  Rules keyed on the comparison
+    (eligibility) call this to find the per-timepoint folders they read.
+
+    Example: longitudinal ``"pre_post"`` -> ``["pre", "post"]``; single
+    ``"t1"`` -> ``["t1"]``.
+
+    Raises ``ValueError`` when a longitudinal label is not exactly two parts.
+    A timepoint label never holds ``_`` (refused at parse time), so that can
+    only be a wiring mistake.
+    """
+    if DATA_TYPE != "longitudinal":
+        return [timepoints_label]
+    parts = timepoints_label.split("_")
+    if len(parts) != 2:
+        raise ValueError(
+            f"timepoints label {timepoints_label!r} is not EARLIER_LATER "
+            f"(split into {parts})"
+        )
+    return parts
 
 
 def dnds_sentinel(timepoints, groups, subject_id):
@@ -1104,22 +1149,15 @@ group_str_regex = "(_({}))?".format("|".join(group_values))
 # =============================================================================
 # Per-timepoint cache helpers
 # =============================================================================
-# The ``compute_allele_freq_per_timepoint`` rule writes one Parquet cache file
-# per (MAG, gr_combo, single timepoint).  Scoping the cache to gr_combo is
-# required by the checkpoint architecture: each (tp_combo, gr_combo) resolves
-# its eligibility_table checkpoint separately, so only the QC files for ONE
-# combination are guaranteed to exist when the cache is first needed.  By
-# keying the cache on gr_combo we can use a SINGLE canonical QC file (the
-# first tp_combo in config order that contains this timepoint) as the input,
-# which Snakemake resolves as a normal rule dependency — no cross-combination
-# QC gathering needed.
+# The ``allele_freq_cache`` rule writes one Parquet cache file per (MAG, single
+# timepoint).  The cache is group-independent and comparison-independent: every
+# (timepoints, groups) combination that names the timepoint reuses the same
+# file, so each sample's profile is read once however many comparisons use it.
+# The cache job reads the QC table of its own timepoint and waits for that
+# timepoint's QC marker (qc_sentinel), so it needs no per-comparison lookup.
 #
-# Deduplication is within each gr_combo, across tp_combos: all tp_combos that
-# share the same (gr_combo, timepoint) reuse the same Parquet cache.  Cache files
-# are NOT shared across gr_combos — each gr_combo builds its own set.
-# For drido (15 tp_combos, 6 gr_combos, 8 unique timepoints):
-#   Before: 15 tp_combos × 6 gr_combos × 2 timepoints = 180 profile-read operations
-#   After:  8 unique timepoints × 6 gr_combos          =  48 cache-write jobs
+# Example: comparisons a_b, a_c and b_c with three group pairs each would read
+# 9 x 2 = 18 (comparison, timepoint) sample sets; the cache reads 3 (a, b, c).
 
 # unique_timepoints: ordered list of individual timepoints, each appearing exactly once.
 #
@@ -1133,8 +1171,10 @@ group_str_regex = "(_({}))?".format("|".join(group_values))
 #   "8mo_10mo" → "10mo" already seen; adds "8mo"   ← 8mo appears last (Strategy C)
 #   Result: ["5mo", "10mo", "16mo", "22mo", "28mo", "34mo", "40mo", "8mo"]
 #
-# This list becomes the {timepoint} wildcard constraint — the single-timepoint
-# wildcard used in cache filenames, distinct from {timepoints} (the combo label).
+# These are the COMPARISON timepoints.  Together with the sheet-only timepoints
+# of a cohort-scope run they form CACHE_TIMEPOINTS (below), the values of the
+# {timepoint} wildcard: the single-timepoint wildcard of the metadata, QC and
+# cache rules, distinct from {timepoints} (the combo label).
 unique_timepoints = []
 _seen_tps = set()
 for tp_label in timepoints_labels:
@@ -1191,32 +1231,10 @@ if DATA_TYPE == "longitudinal":
     del _meta_sheet
 CACHE_TIMEPOINTS = unique_timepoints + EXTRA_CACHE_TIMEPOINTS
 
-# =============================================================================
-# Cache Path Resolution Logic (2B Refactor)
-# =============================================================================
-# After the 2A/2B refactors, QC runs once per timepoints combination (group-independent).
-# The cache is also group-independent: one Parquet file per (MAG, timepoint).
-#
-# Before 2B: 8 unique timepoints × 6 gr_combos = 48 cache-write jobs (DRIDO)
-# After  2B: 8 unique timepoints × 1            =  8 cache-write jobs
-#
-# timepoint_to_canonical_tp: maps individual_timepoint → the FIRST tp_combo
-# label in config order that contains that timepoint.
-#
-# Example (drido, 15 tp_combos):
-#   "5mo_10mo" → "5mo"→"5mo_10mo", "10mo"→"5mo_10mo"
-#   "5mo_16mo" → "5mo" already set; "16mo"→"5mo_16mo"
-#   "10mo_16mo" → both already set → nothing added
-#   Result: {"5mo": "5mo_10mo", "10mo": "5mo_10mo", "16mo": "5mo_16mo", ...}
-timepoint_to_canonical_tp = {}
-for tp_label in timepoints_labels:
-    if DATA_TYPE == "longitudinal":
-        parts = tp_label.split("_")  # "5mo_10mo" → ["5mo", "10mo"]
-    else:
-        parts = [tp_label]
-    for tp in parts:
-        if tp not in timepoint_to_canonical_tp:
-            timepoint_to_canonical_tp[tp] = tp_label  # first in config order wins
+# QC and the allele-frequency cache are both built once per single timepoint
+# and are group-independent: the cache of (MAG, timepoint) reads the QC table
+# of that same timepoint (get_timepoint_qc_file), and every comparison naming
+# the timepoint reuses both.
 
 # =============================================================================
 # Wildcard Constraints
@@ -1593,9 +1611,8 @@ def get_allele_freq_cache_path(
 
     The cache is group-independent (2B refactor): one file per (MAG, timepoint),
     reused across every (timepoint_combination, group_combination) pair that
-    includes that timepoint.  The cache rule input is the canonical QC file
-    from the single per-timepoint QC directory (also group-independent after
-    the 2A refactor).
+    includes that timepoint.  The cache job reads the QC table of that same
+    timepoint (``get_timepoint_qc_file``).
     """
     return os.path.join(
         REUSE_DIR,
@@ -1605,30 +1622,18 @@ def get_allele_freq_cache_path(
     )
 
 
-def get_canonical_qc_file(mag_wildcard, timepoint):
-    """Return the single canonical QC TSV path for a (timepoint,) cache.
+def get_timepoint_qc_file(mag_wildcard, timepoint):
+    """Path of one genome's QC table at ONE timepoint.
 
-    Selects the first tp_combo in config order that contains ``timepoint``.
-    This canonical QC file is the ONLY input to
-    ``compute_allele_freq_per_timepoint`` — Snakemake resolves it as a regular
-    rule dependency (``qc`` → ``generate_metadata``), so the DAG is valid
-    regardless of which combination's eligibility_table checkpoint fired first.
+    The table lists every sample of that timepoint with its per-sample QC
+    verdict; it is header-only when the genome has no profiled sample there.
+    The QC step writes one for every genome of the run, so once the QC marker
+    of the timepoint exists (``qc_sentinel``) the table exists too.
 
-    After the 2A/2B refactor QC is group-independent, so the path is
-    ``QC_{canonical_tp}/`` with no groups component.
+    Example: ``get_timepoint_qc_file("MAG_7", "pre")`` ->
+    ``<run>/QC/QC_pre/MAG_7_QC.tsv``.
     """
-    canonical_tp = timepoint_to_canonical_tp.get(timepoint)
-    if canonical_tp is None:
-        raise ValueError(
-            f"No tp_combo found for timepoint={timepoint!r}. "
-            "Check that the timepoint appears in the config."
-        )
-    return os.path.join(
-        REUSE_DIR,
-        "QC",
-        f"QC_{canonical_tp}",
-        f"{mag_wildcard}_QC.tsv",
-    )
+    return os.path.join(qc_dir_of(timepoint), f"{mag_wildcard}_QC.tsv")
 
 
 
@@ -1980,14 +1985,17 @@ def get_baseline_presence_stem(timepoints="{timepoints}", groups="{groups}"):
 
 
 def get_all_qc_files_for_mag(mag_wildcard="{mag}"):
-    """Every per-timepoint-combination QC file for one MAG -- the ANI sample gate.
+    """One genome's QC table at every COMPARISON timepoint -- the ANI sample gate.
 
-    Unlike the allele-frequency cache (which wants ONE canonical timepoint's QC),
-    pairwise ANI wants every sample judged usable at ANY timepoint combination;
-    the CLI unions and de-duplicates them.  Resolves under REUSE_DIR because QC
-    IS a reusable upstream artifact (same reasoning as qc_sentinel).
+    Unlike the allele-frequency cache (which wants ONE timepoint's QC),
+    pairwise ANI wants every sample judged usable at any timepoint of any
+    comparison; the CLI unions them.  One table per entry of
+    ``unique_timepoints``: the same samples the per-comparison tables used to
+    hold between them, each sample now in exactly one table.  Timepoints that
+    sit in no comparison (the extra cache timepoints of a cohort-scope run) are
+    left out, as before: ANI compares the samples of the comparisons.
+
+    Example: comparisons ``pre_post`` and ``pre_end`` ->
+    ``[<run>/QC/QC_pre/MAG_7_QC.tsv, .../QC_post/..., .../QC_end/...]``.
     """
-    return [
-        os.path.join(REUSE_DIR, "QC", f"QC_{tp}", f"{mag_wildcard}_QC.tsv")
-        for tp in timepoints_labels
-    ]
+    return [get_timepoint_qc_file(mag_wildcard, tp) for tp in unique_timepoints]

@@ -32,14 +32,13 @@ def _allele_analysis_cache_input(wildcards):
 
 rule allele_freq_cache:
     input:
-        # Single canonical QC file for this timepoint (group-independent after 2A/2B).
-        # One file from the first tp_combo in config order that contains this timepoint.
-        # Snakemake resolves it as a normal qc → generate_metadata chain — no
-        # cross-combination checkpoint dependencies.
-        qc_files=lambda wildcards: get_canonical_qc_file(
-            wildcards.mag, wildcards.timepoint
-            # groups argument removed — QC is now per-timepoint (2A/2B)
-        ),
+        # The QC "done" marker of THIS timepoint: the job waits for that QC
+        # run, whichever comparison asked for the cache.  The marker (an output
+        # of the qc rule) is the dependency rather than the per-genome table,
+        # as in pairwise_ani: the table is not the declared output of any rule,
+        # and it exists as soon as the marker does (the QC step writes one for
+        # every genome of the run, header-only when it has no sample here).
+        qc_done=lambda wildcards: qc_sentinel(wildcards.timepoint),
     output:
         cache=os.path.join(
             OUTDIR,
@@ -58,9 +57,13 @@ rule allele_freq_cache:
         ),
     params:
         data_type=DATA_TYPE,
-        # For longitudinal data the script filters the QC file's rows to this
-        # timepoint; for single data the QC file covers one timepoint already
-        # so --timepoint is not passed.
+        # This genome's QC table at this timepoint (group-independent).
+        qc_file=lambda wildcards: get_timepoint_qc_file(
+            wildcards.mag, wildcards.timepoint
+        ),
+        # For longitudinal data the script keeps the QC rows of this timepoint
+        # (all of them: the table holds one timepoint); single-timepoint QC
+        # tables carry no time column, so --timepoint is not passed.
         timepoint_arg=lambda wildcards: (
             f"--timepoint {wildcards.timepoint}"
             if DATA_TYPE == "longitudinal"
@@ -79,7 +82,7 @@ rule allele_freq_cache:
         """
         alleleflux-cache-allele-freq \
             --magID {wildcards.mag} \
-            --qc_files {input.qc_files} \
+            --qc_files {params.qc_file} \
             {params.timepoint_arg} \
             --data_type {params.data_type} \
             {params.site_filter_args} \

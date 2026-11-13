@@ -104,6 +104,44 @@ class TestQcPassingSamples(unittest.TestCase):
         self.assertTrue(got.empty)
         self.assertIn("sample_id", got.columns)
 
+    def test_header_only_table_adds_no_sample_and_keeps_numbers_numeric(self):
+        """QC writes one table per timepoint; a genome with no profiled sample at a
+        timepoint has a header-only table there.  Unioned with a table that has
+        rows it must add nothing AND leave genome_size a number: a zero-row frame
+        read from a header has text columns only, and pandas turns a numeric
+        column into text when such a frame is concatenated with it."""
+        columns = [
+            "sample_id",
+            "MAG_ID",
+            "group",
+            "subjectID",
+            "replicate",
+            "genome_size",
+            "breadth",
+            "coverage_threshold_passed",
+            "time",
+        ]
+        full = os.path.join(self.tmp, "pre_QC.tsv")
+        empty = os.path.join(self.tmp, "post_QC.tsv")
+        pd.DataFrame(
+            [["S1", self.MAG, "treatment", "m1", "1", 5000, 0.8, True, "pre"]],
+            columns=columns,
+        ).to_csv(full, sep="\t", index=False)
+        pd.DataFrame(columns=columns).to_csv(empty, sep="\t", index=False)
+        # Either order of the two tables gives the same one-sample roster.
+        for files in ([full, empty], [empty, full]):
+            got = qc_passing_samples(files, self.MAG)
+            self.assertEqual(list(got["sample_id"]), ["S1"])
+            self.assertTrue(
+                pd.api.types.is_integer_dtype(got["genome_size"]),
+                got["genome_size"].dtype,
+            )
+            self.assertEqual(int(got.loc[0, "genome_size"]), 5000)
+        # Every table header-only: the empty roster, with its columns.
+        got = qc_passing_samples([empty], self.MAG)
+        self.assertTrue(got.empty)
+        self.assertIn("sample_id", got.columns)
+
     def test_raises_when_verdict_column_missing(self):
         qc = os.path.join(self.tmp, "bad_QC.tsv")
         pd.DataFrame({"sample_id": ["S1"]}).to_csv(qc, sep="\t", index=False)

@@ -5,16 +5,19 @@ This module generates per-MAG metadata files that organize sample profile paths
 by experimental group and timepoint. These metadata files are used as input for
 QC analysis and downstream statistical tests.
 
-**2A Refactor — Per-timepoint scope (group-independent):**
-The metadata and QC rules previously ran once per (timepoints, groups) combination.
-They now run once per timepoints combination only, passing ALL unique group values
-from the config.  This means:
-  - Before: 15 tp_combos × 6 gr_combos = 90 metadata + 90 QC jobs
-  - After:  15 tp_combos × 1            = 15 metadata + 15 QC jobs (6× reduction)
+**Scope: one job per single timepoint, every group.**
+The metadata and QC rules run once per single timepoint (``pre``), not per
+comparison (``pre_post``) and not per group pair, passing ALL unique group
+values from the config.  A timepoint shared by several comparisons is read
+once: comparisons pre_post and pre_end need 3 metadata + 3 QC jobs (pre, post,
+end), where one job per comparison would read the ``pre`` samples twice.
+
+Every genome with a profile anywhere in the run gets a ``{mag}_metadata.tsv``
+in every timepoint's folder, header-only when it has no sample there.
 
 Group-pair-specific eligibility (which MAGs have enough samples in group A vs B)
-is still computed per (timepoints, groups) in the eligibility_table checkpoint,
-which now reads from the single per-timepoint QC directory.
+is computed per (timepoints, groups) in the eligibility_table checkpoint, which
+reads the QC folders of the comparison's two timepoints.
 
 When USE_EXISTING_PROFILES is True, profiles are read directly from PROFILES_DIR
 (the existing profiles path specified in config). No profiling step runs.
@@ -49,29 +52,30 @@ def get_metadata_inputs(wildcards):
 
 
 rule generate_metadata:
-    """Generate per-MAG metadata files for a single timepoints combination.
+    """Generate per-MAG metadata files for ONE timepoint.
 
-    Runs once per {timepoints} wildcard (not per groups).  All unique group
-    values from the config are passed via --groups so downstream QC sees every
-    group in one directory.
+    Runs once per {timepoint} wildcard (a single timepoint, not a comparison
+    and not a group pair).  All unique group values from the config are passed
+    via --groups so downstream QC sees every group in one directory.
     """
     input:
         unpack(get_metadata_inputs),
     output:
         # Sentinel marker (see common.smk) — replaces a directory() output to
         # avoid pre-deletion of the inputMetadata dir on every re-run.
-        sentinel=metadata_sentinel("{timepoints}"),
+        sentinel=metadata_sentinel("{timepoint}"),
     params:
         # Read profiles from PROFILES_DIR - either existing profiles or newly generated
         rootDir=PROFILES_DIR,
         data_type=DATA_TYPE,
         # The actual output directory the script writes per-MAG metadata into.
         outDir=os.path.join(
-            OUTDIR, "inputMetadata", "inputMetadata_{timepoints}"
+            OUTDIR, "inputMetadata", "inputMetadata_{timepoint}"
         ),
         # Pass every unique group so the QC directory covers all groups
         group_args=" ".join(_all_group_values),
-        timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoints.replace('_', ' ')}",
+        # Exactly one timepoint per job: the samples of this timepoint only.
+        timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoint}",
     retries: get_retries("generate_metadata")
     resources:
         mem_mb=get_mem_mb("generate_metadata"),

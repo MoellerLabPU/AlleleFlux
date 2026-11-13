@@ -135,10 +135,12 @@ def get_final_pipeline_outputs(wildcards):
 # time — making the pre-checkpoint stage effectively serial.
 def get_upstream_targets(wildcards):
     targets = []
-    # Metadata + QC: one per unique timepoints combination (group-independent
-    # after 2A).  Target the per-rule sentinel — see common.smk for why we
-    # gate on a sentinel file rather than the directory itself.
-    for tp in timepoints_labels:
+    # Metadata + QC: one per single timepoint (group-independent).  That is
+    # every comparison timepoint, plus the sheet's timepoints that sit in no
+    # comparison when a de novo analysis reads the whole dated sheet
+    # (CACHE_TIMEPOINTS in common.smk).  Target the per-rule sentinel — see
+    # common.smk for why we gate on a sentinel file rather than the directory.
+    for tp in CACHE_TIMEPOINTS:
         targets.append(metadata_sentinel(tp))
         targets.append(qc_sentinel(tp))
     # eligibility_table is eager-listed for all 18 (tp, gr) combinations so

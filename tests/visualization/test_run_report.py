@@ -60,12 +60,23 @@ def make_run(root, reuse=None, data_type="longitudinal"):
         for r in rows:
             del r["time"]
     _tsv(sheet, rows)
-    _tsv(
-        os.path.join(
-            side, "inputMetadata", f"inputMetadata_{TP}", "summary_mag_index.tsv"
-        ),
-        [{"mag_id": mag, "sample_id": s} for mag in ("M1", "M2") for s, *_ in samples],
-    )
+    # One metadata folder per single timepoint.  M1 is profiled in every
+    # sample; M2 only in the "end" samples, so a comparison's count must be
+    # taken over BOTH of its folders (pre alone would say 1 genome).  Single
+    # data: the comparison label is the timepoint, hence one folder.
+    folders = TP.split("_") if data_type == "longitudinal" else [TP]
+    for folder in folders:
+        here = [s for s, _, _, t in samples if data_type == "single" or t == folder]
+        mags = ("M1", "M2") if folder != "pre" else ("M1",)
+        _tsv(
+            os.path.join(
+                side,
+                "inputMetadata",
+                f"inputMetadata_{folder}",
+                "summary_mag_index.tsv",
+            ),
+            [{"mag_id": mag, "sample_id": s} for mag in mags for s in here],
+        )
     # QC: M1 passes in 3 of 4 samples, M2 in 1 -> 2 MAGs with a passing sample, 4 passing pairs
     for mag, passes in (("M1", 3), ("M2", 1)):
         _tsv(
@@ -248,9 +259,13 @@ class TestTables(unittest.TestCase):
         self.assertEqual(int(t.set_index("group").loc["control", "n_samples"]), 2)
 
     def test_profiles_eligibility_preprocessing(self):
-        self.assertEqual(
-            mags_with_profiles(os.path.join(self.side, "inputMetadata"), TP), 2
-        )
+        metadata_dir = os.path.join(self.side, "inputMetadata")
+        # Distinct genomes over the two folders of the comparison (M1 at both
+        # timepoints, M2 at "end" only -> 2), not the count of one folder.
+        self.assertEqual(mags_with_profiles(metadata_dir, ["pre", "end"]), 2)
+        self.assertEqual(mags_with_profiles(metadata_dir, ["pre"]), 1)
+        # A folder that is not there: the count is not available, never partial.
+        self.assertIsNone(mags_with_profiles(metadata_dir, ["pre", "post"]))
         self.assertEqual(
             eligibility_counts(
                 os.path.join(self.run_dir, f"eligibility_table_{CMP}.tsv")
