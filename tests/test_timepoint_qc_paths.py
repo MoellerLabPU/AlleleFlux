@@ -38,7 +38,7 @@ HELPERS = (
     "qc_dir_of",
     "comparison_timepoints",
     "get_timepoint_qc_file",
-    "get_all_qc_files_for_mag",
+    "qc_tables_for_cache_files",
 )
 
 
@@ -117,15 +117,44 @@ class TestComparisonTimepoints:
 
 
 class TestQcTablesOfOneGenome:
-    def test_one_table_per_comparison_timepoint_in_config_order(self):
-        # Pairwise ANI unions the samples that passed QC at any comparison
-        # timepoint: one table per timepoint, each sample in exactly one.
+    """Pairwise ANI's sample list: the genome's QC tables at exactly the
+    timepoints whose cache files the job waits for."""
+
+    @staticmethod
+    def _cache(timepoint, mag="MAG_7"):
+        return f"RUN/allele_freq_cache/{timepoint}/{mag}_{timepoint}_allele_frequency.parquet"
+
+    def test_one_table_per_cache_file_in_config_order(self):
+        # The caches arrive sorted by path (end, post, pre); the tables come
+        # back in the order of the config's comparisons (pre, post, end).
         fn = _load(unique_timepoints=("pre", "post", "end"))
-        assert fn["get_all_qc_files_for_mag"]("MAG_7") == [
+        caches = sorted(self._cache(tp) for tp in ("pre", "post", "end"))
+        assert fn["qc_tables_for_cache_files"]("MAG_7", caches) == [
             "RUN/QC/QC_pre/MAG_7_QC.tsv",
             "RUN/QC/QC_post/MAG_7_QC.tsv",
             "RUN/QC/QC_end/MAG_7_QC.tsv",
         ]
+
+    def test_a_timepoint_without_a_cache_file_has_no_table_in_the_list(self):
+        # MAG_7 is tested in pre_post only: its "end" samples have no cache
+        # among the inputs, so their QC table is not handed to the command.
+        fn = _load(unique_timepoints=("pre", "post", "end"))
+        caches = [self._cache("post"), self._cache("pre")]
+        assert fn["qc_tables_for_cache_files"]("MAG_7", caches) == [
+            "RUN/QC/QC_pre/MAG_7_QC.tsv",
+            "RUN/QC/QC_post/MAG_7_QC.tsv",
+        ]
+
+    def test_a_cache_file_of_an_unknown_timepoint_is_refused(self):
+        # A wiring mistake (a witness-only timepoint handed to ANI), never data.
+        fn = _load(unique_timepoints=("pre", "post"))
+        with pytest.raises(ValueError, match="mid"):
+            fn["qc_tables_for_cache_files"]("MAG_7", [self._cache("mid")])
+
+    def test_no_cache_file_is_refused(self):
+        fn = _load(unique_timepoints=("pre", "post"))
+        with pytest.raises(ValueError, match="MAG_7"):
+            fn["qc_tables_for_cache_files"]("MAG_7", [])
 
 
 class TestOldLayoutIsGone:

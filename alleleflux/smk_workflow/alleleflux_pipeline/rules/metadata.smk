@@ -7,8 +7,11 @@ QC analysis and downstream statistical tests.
 
 **Scope: one job per single timepoint, every group.**
 The metadata and QC rules run once per single timepoint (``pre``), not per
-comparison (``pre_post``) and not per group pair, passing ALL unique group
-values from the config.  A timepoint shared by several comparisons is read
+comparison (``pre_post``) and not per group pair, passing every group of
+``WITNESS_GROUPS`` (common.smk): the groups of the config's comparisons, plus
+the sheet's other groups when the de novo analysis reads the whole sheet for
+baseline witnesses (``cohort_witnesses: sheet`` under the cohort scope).  A
+timepoint shared by several comparisons is read
 once: comparisons pre_post and pre_end need 3 metadata + 3 QC jobs (pre, post,
 end), where one job per comparison would read the ``pre`` samples twice.
 
@@ -23,14 +26,6 @@ When USE_EXISTING_PROFILES is True, profiles are read directly from PROFILES_DIR
 (the existing profiles path specified in config). No profiling step runs.
 The metadata files will contain the actual paths to the existing profile files.
 """
-
-# ALL unique group values across all group combinations — passed to metadata
-# so a single job covers every group in this timepoint, not just one pair.
-_all_group_values = sorted(
-    {gr["treatment"] for gr in config["analysis"]["groups_combinations"]}
-    | {gr["control"] for gr in config["analysis"]["groups_combinations"]}
-)
-
 
 # Define input function to conditionally depend on profile rule outputs
 def get_metadata_inputs(wildcards):
@@ -55,8 +50,8 @@ rule generate_metadata:
     """Generate per-MAG metadata files for ONE timepoint.
 
     Runs once per {timepoint} wildcard (a single timepoint, not a comparison
-    and not a group pair).  All unique group values from the config are passed
-    via --groups so downstream QC sees every group in one directory.
+    and not a group pair).  Every group of WITNESS_GROUPS is passed via
+    --groups so downstream QC sees every group in one directory.
     """
     input:
         unpack(get_metadata_inputs),
@@ -72,8 +67,11 @@ rule generate_metadata:
         outDir=os.path.join(
             OUTDIR, "inputMetadata", "inputMetadata_{timepoint}"
         ),
-        # Pass every unique group so the QC directory covers all groups
-        group_args=" ".join(_all_group_values),
+        # Every group that gets metadata, QC and caches (common.smk): the
+        # compared groups, plus the sheet's other groups when they are read as
+        # baseline witnesses.  Eligibility and the statistics name their own
+        # two groups, so an extra group never enters a test.
+        group_args=" ".join(WITNESS_GROUPS),
         # Exactly one timepoint per job: the samples of this timepoint only.
         timepoint_args=lambda wildcards: f"--timepoints {wildcards.timepoint}",
     retries: get_retries("generate_metadata")

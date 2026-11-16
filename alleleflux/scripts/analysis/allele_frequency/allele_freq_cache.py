@@ -9,7 +9,7 @@ timepoint.
 
     alleleflux-cache-allele-freq
         --magID       MRGM_1079
-        --qc_files    {OUTDIR}/QC/QC_5mo_10mo/MRGM_1079_QC.tsv
+        --qc_files    {OUTDIR}/QC/QC_5mo/MRGM_1079_QC.tsv
         --timepoint   5mo
         --data_type   longitudinal
         --output_path {OUTDIR}/allele_freq_cache/5mo/MRGM_1079_5mo_allele_frequency.parquet
@@ -44,10 +44,21 @@ Shared helpers (from ``_allele_freq_common.py``)
 
 Note on QC input
 -----------------
-The Snakemake rule ``compute_allele_freq_per_timepoint`` passes exactly ONE
-canonical QC file per cache job (the QC from the first timepoint_combination
-in config order that contains the requested timepoint).  ``filter_qc_to_timepoint``
-handles this single-file case; there is no need to union across combinations.
+The Snakemake rule ``allele_freq_cache`` passes exactly ONE QC file per cache
+job: the genome's QC table of the requested timepoint
+(``QC/QC_{timepoint}/{mag}_QC.tsv``, one row per sample of that timepoint).
+
+A genome with no usable sample (``--allow_empty``)
+--------------------------------------------------
+The workflow fixes the list of cache files before any QC table is read: under
+the cohort baseline scope it asks for every tested genome at every witness
+timepoint.  A genome can have no QC-passing sample at one of them (its QC
+table there is header-only, or every sample failed).  With ``--allow_empty``
+that job writes a cache with the normal columns and zero rows plus a
+header-only sidecar, logs a warning and exits 0; the readers see a timepoint
+with no sample.  Without the flag it is an error, as it is for a call by hand.
+A sample that passed QC but whose profile cannot be read is an error either
+way.
 """
 
 import argparse
@@ -64,6 +75,7 @@ import pyarrow.parquet as pq
 
 from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
     build_metadata_from_qc,
+    empty_cache_table,
     init_worker,
     load_qc_results,
     process_mag_files,
@@ -76,20 +88,78 @@ from alleleflux.scripts.utilities.site_depth_filter import (
 
 logger = logging.getLogger(__name__)
 
+# Columns of the sidecar written next to every cache: one row per sample, what
+# the site-depth filter kept and removed.  Spelled once so the sidecar of a
+# zero-row cache (header only) has exactly the columns of a populated one.
+SIDECAR_COLUMNS = [
+    "sample_id",
+    "mag_id",
+    "timepoint",
+    "mean_coverage",
+    "mean_coverage_after_filter",
+    "n_sites_covered",
+    "n_removed_low",
+    "n_removed_high",
+    "n_kept",
+]
+
+
+def sidecar_path(output_path):
+    """The sidecar's path for a cache path: same folder, ``.parquet`` replaced.
+
+    Example: ``.../MAG_7_pre_allele_frequency.parquet`` ->
+    ``.../MAG_7_pre_allele_frequency_site_depth_filter.tsv``.
+    """
+    return output_path.with_name(
+        re.sub(r"\.parquet$", "", output_path.name) + "_site_depth_filter.tsv"
+    )
+
+
+def write_empty_cache(output_path, data_type):
+    """Write a zero-row cache and its header-only sidecar (``--allow_empty``).
+
+    The cache has the columns and types of a populated one
+    (``empty_cache_table``), so every reader opens it like any other file and
+    finds no sample in it.  Written to a temporary name and renamed, like a
+    populated cache, so a killed job never leaves a file that looks complete.
+
+    Parameters
+    ----------
+    output_path : pathlib.Path
+        The cache file to write; its folder must exist.
+    data_type : str
+        ``"longitudinal"`` or ``"single"`` (decides whether ``time`` is a column).
+
+    Returns
+    -------
+    pathlib.Path
+        The sidecar that was written next to the cache.
+    """
+    tmp_path = output_path.with_suffix(".parquet.tmp")
+    pq.write_table(
+        empty_cache_table(data_type),
+        tmp_path,
+        compression="snappy",
+        use_dictionary=True,
+    )
+    tmp_path.rename(output_path)
+    sidecar = sidecar_path(output_path)
+    pd.DataFrame(columns=SIDECAR_COLUMNS).to_csv(sidecar, sep="\t", index=False)
+    return sidecar
+
 
 def filter_qc_to_timepoint(qc_path, mag_id, timepoint):
-    """Load the canonical QC file and filter to a single timepoint.
+    """Load one genome's QC table and keep the passing samples of one timepoint.
 
-    The Snakemake rule always supplies exactly one QC path per cache job —
-    the canonical QC file for this (gr_combo, timepoint) pair (the first
-    timepoint_combination in config order that contains this timepoint).
-    This function loads it, filters rows to ``timepoint``, and returns the
-    result ready for ``build_metadata_from_qc``.
+    The Snakemake rule supplies exactly one QC path per cache job: the
+    genome's table of this timepoint, so every row already belongs to it.  The
+    filter on ``time`` stays as a guard for a call by hand with a table that
+    holds several timepoints.
 
     Parameters
     ----------
     qc_path : str
-        Path to the canonical per-MAG QC TSV for this (gr_combo, timepoint).
+        Path to the per-MAG QC TSV (``QC/QC_{timepoint}/{mag}_QC.tsv``).
     mag_id : str
         Used for logging and error messages.
     timepoint : str
@@ -100,12 +170,14 @@ def filter_qc_to_timepoint(qc_path, mag_id, timepoint):
     -------
     pd.DataFrame
         QC rows for samples at this timepoint that passed coverage/breadth QC.
+        MAY BE EMPTY (a header-only table, or no sample passed): the caller
+        decides whether that is an error (``--allow_empty``).
 
     Raises
     ------
     ValueError
-        If the QC file has no ``time`` column, or if no samples remain after
-        filtering to the requested timepoint.
+        If the QC file has no ``coverage_threshold_passed`` or no ``time``
+        column.
     """
     qc_df = load_qc_results(qc_path, mag_id)
 
@@ -118,11 +190,6 @@ def filter_qc_to_timepoint(qc_path, mag_id, timepoint):
     # Cast to str on both sides to handle numeric timepoints (e.g. 5 vs "5").
     qc_df["time"] = qc_df["time"].astype(str)
     qc_df = qc_df[qc_df["time"] == str(timepoint)]
-
-    if qc_df.empty:
-        raise ValueError(
-            f"No QC-passing samples for MAG {mag_id} at timepoint '{timepoint}'."
-        )
 
     logger.info(
         f"Found {len(qc_df)} samples for MAG {mag_id} at timepoint '{timepoint}'."
@@ -152,10 +219,9 @@ def main():
         nargs="+",
         type=str,
         help=(
-            "Path(s) to per-MAG QC TSV file(s).  Exactly one file is expected "
-            "for longitudinal data (the canonical QC file for this gr_combo and "
-            "timepoint); one file for single data.  The nargs='+' form is kept "
-            "so the Snakemake rule can expand the list naturally."
+            "Path to the genome's QC TSV of this timepoint "
+            "(QC/QC_{timepoint}/{mag}_QC.tsv).  Exactly one file is read; the "
+            "nargs='+' form is kept so existing calls keep working."
         ),
     )
     parser.add_argument(
@@ -195,6 +261,19 @@ def main():
         default=cpu_count(),
         help="Worker processes for parallel profile loading.",
     )
+    parser.add_argument(
+        "--allow_empty",
+        action="store_true",
+        help=(
+            "When the genome has NO QC-passing sample at this timepoint (a "
+            "header-only QC table included), write a cache with the normal "
+            "columns and zero rows plus a header-only sidecar, warn and exit 0. "
+            "Without the flag that case is an error.  The workflow passes it "
+            "because its list of cache files is fixed before QC is read.  A "
+            "sample that passed QC but whose profile cannot be read stays an "
+            "error."
+        ),
+    )
     add_site_depth_filter_args(parser)
 
     args = parser.parse_args()
@@ -207,13 +286,39 @@ def main():
     if args.data_type == "longitudinal":
         if args.timepoint is None:
             parser.error("--timepoint is required when --data_type is 'longitudinal'.")
-        # The Snakemake rule passes one canonical QC file per (gr_combo, timepoint).
-        # Filter its rows to the single requested timepoint.
+        # The Snakemake rule passes the genome's QC table of this timepoint.
+        # Keep its passing rows at the requested timepoint.
         qc_df = filter_qc_to_timepoint(args.qc_files[0], mag_id, args.timepoint)
     else:
         # Single data: the QC file covers exactly one timepoint — load all passing
         # samples without any timepoint-based row filtering.
         qc_df = load_qc_results(args.qc_files[0], mag_id)
+
+    output_path = Path(args.output_path)
+    tp_label = args.timepoint if args.data_type == "longitudinal" else "N/A (single)"
+
+    # No QC-passing sample at all.  An error for a call by hand; under
+    # --allow_empty (the workflow) a zero-row cache, so the job still writes
+    # the two files the workflow was promised.  This is decided HERE, from the
+    # QC table alone, before any profile is opened: a profile that cannot be
+    # read further down is a real failure and never ends up as an empty cache.
+    if qc_df.empty:
+        message = (
+            f"zero QC-passing samples for MAG {mag_id} at timepoint {tp_label} "
+            f"in {args.qc_files[0]}"
+        )
+        if not args.allow_empty:
+            raise ValueError(
+                f"{message}; nothing to cache (pass --allow_empty to write a "
+                f"zero-row cache instead)"
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        sidecar = write_empty_cache(output_path, args.data_type)
+        logger.warning(
+            f"{message}: empty cache written to {output_path} "
+            f"(header-only sidecar {sidecar})"
+        )
+        return
 
     # ------------------------------------------------------------------
     # 2. Build worker inputs
@@ -242,13 +347,11 @@ def main():
     # group; pyarrow handles per-row-group dictionaries for the categorical
     # columns automatically.
     n_proc = min(args.cpus, len(sample_file_tuples))
-    tp_label = args.timepoint if args.data_type == "longitudinal" else "N/A (single)"
     logger.info(
         f"Computing allele frequencies for {len(sample_file_tuples)} samples "
         f"of MAG {mag_id} (timepoint={tp_label}) using {n_proc} processes."
     )
 
-    output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temp file first, then rename atomically.  If the job is
     # killed mid-write (SLURM SIGTERM/SIGKILL) or hits an OOM, the partial
@@ -319,26 +422,12 @@ def main():
     # Sidecar next to the cache: what the site-depth filter removed, per
     # sample.  The run-level table is built from every sidecar by
     # alleleflux-site-filter-summary.
-    sidecar = output_path.with_name(
-        re.sub(r"\.parquet$", "", output_path.name) + "_site_depth_filter.tsv"
-    )
+    sidecar = sidecar_path(output_path)
     summary_df = pd.DataFrame(filter_summaries)
     summary_df.insert(
         0, "timepoint", tp_label if args.data_type == "longitudinal" else ""
     )
-    summary_df = summary_df[
-        [
-            "sample_id",
-            "mag_id",
-            "timepoint",
-            "mean_coverage",
-            "mean_coverage_after_filter",
-            "n_sites_covered",
-            "n_removed_low",
-            "n_removed_high",
-            "n_kept",
-        ]
-    ]
+    summary_df = summary_df[SIDECAR_COLUMNS]
     summary_df.to_csv(sidecar, sep="\t", index=False)
     logger.info(
         f"site-depth filter: {summary_df['n_removed_high'].sum():,} high-depth and "

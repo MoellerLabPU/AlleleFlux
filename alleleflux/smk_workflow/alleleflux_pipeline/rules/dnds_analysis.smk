@@ -30,8 +30,9 @@ rule dnds_from_timepoints:
         # The comparison's cache files (every QC-eligible MAG at both timepoints):
         # the two samples' counts come from these; declared so a missing or stale
         # cache re-runs the cache job rather than failing inside the command.
+        # Its own two timepoints only (no witness caches: dN/dS reads none).
         caches=lambda wildcards: allele_freq_cache_files_for_comparison(
-            wildcards.timepoints, wildcards.groups
+            wildcards.timepoints, wildcards.groups, witness_timepoints=False
         ),
         # Prodigal gene predictions
         prodigal_fasta=config["input"]["prodigal_path"],

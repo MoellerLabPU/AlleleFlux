@@ -506,9 +506,71 @@ def extra_cache_timepoints(meta_sheet, comparison_timepoints):
     return sorted(extra, key=lambda t: (first[t], t))
 
 
-def cohort_caches_every_timepoint(data_type, baseline_scope, use_baseline_presence,
-                                  use_gene_de_novo, sheet_dated):
-    """Should QC and allele-frequency caches cover EVERY timepoint of the sheet?
+def extra_witness_groups(meta_sheet, comparison_groups):
+    """The sheet's groups that sit in no comparison, sorted by label.
+
+    Under a dated ``cohort`` baseline scope with ``cohort_witnesses: sheet``
+    every sample of the sheet dated before the first carrier is a baseline
+    witness, whatever its group.  A group that is in the sheet but in no
+    ``groups_combinations`` entry gets no metadata row, hence no QC and no
+    cache, unless the workflow asks for it; this function names those groups
+    so it can (they are added to the metadata step's ``--groups``).
+
+    Parameters: ``meta_sheet`` is the metadata sheet read as text (columns
+    ``sample_id``, ``group``); ``comparison_groups`` are the groups of every
+    configured comparison.  Both sides are compared as text with surrounding
+    spaces removed, so a sheet cell ``20`` and a config value 20 are the same
+    group.
+
+    Returns the extra labels sorted (they are never a wildcard value, only
+    words on a command line, so no date order is needed).
+
+    Raises ``ValueError`` when: a ``group`` cell is blank (naming the samples;
+    such a sample would silently never testify); an extra label is not one
+    plain word of ASCII letters, digits, ``.``, ``-`` and ``_`` (naming the
+    labels; a space would split it into two ``--groups`` words and any other
+    character could be read by the shell).
+
+    Example: the config compares ``A`` with ``B``; the sheet also has samples
+    in ``C`` and ``D`` -> ``["C", "D"]``.  A sheet whose every group is
+    compared -> ``[]``.
+    """
+    # A blank group cell would become the text "nan" below and turn into a
+    # group of its own: stop here, naming the rows.
+    blank = meta_sheet["group"].isna() | (
+        meta_sheet["group"].astype(str).str.strip() == ""
+    )
+    if blank.any():
+        raise ValueError(
+            "blank group cell in the metadata sheet for sample(s) "
+            f"{sorted(meta_sheet.loc[blank, 'sample_id'].astype(str))}; under "
+            "cohort_witnesses: sheet every sample needs a group"
+        )
+    compared = {str(g).strip() for g in comparison_groups}
+    extra = sorted(set(meta_sheet["group"].astype(str).str.strip()) - compared)
+    bad = [
+        g
+        for g in extra
+        if not (
+            g.isascii()
+            and g.replace(".", "").replace("-", "").replace("_", "").isalnum()
+        )
+    ]
+    if bad:
+        raise ValueError(
+            f"group label(s) {bad} in the metadata sheet cannot be passed to a "
+            "command as one word: a group label may hold only ASCII letters, "
+            "digits, '.', '-' and '_' (no spaces, slashes or shell characters).  "
+            "They sit in no groups_combinations entry but cohort_witnesses: sheet "
+            "reads their samples as baseline witnesses; rename them in the sheet, "
+            "or set analysis.baseline_presence.cohort_witnesses: comparisons"
+        )
+    return extra
+
+
+def cohort_witnesses_active(data_type, baseline_scope, use_baseline_presence,
+                            use_gene_de_novo, sheet_dated):
+    """Do the de novo analyses read baseline witnesses OUTSIDE the comparison?
 
     Only when all four hold (user rule 2026-11-13: no extra work unless a de
     novo analysis asks for it):
@@ -519,7 +581,13 @@ def cohort_caches_every_timepoint(data_type, baseline_scope, use_baseline_presen
     * the sheet is fully dated (on an undated sheet the de novo CLIs narrow
       the scope themselves, so there is nothing extra to read);
     * baseline presence or the gene-level de novo analysis is switched on
-      (they are the only readers of the extra caches).
+      (they are the only readers of the witness caches).
+
+    When True, every genome tested in some comparison gets an allele-frequency
+    cache at EVERY witness timepoint (``CACHE_TIMEPOINTS``), because its
+    samples there may testify even where the genome itself is not tested.
+    Which timepoints and groups those are is the next question
+    (``cohort_reads_whole_sheet``).
 
     Example: ``("longitudinal", "cohort", True, False, True)`` -> True;
     the same with ``sheet_dated`` False, scope ``"comparison"``, data type
@@ -531,6 +599,31 @@ def cohort_caches_every_timepoint(data_type, baseline_scope, use_baseline_presen
         and sheet_dated
         and (use_baseline_presence or use_gene_de_novo)
     )
+
+
+def cohort_reads_whole_sheet(witnesses_active, cohort_witnesses):
+    """Are the baseline witnesses the WHOLE sheet, or only the comparisons' samples?
+
+    ``analysis.baseline_presence.cohort_witnesses`` says who may testify under
+    the cohort scope (design D13):
+
+    * ``sheet`` (default): any sample of the metadata sheet, at any timepoint
+      and in any group.  Timepoints and groups that sit in no comparison then
+      get metadata, QC and caches too (``extra_cache_timepoints``,
+      ``extra_witness_groups``).
+    * ``comparisons``: only samples at a timepoint named in some
+      ``timepoints_combinations`` entry AND in a group named in some
+      ``groups_combinations`` entry.  No extra timepoint, no extra group.
+
+    The setting is read only when witnesses are read at all
+    (``witnesses_active``, see ``cohort_witnesses_active``); otherwise it is
+    ignored, never refused, because the config template always carries the
+    line.
+
+    Example: ``(True, "sheet")`` -> True; ``(True, "comparisons")`` -> False;
+    ``(False, "sheet")`` -> False.
+    """
+    return bool(witnesses_active and cohort_witnesses == "sheet")
 
 
 # Defined this early (it used to sit with the other de novo helpers further
@@ -545,6 +638,10 @@ def de_novo_rule_params():
     * ``baseline_scope`` -- what "absent at baseline" is judged against
       (``cohort`` by default: every sample of the run dated before the first
       carrier; needs ``collection_date`` in the metadata);
+    * ``cohort_witnesses`` -- who may testify under the cohort scope:
+      ``sheet`` (default; any sample of the metadata sheet) or ``comparisons``
+      (only samples at a compared timepoint in a compared group).  Kept as
+      read under every other scope, where nothing uses it;
     * ``cluster_window_bp`` / ``max_de_novo_neighbours`` -- the cluster rule
       (de novo alleles within the window on one contig in one group are one
       block event; more than the tolerated neighbours -> block_event);
@@ -560,18 +657,20 @@ def de_novo_rule_params():
     negative numbers stop it too.
 
     Example: a config with only ``summary`` in the block ->
-    ``{"baseline_scope": "cohort", "cluster_window_bp": 1000,
-    "max_de_novo_neighbours": 0, "strain_gate": "carrier",
-    "min_determined_carriers": 3}``.
+    ``{"baseline_scope": "cohort", "cohort_witnesses": "sheet",
+    "cluster_window_bp": 1000, "max_de_novo_neighbours": 0,
+    "strain_gate": "carrier", "min_determined_carriers": 3}``.
     """
-    # The two vocabularies, spelled here (not module-level) so the function is
+    # The vocabularies, spelled here (not module-level) so the function is
     # self-contained: the slice tests exec it alone, and the CLIs own the words.
     BASELINE_SCOPES = ("individual", "own_group", "comparison", "cohort")
+    COHORT_WITNESSES = ("sheet", "comparisons")
     STRAIN_GATES = ("carrier", "group", "both", "none")
     analysis = config.get("analysis", {}) or {}
     block = analysis.get("baseline_presence", {}) or {}
     p = {
         "baseline_scope": str(block.get("baseline_scope", "cohort")),
+        "cohort_witnesses": str(block.get("cohort_witnesses", "sheet")),
         "cluster_window_bp": int(block.get("cluster_window_bp", 1000)),
         "max_de_novo_neighbours": int(block.get("max_de_novo_neighbours", 0)),
         "strain_gate": str(block.get("strain_gate", "carrier")),
@@ -581,6 +680,12 @@ def de_novo_rule_params():
         raise ValueError(
             f"analysis.baseline_presence.baseline_scope must be one of "
             f"{BASELINE_SCOPES}, got {p['baseline_scope']!r}"
+        )
+    # Checked under every scope (a typo is a typo), used only under cohort.
+    if p["cohort_witnesses"] not in COHORT_WITNESSES:
+        raise ValueError(
+            f"analysis.baseline_presence.cohort_witnesses must be one of "
+            f"{COHORT_WITNESSES}, got {p['cohort_witnesses']!r}"
         )
     if p["strain_gate"] not in STRAIN_GATES:
         raise ValueError(
@@ -1187,49 +1292,85 @@ for tp_label in timepoints_labels:
             _seen_tps.add(tp)
             unique_timepoints.append(tp)
 
-# CACHE_TIMEPOINTS: every single timepoint that gets QC and an allele-frequency
-# cache, and the values the {timepoint} wildcard may take.
+# Who may testify as a baseline witness, turned into two explicit lists
+# (design D13).  The de novo commands are handed exactly these lists
+# (--witness_timepoints, --witness_groups) and the workflow builds QC and
+# caches for exactly these, so a command never asks for a cache that was not
+# built and never skips one silently.
 #
-# Normally that is unique_timepoints (the comparison timepoints).  Under a dated
-# cohort baseline scope with a de novo analysis on, the de novo CLIs read EVERY
-# sample of the sheet dated before the first carrier as a baseline witness, so
-# the sheet's timepoints that sit in no comparison are added (first-collection-
-# date order).  No config knob: the sheet is the contract (design D2).
+#   CACHE_TIMEPOINTS  every single timepoint that gets metadata, QC and
+#                     allele-frequency caches, and the values the {timepoint}
+#                     wildcard may take.
+#   WITNESS_GROUPS    every group handed to the metadata step, hence present
+#                     in the QC tables and the caches.
 #
-# Example: comparisons a_b and a_c; the sheet also holds timepoint x, collected
-# before everything else.  Flag off -> ["a", "b", "c"].  Flag on -> ["a", "b",
-# "c", "x"], and x gets metadata, QC and caches like the others.
-COHORT_CACHES_EVERY_TIMEPOINT = False
+# Normally these are the comparisons' own timepoints (unique_timepoints) and
+# groups (group_values).  Two flags widen them:
+#
+#   COHORT_WITNESSES_ACTIVE   longitudinal data, baseline_scope: cohort, a
+#                             fully dated sheet and a de novo analysis on.  The
+#                             de novo commands then read samples outside the
+#                             comparison, so every tested genome gets a cache
+#                             at every entry of CACHE_TIMEPOINTS
+#                             (_cache_universe in dynamic_targets.smk).
+#   COHORT_READS_WHOLE_SHEET  the above AND cohort_witnesses: sheet (the
+#                             default).  The sheet's timepoints and groups
+#                             that sit in no comparison are added to the two
+#                             lists (timepoints in first-collection-date
+#                             order, groups sorted).
+#
+# Example: comparisons a_b and a_c of groups g1 and g2; the sheet also holds
+# timepoint x and group g3.
+#   scope not cohort            -> ["a", "b", "c"],      ["g1", "g2"]
+#   cohort, witnesses: sheet    -> ["a", "b", "c", "x"], ["g1", "g2", "g3"]
+#   cohort, witnesses: comparisons -> ["a", "b", "c"],   ["g1", "g2"], and a
+#     genome tested in a_b only still gets a cache at c (first flag).
+COHORT_WITNESSES_ACTIVE = False
+COHORT_READS_WHOLE_SHEET = False
 EXTRA_CACHE_TIMEPOINTS = []
+EXTRA_WITNESS_GROUPS = []
 if DATA_TYPE == "longitudinal":
     _analysis = config.get("analysis", {}) or {}
     _use_baseline_presence = bool(_analysis.get("use_baseline_presence", False))
     _use_gene_de_novo = bool(_analysis.get("use_gene_de_novo", False))
-    # The scope is read ONLY when a de novo analysis is on: de_novo_rule_params()
-    # also checks the strain gate against use_strain_turnover, and a config with
-    # no de novo analysis must never trip that check.
+    # The de novo knobs are read ONLY when a de novo analysis is on:
+    # de_novo_rule_params() also checks the strain gate against
+    # use_strain_turnover, and a config with no de novo analysis must never
+    # trip that check.
     if _use_baseline_presence or _use_gene_de_novo:
-        COHORT_CACHES_EVERY_TIMEPOINT = cohort_caches_every_timepoint(
+        _de_novo_params = de_novo_rule_params()
+        COHORT_WITNESSES_ACTIVE = cohort_witnesses_active(
             DATA_TYPE,
-            de_novo_rule_params()["baseline_scope"],
+            _de_novo_params["baseline_scope"],
             _use_baseline_presence,
             _use_gene_de_novo,
             sheet_fully_dated(_meta_sheet),
         )
-    if COHORT_CACHES_EVERY_TIMEPOINT:
+        COHORT_READS_WHOLE_SHEET = cohort_reads_whole_sheet(
+            COHORT_WITNESSES_ACTIVE, _de_novo_params["cohort_witnesses"]
+        )
+    if COHORT_READS_WHOLE_SHEET:
         EXTRA_CACHE_TIMEPOINTS = extra_cache_timepoints(_meta_sheet, unique_timepoints)
-    # Say so only when there IS an extra timepoint: every job re-reads this file,
+        EXTRA_WITNESS_GROUPS = extra_witness_groups(_meta_sheet, group_values)
+    # Say so only when there IS something extra: every job re-reads this file,
     # so a line that reports "none" would land in every job log for nothing.
-    if EXTRA_CACHE_TIMEPOINTS:
+    if EXTRA_CACHE_TIMEPOINTS or EXTRA_WITNESS_GROUPS:
         _n_extra_samples = int(
-            _meta_sheet["time"].astype(str).str.strip().isin(EXTRA_CACHE_TIMEPOINTS).sum()
+            (
+                _meta_sheet["time"].astype(str).str.strip().isin(EXTRA_CACHE_TIMEPOINTS)
+                | _meta_sheet["group"].astype(str).str.strip().isin(EXTRA_WITNESS_GROUPS)
+            ).sum()
         )
         logger.info(
-            "cohort scope: QC and caches at every sheet timepoint; extra "
-            f"timepoint(s) {EXTRA_CACHE_TIMEPOINTS} ({_n_extra_samples} samples)"
+            "cohort scope, cohort_witnesses: sheet -> QC and caches for every "
+            f"sheet timepoint and group; extra timepoint(s) {EXTRA_CACHE_TIMEPOINTS}, "
+            f"extra group(s) {EXTRA_WITNESS_GROUPS} ({_n_extra_samples} samples "
+            "outside every comparison)"
         )
     del _meta_sheet
 CACHE_TIMEPOINTS = unique_timepoints + EXTRA_CACHE_TIMEPOINTS
+# group_values holds text already (the config's treatment and control names).
+WITNESS_GROUPS = [str(g) for g in group_values] + EXTRA_WITNESS_GROUPS
 
 # QC and the allele-frequency cache are both built once per single timepoint
 # and are group-independent: the cache of (MAG, timepoint) reads the QC table
@@ -1984,18 +2125,47 @@ def get_baseline_presence_stem(timepoints="{timepoints}", groups="{groups}"):
     return os.path.join(OUTDIR, "baseline_presence", f"{timepoints}-{groups}_{family}_{stat}_baseline_presence")
 
 
-def get_all_qc_files_for_mag(mag_wildcard="{mag}"):
-    """One genome's QC table at every COMPARISON timepoint -- the ANI sample gate.
+def qc_tables_for_cache_files(mag_wildcard, cache_files):
+    """One genome's QC table at each timepoint it has a cache file at -- the ANI sample gate.
 
-    Unlike the allele-frequency cache (which wants ONE timepoint's QC),
-    pairwise ANI wants every sample judged usable at any timepoint of any
-    comparison; the CLI unions them.  One table per entry of
-    ``unique_timepoints``: the same samples the per-comparison tables used to
-    hold between them, each sample now in exactly one table.  Timepoints that
-    sit in no comparison (the extra cache timepoints of a cohort-scope run) are
-    left out, as before: ANI compares the samples of the comparisons.
+    Pairwise ANI compares the genome's QC-passing samples at the timepoints of
+    the comparisons it is TESTED in.  Those timepoints are exactly the cache
+    files the rule waits for (``allele_freq_cache_files_for_mag``), so the QC
+    tables are read off those paths: the sample list can then never name a
+    timepoint whose cache is not an input of the job.  It matters since the
+    de novo analysis may build caches of the same genome at other timepoints
+    (baseline witnesses): ANI must not pick those samples up, nor depend on
+    whether such a file happens to exist yet.
 
-    Example: comparisons ``pre_post`` and ``pre_end`` ->
-    ``[<run>/QC/QC_pre/MAG_7_QC.tsv, .../QC_post/..., .../QC_end/...]``.
+    ``cache_files`` are paths ``.../allele_freq_cache/{timepoint}/{file}``; the
+    timepoint is the name of the file's folder.  The tables come back in the
+    order of the config's comparisons (``unique_timepoints``), whatever the
+    order of ``cache_files``.
+
+    Raises ``ValueError`` on an empty list (an ANI job exists only for a
+    tested genome, which has caches) and on a folder that is not a comparison
+    timepoint (a witness-only cache handed to ANI): both are wiring mistakes.
+
+    Example: caches of MAG_7 at ``pre`` and ``post`` (tested in ``pre_post``
+    only; the run also compares ``pre_end``) ->
+    ``[<run>/QC/QC_pre/MAG_7_QC.tsv, <run>/QC/QC_post/MAG_7_QC.tsv]``.
     """
-    return [get_timepoint_qc_file(mag_wildcard, tp) for tp in unique_timepoints]
+    cached = {os.path.basename(os.path.dirname(str(f))) for f in cache_files}
+    if not cached:
+        raise ValueError(
+            f"pairwise ANI of {mag_wildcard}: no allele-frequency cache file among "
+            "the inputs, so there is no sample to compare"
+        )
+    unknown = sorted(cached - set(unique_timepoints))
+    if unknown:
+        raise ValueError(
+            f"pairwise ANI of {mag_wildcard}: cache file(s) at timepoint(s) "
+            f"{unknown}, which sit in no comparison ({unique_timepoints})"
+        )
+    return [
+        get_timepoint_qc_file(mag_wildcard, tp)
+        for tp in unique_timepoints
+        if tp in cached
+    ]
+
+

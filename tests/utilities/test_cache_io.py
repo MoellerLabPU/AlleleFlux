@@ -7,6 +7,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
+    empty_cache_table,
+)
 from alleleflux.scripts.utilities.cache_io import (
     cache_path,
     cache_samples,
@@ -185,3 +188,33 @@ def test_batches_are_filtered_independently(tmp_path):
         got["group"]
     ) == ["20", "40"]
     assert cache_samples(d, "MAG_A", "pre") == ["s1_pre", "s2_pre"]
+
+
+def test_zero_row_cache_has_no_samples_and_no_sites(cache):
+    """A genome with no QC-passing sample at a timepoint gets a cache with the
+    normal columns and zero rows (``alleleflux-cache-allele-freq
+    --allow_empty``).  The readers see a timepoint with nobody in it: no
+    sample, no row, and the other timepoints are read as usual."""
+    path = cache_path(cache, "MAG_A", "mid")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pq.write_table(empty_cache_table("longitudinal"), path)
+
+    assert cache_samples(cache, "MAG_A", "mid") == []
+    alone = load_cache_sites(cache, "MAG_A", ["mid"])
+    assert len(alone) == 0 and {"contig", "position", "sample_id", "timepoint"} <= set(
+        alone.columns
+    )
+    # Filters are applied to an empty file without tripping over it.
+    filtered = load_cache_sites(
+        cache,
+        "MAG_A",
+        ["mid"],
+        sites=pd.DataFrame({"contig": ["c1"], "position": [1]}),
+        sample_ids=["s1_pre"],
+        columns=["A"],
+    )
+    assert len(filtered) == 0
+    # Next to populated timepoints it adds nothing.
+    with_mid = load_cache_sites(cache, "MAG_A", ["pre", "mid", "end"])
+    without = load_cache_sites(cache, "MAG_A", ["pre", "end"])
+    pd.testing.assert_frame_equal(with_mid, without)

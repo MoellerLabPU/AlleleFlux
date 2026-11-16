@@ -56,6 +56,7 @@ class TestDeNovoRuleParams:
         fns = _load(_cfg({"summary": "two_sample_paired"}))
         assert fns["de_novo_rule_params"]() == {
             "baseline_scope": "cohort",
+            "cohort_witnesses": "sheet",
             "cluster_window_bp": 1000,
             "max_de_novo_neighbours": 0,
             "strain_gate": "carrier",
@@ -116,6 +117,34 @@ class TestDeNovoRuleParams:
             _load(_cfg({"strain_gate": "maybe"}))["de_novo_rule_params"]()
         with pytest.raises(ValueError, match="baseline_scope"):
             _load(_cfg({"baseline_scope": "everyone"}))["de_novo_rule_params"]()
+
+    def test_cohort_witnesses_defaults_to_sheet_and_refuses_an_unknown_word(self):
+        # Who may testify under the cohort scope: the whole sheet (default) or
+        # only samples at a compared timepoint in a compared group.
+        assert _load(_cfg({}))["de_novo_rule_params"]()["cohort_witnesses"] == "sheet"
+        assert (
+            _load(_cfg({"cohort_witnesses": "comparisons"}))["de_novo_rule_params"]()[
+                "cohort_witnesses"
+            ]
+            == "comparisons"
+        )
+        with pytest.raises(ValueError, match="cohort_witnesses"):
+            _load(_cfg({"cohort_witnesses": "everyone"}))["de_novo_rule_params"]()
+
+    def test_cohort_witnesses_is_kept_but_not_refused_under_another_scope(self):
+        # The config template always carries the line; under a scope that
+        # reads no outside witness it is simply not used.
+        p = _load(_cfg({"baseline_scope": "comparison", "cohort_witnesses": "sheet"}))[
+            "de_novo_rule_params"
+        ]()
+        assert (p["baseline_scope"], p["cohort_witnesses"]) == ("comparison", "sheet")
+
+    def test_cohort_witnesses_never_reaches_the_rising_origin_flags(self):
+        # It decides which samples are read, upstream; rising_origin has no such flag.
+        args = _load(_cfg({"cohort_witnesses": "comparisons"}))[
+            "de_novo_rule_cli_args"
+        ]()
+        assert "cohort_witnesses" not in args and "comparisons" not in args
 
     def test_negative_numbers_raise(self):
         with pytest.raises(ValueError, match="cluster_window_bp"):

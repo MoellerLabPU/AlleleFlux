@@ -72,6 +72,13 @@ rule allele_freq_cache:
         # Per-site depth filter flags, shared with pairwise_ani and
         # baseline_presence so every profile reader filters identically.
         site_filter_args=SITE_DEPTH_FILTER_ARGS,
+    # --allow_empty in the command below: the list of cache files is fixed from
+    # the eligibility tables, before any QC table is read.  Under the cohort
+    # baseline scope it holds every tested genome at every witness timepoint,
+    # and a genome can have no QC-passing sample at one of them; that job then
+    # writes a zero-row cache and a header-only sidecar instead of failing, so
+    # both declared outputs exist.  A genome at a timepoint of a comparison it
+    # is eligible in always has passing samples (eligibility counted them).
     threads: get_threads("allele_freq_cache")
     retries: get_retries("allele_freq_cache")
     resources:
@@ -86,6 +93,7 @@ rule allele_freq_cache:
             {params.timepoint_arg} \
             --data_type {params.data_type} \
             {params.site_filter_args} \
+            --allow_empty \
             --output_path {output.cache} \
             --cpus {threads}
         """

@@ -142,6 +142,42 @@ class TestQcPassingSamples(unittest.TestCase):
         self.assertTrue(got.empty)
         self.assertIn("sample_id", got.columns)
 
+    def test_groups_keep_the_roster_to_the_named_groups(self):
+        """Under ``cohort_witnesses: sheet`` the QC tables also list samples of
+        groups that sit in no comparison (they are baseline witnesses for the
+        de novo analysis).  Pairwise ANI keeps to the configured groups, so
+        the roster is filtered when ``groups`` is given, and unchanged
+        without it."""
+        columns = [
+            "sample_id",
+            "MAG_ID",
+            "group",
+            "subjectID",
+            "replicate",
+            "genome_size",
+            "breadth",
+            "coverage_threshold_passed",
+            "time",
+        ]
+        qc = os.path.join(self.tmp, "groups_QC.tsv")
+        pd.DataFrame(
+            [
+                ["S1", self.MAG, "20", "m1", "1", 5000, 0.8, True, "pre"],
+                ["S2", self.MAG, "40", "m2", "2", 5000, 0.8, True, "pre"],
+                ["S3", self.MAG, "other", "m3", "3", 5000, 0.8, True, "pre"],
+            ],
+            columns=columns,
+        ).to_csv(qc, sep="\t", index=False)
+        everyone = qc_passing_samples([qc], self.MAG)
+        self.assertEqual(sorted(everyone["sample_id"]), ["S1", "S2", "S3"])
+        # Group labels are compared as text: a number in the list matches "20".
+        kept = qc_passing_samples([qc], self.MAG, groups=[20, "40"])
+        self.assertEqual(sorted(kept["sample_id"]), ["S1", "S2"])
+        # No sample in the named groups: an empty roster with its columns.
+        none = qc_passing_samples([qc], self.MAG, groups=["absent"])
+        self.assertTrue(none.empty)
+        self.assertIn("sample_id", none.columns)
+
     def test_raises_when_verdict_column_missing(self):
         qc = os.path.join(self.tmp, "bad_QC.tsv")
         pd.DataFrame({"sample_id": ["S1"]}).to_csv(qc, sep="\t", index=False)

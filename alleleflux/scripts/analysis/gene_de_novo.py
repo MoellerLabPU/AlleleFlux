@@ -95,6 +95,8 @@ from alleleflux.scripts.utilities.genes import load_genes  # noqa: F401 (re-expo
 from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.sample_metadata import (
     META_OPTIONAL,
+    add_witness_args,
+    cohort_witness_rows,
     validate_collection_dates,
 )
 from alleleflux.scripts.utilities.utilities import build_contig_length_index
@@ -1053,10 +1055,31 @@ def hunt_the_hot_genes(args: argparse.Namespace) -> int:
                 f"{missing}"
             )
         if dated.all():
-            loaded = meta
-            timepoints = list(dict.fromkeys(meta["time"]))
+            # Who may testify: a sample outside the comparison is read only
+            # when its timepoint and its group are in the two lists the
+            # workflow built caches for (no list = no restriction; the same
+            # filter as alleleflux-baseline-presence).  The comparison's own
+            # samples are always read.
+            read = cohort_witness_rows(
+                meta, in_comparison, args.witness_timepoints, args.witness_groups
+            )
+            if not read.all():
+                left_out = meta[~read]
+                logger.info(
+                    f"cohort scope: {len(left_out)} sample(s) of the sheet not read "
+                    f"as baseline witnesses (timepoint outside --witness_timepoints "
+                    f"{args.witness_timepoints} or group outside --witness_groups "
+                    f"{args.witness_groups}): groups "
+                    f"{sorted(left_out['group'].unique())}, timepoints "
+                    f"{sorted(left_out['time'].unique())}"
+                )
+            loaded = meta[read]
+            # Every one of these timepoints must have a cache file per MAG
+            # (cache_io raises on a missing one); a zero-row file is a
+            # timepoint with no QC-passing sample of that MAG.
+            timepoints = list(dict.fromkeys(loaded["time"]))
             logger.info(
-                f"cohort scope: {len(meta) - len(comparison_meta)} samples outside "
+                f"cohort scope: {len(loaded) - len(comparison_meta)} samples outside "
                 f"the comparison loaded as potential baseline (timepoints {timepoints})"
             )
         else:
@@ -1211,6 +1234,7 @@ def main():
         default="cohort",
         help="What 'absent at baseline' is judged against (as alleleflux-baseline-presence)",
     )
+    add_witness_args(parser)
     parser.add_argument(
         "--cluster_window_bp",
         type=int,

@@ -15,6 +15,7 @@ import unittest
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
 from alleleflux.scripts.analysis.baseline_presence import (
@@ -1654,32 +1655,193 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual(g["origin_any_mouse"], "standing_variation")  # m1 pre has G
         self.assertTrue(pd.isna(g["first_carrier_date"]))
 
-    def test_cohort_skips_timepoints_without_a_cache_for_the_mag(self):
-        """A third timepoint in the sheet whose cache has no file for this genome
-        (the genome was not QC-eligible there): skipped with a log line, no crash."""
+    # ---- Phase 3b: the workflow builds a cache of every tested genome at every
+    # witness timepoint, so the command no longer skips a missing one, and it is
+    # told which timepoints and groups may testify.
+    COHORT_DATES = {
+        **{f"{m}_pre": "2017-01-10" for m in ("m1", "m2", "m3", "m4")},
+        **{f"{m}_end": "2017-06-10" for m in ("m1", "m2", "m3", "m4")},
+        "m5_mid": "2016-09-01",
+        "m6_mid": "2018-01-01",
+    }
+    OUTPUT_SUFFIXES = (".tsv.gz", "_summary.tsv", "_rising.tsv")
+
+    def _add_late_sample(self):
+        """One more dated sample, mouse m7 of group 'other' at a fourth timepoint
+        'late' (collected before everything else).  No cache is written for it."""
         meta = pd.read_csv(self.metadata, sep="\t", dtype=str)
-        meta = pd.concat(
-            [
-                meta,
-                pd.DataFrame(
-                    [
-                        {
-                            "sample_id": "m7_late",
-                            "subjectID": "m7",
-                            "group": "other",
-                            "time": "late",
-                            "replicate": "r4",
-                            "bam_path": "x",
-                        }
-                    ]
-                ),
-            ]
+        late = {
+            "sample_id": "m7_late",
+            "subjectID": "m7",
+            "group": "other",
+            "time": "late",
+            "replicate": "r4",
+            "bam_path": "x",
+            "collection_date": "2016-01-01",
+            "cohort": "wave1",
+        }
+        pd.concat([meta, pd.DataFrame([late])], ignore_index=True).to_csv(
+            self.metadata, sep="\t", index=False
         )
-        meta.to_csv(self.metadata, sep="\t", index=False)
+
+    def _outputs(self):
+        """The three output tables as text, keyed by their suffix."""
+        stem = os.path.join(
+            self.out, "pre_end-fat_control_two_sample_paired_tTest_baseline_presence"
+        )
+        return {
+            suffix: pd.read_csv(stem + suffix, sep="\t", dtype=str).to_csv(index=False)
+            for suffix in self.OUTPUT_SUFFIXES
+        }
+
+    def test_cohort_missing_cache_is_an_error_naming_the_file(self):
+        """A dated sheet with a timepoint whose cache file is not there.  The
+        workflow promises a cache of the genome at every witness timepoint, so
+        a missing one means witnesses were lost: stop, naming the file, never
+        skip it with a log line."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        self._add_late_sample()
+        done = self._run("--baseline_scope", "cohort")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("FileNotFoundError", done.stderr)
+        self.assertIn(f"{self.MAG}_late_allele_frequency.parquet", done.stderr)
+
+    def test_cohort_zero_row_cache_adds_no_witness(self):
+        """The same sheet, with the cache the workflow writes for a genome that
+        has no QC-passing sample at that timepoint (zero rows): the run goes
+        through and every table equals the run on the sheet without that
+        sample."""
+        from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
+            empty_cache_table,
+        )
+        from alleleflux.scripts.utilities.cache_io import cache_path
+
+        self._add_cohort_samples(self.COHORT_DATES)
         done = self._run("--baseline_scope", "cohort")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("late", done.stderr)
+        without_late = self._outputs()
+
+        self._add_late_sample()
+        path = cache_path(os.path.join(self.run, "allele_freq_cache"), self.MAG, "late")
+        os.makedirs(os.path.dirname(path))
+        pq.write_table(empty_cache_table("longitudinal"), path)
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
         self.assertNotIn("m7_late", set(self._long()["sample_id"]))
+        self.assertEqual(self._outputs(), without_late)
+
+    def test_witness_lists_covering_the_sheet_change_nothing(self):
+        """What the workflow passes under ``cohort_witnesses: sheet``: every
+        timepoint and group of the sheet.  Same tables as a run without the
+        two flags."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        plain = self._outputs()
+        done = self._run(
+            "--baseline_scope",
+            "cohort",
+            "--witness_timepoints",
+            "pre",
+            "end",
+            "mid",
+            "--witness_groups",
+            "fat",
+            "control",
+            "other",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self._outputs(), plain)
+        self.assertNotIn("not read as baseline witnesses", done.stderr)
+
+    def test_a_sample_outside_the_witness_timepoints_does_not_testify(self):
+        """m5_mid (group other, dated 2016) carries G before the first carrier.
+        With 'mid' left out of the witness timepoints it is not read, so G is
+        no longer standing, the run says how many samples were left out, and
+        the cache at 'mid' is never opened (it is removed here)."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")
+
+        shutil.rmtree(os.path.join(self.run, "allele_freq_cache", "mid"))
+        done = self._run(
+            "--baseline_scope", "cohort", "--witness_timepoints", "pre", "end"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertTrue(g["origin_any_mouse"].startswith("de_novo_candidate"))
+        self.assertEqual(int(g["n_pre_samples_covered"]), 3)  # m1, m2, m3 pre
+        self.assertNotIn("mid", set(self._long()["time"]))
+        self.assertIn(
+            "2 sample(s) of the sheet not read as baseline witnesses", done.stderr
+        )
+
+    def test_a_sample_outside_the_witness_groups_does_not_testify(self):
+        """Same allele, 'mid' IS a witness timepoint but group 'other' is not a
+        witness group: m5 and m6 are left out again."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+        done = self._run(
+            "--baseline_scope",
+            "cohort",
+            "--witness_timepoints",
+            "pre",
+            "end",
+            "mid",
+            "--witness_groups",
+            "fat",
+            "control",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertTrue(g["origin_any_mouse"].startswith("de_novo_candidate"))
+        self.assertNotIn("other", set(self._long()["group"]))
+        self.assertIn(
+            "2 sample(s) of the sheet not read as baseline witnesses", done.stderr
+        )
+
+    def test_the_comparisons_own_samples_are_never_filtered_out(self):
+        """Witness lists that name neither the comparison's timepoints nor its
+        groups: its own 8 samples are read all the same (the lists only decide
+        about samples OUTSIDE the comparison), plus the two 'mid' witnesses."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        done = self._run(
+            "--baseline_scope",
+            "cohort",
+            "--witness_timepoints",
+            "mid",
+            "--witness_groups",
+            "other",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        long = self._long()
+        self.assertEqual(long["sample_id"].nunique(), 10)
+        self.assertEqual(
+            long.loc[long.is_comparison_sample == "True", "sample_id"].nunique(), 8
+        )
+
+    def test_witness_lists_are_ignored_under_another_scope(self):
+        """The workflow passes the two lists whatever the scope; only cohort
+        reads outside the comparison, so under `comparison` they change nothing."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        done = self._run("--baseline_scope", "comparison")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        plain = self._outputs()
+        done = self._run(
+            "--baseline_scope",
+            "comparison",
+            "--witness_timepoints",
+            "mid",
+            "--witness_groups",
+            "other",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self._outputs(), plain)
 
 
 class TestCheckBaselineScope(unittest.TestCase):

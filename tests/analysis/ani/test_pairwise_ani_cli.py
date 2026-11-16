@@ -228,6 +228,23 @@ class TestPairwiseAniCLI(unittest.TestCase):
         # mean_coverage deliberately absent: QC's average_coverage is authoritative.
         self.assertNotIn("mean_coverage", samples.columns)
 
+    def test_groups_flag_keeps_other_groups_out_of_every_pair(self):
+        """The workflow passes the configured groups.  A sample of another
+        group (a baseline witness of the de novo analysis, present in the QC
+        table under ``cohort_witnesses: sheet``) is not compared: S2 is the
+        only control sample, so naming ``treatment`` alone leaves S1 and S3."""
+        completed = self._run("--groups", "treatment")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        table = self._read("_pairwise_ani.tsv")
+        self.assertEqual(
+            sorted(zip(table.sample1, table.sample2)), [("S1", "S3")], table
+        )
+        samples = self._read("_pairwise_ani_samples.tsv")
+        self.assertEqual(sorted(samples["sample_id"]), ["S1", "S3"])
+        # Both groups named: the same three pairs as without the flag.
+        self.assertEqual(self._run("--groups", "treatment", "control").returncode, 0)
+        self.assertEqual(len(self._read("_pairwise_ani.tsv")), 3)
+
     def test_within_subject_mode_restricts_pairs(self):
         self.assertEqual(self._run("--pairs", "within_subject").returncode, 0)
         table = self._read("_pairwise_ani.tsv")

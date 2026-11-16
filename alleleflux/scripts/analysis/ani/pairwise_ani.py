@@ -257,7 +257,10 @@ def round_up_the_sample_pairs(args: argparse.Namespace) -> int:
     # ---- 2. Who plays?  QC-passing samples, unioned across the QC files.
     # MAY be empty (low-abundance MAG): everything below still runs and produces
     # header-only outputs, so a pipeline over all MAGs never crashes here.
-    samples = qc_passing_samples(args.qc_files, args.mag)
+    # --groups (the workflow names the configured groups) keeps samples of any
+    # other group out: under cohort_witnesses: sheet the QC tables also list
+    # baseline witnesses of groups that sit in no comparison.
+    samples = qc_passing_samples(args.qc_files, args.mag, groups=args.groups)
 
     # ---- consistency guard: QC recorded the genome size IT used (same FASTA +
     # mapping, at QC time).  If it disagrees with the .fai-derived sum we are
@@ -441,8 +444,16 @@ def main():
         "--qc_files",
         required=True,
         nargs="+",
-        help="Per-MAG QC TSV(s), one per timepoint combination; samples "
-        "with coverage_threshold_passed anywhere are compared",
+        help="Per-MAG QC TSV(s), one per timepoint (QC/QC_{timepoint}/{mag}_QC.tsv); "
+        "samples with coverage_threshold_passed in any of them are compared. "
+        "The workflow passes the timepoints the MAG is tested at.",
+    )
+    parser.add_argument(
+        "--groups",
+        nargs="+",
+        default=None,
+        help="Compare only samples of these groups (the workflow passes the "
+        "groups of groups_combinations). Default: every group in the QC tables.",
     )
     parser.add_argument(
         "--fasta",

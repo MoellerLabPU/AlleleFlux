@@ -1,10 +1,15 @@
 """Pairwise conANI / popANI between the QC-passing sample pairs of each MAG.
 
 Scope: ONE job per {mag}, independent of group and timepoint combinations.  The
-sample universe is the union of everything that passed QC at any timepoint
-combination, so a single job covers within-mouse (pre vs end) and between-mouse
-comparisons at once; which pairs are actually compared is the CLI's --pairs
-setting (config analysis.pairwise_ani.pairs).
+sample universe is every sample of a configured group that passed QC at a
+timepoint of a comparison the MAG is tested in, so a single job covers
+within-mouse (pre vs end) and between-mouse comparisons at once; which pairs
+are actually compared is the CLI's --pairs setting (config
+analysis.pairwise_ani.pairs).
+
+The universe does not move with the de novo settings: witness-only caches
+(other timepoints of the MAG) and witness-only groups, built for baseline
+presence under the cohort scope, are never read here.
 
 The MAG universe is get_tested_mags(): every MAG eligible for at least one
 enabled test in at least one comparison, read from the eligibility checkpoints
@@ -19,10 +24,12 @@ rule pairwise_ani:
     input:
         # Depend on the QC sentinels rather than the QC TSVs so an interrupted QC
         # job cannot leave a half-written directory that looks complete.
-        # One per comparison timepoint: the tables get_all_qc_files_for_mag lists.
+        # One per comparison timepoint: a superset of the tables this MAG reads
+        # (params.qc_files lists those of its own timepoints).
         qc_sentinels=[qc_sentinel(tp) for tp in unique_timepoints],
-        # The MAG's cache files (one per timepoint it is QC-eligible at): the
-        # single per-site source after QC, already site-depth-filtered.
+        # The MAG's cache files, one per timepoint of the comparisons it is
+        # QC-eligible in: the single per-site source after QC, already
+        # site-depth-filtered.  Never its witness-only caches.
         caches=lambda wildcards: allele_freq_cache_files_for_mag(wildcards.mag),
         fasta=config["input"]["fasta_path"],
         mag_mapping=config["input"]["mag_mapping_path"],
@@ -47,7 +54,17 @@ rule pairwise_ani:
     params:
         # Wildcard-dependent params need a lambda (bare {wildcards.X} does not
         # interpolate inside params values -- house rule).
-        qc_files=lambda wildcards: " ".join(get_all_qc_files_for_mag(wildcards.mag)),
+        # The MAG's QC table at exactly the timepoints of input.caches, so the
+        # sample list never names a timepoint whose cache is not an input (and
+        # never depends on which other cache files happen to exist).  Read off
+        # the input paths, not from the eligibility checkpoint: a param may
+        # only depend on a checkpoint whose output is an input of the rule.
+        qc_files=lambda wildcards, input: " ".join(
+            qc_tables_for_cache_files(wildcards.mag, input.caches)
+        ),
+        # The configured groups only: under cohort_witnesses: sheet the QC
+        # tables also list samples of groups that sit in no comparison.
+        groups=" ".join(str(g) for g in group_values),
         cache_dir=os.path.join(REUSE_DIR, "allele_freq_cache"),
         output_dir=os.path.join(OUTDIR, "pairwise_ani"),
         # The presence rule, shared with baseline_presence via one dict in
@@ -80,6 +97,7 @@ rule pairwise_ani:
             --mag {wildcards.mag} \
             --cache_dir {params.cache_dir} \
             --qc_files {params.qc_files} \
+            --groups {params.groups} \
             --fasta {input.fasta} \
             --mag_mapping {input.mag_mapping} \
             --output_dir {params.output_dir} \

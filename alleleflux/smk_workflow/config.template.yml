@@ -105,6 +105,13 @@ analysis:
                                    # own_group = only its own group (groups housed apart, e.g. single-diet cages;
                                    #   needs summary single_sample or lmm_across_time, an error otherwise);
                                    # individual = the carrier mice's own earlier samples only.
+    cohort_witnesses: "sheet"      # who may testify under baseline_scope: cohort (ignored under the other scopes):
+                                   # sheet = any sample of the metadata sheet, at any timepoint and in any group;
+                                   #   timepoints and groups that sit in no comparison then get QC and
+                                   #   allele-frequency caches too (they are never tested, only read as witnesses);
+                                   # comparisons = only samples at a timepoint named in timepoints_combinations
+                                   #   AND in a group named in groups_combinations (no extra QC).
+                                   # Either way every tested genome gets a cache at every witness timepoint.
     cluster_window_bp: 1000        # cluster rule: de novo alleles within this many bp on one contig, in one
                                    # group, at any age, are one block event (chained), never independent mutations
     max_de_novo_neighbours: 0      # a de novo allele with MORE than this many such neighbours becomes a

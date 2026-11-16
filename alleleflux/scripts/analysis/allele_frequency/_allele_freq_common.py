@@ -24,6 +24,7 @@ directly; use the public API of allele_freq_cache.py or allele_freq.py.
 import logging
 
 import pandas as pd
+import pyarrow as pa
 
 from alleleflux.scripts.utilities.site_depth_filter import (
     SiteDepthFilter,
@@ -117,6 +118,69 @@ CACHE_CATEGORICAL_COLUMNS = [
 logger = logging.getLogger(__name__)
 
 
+def empty_cache_table(data_type):
+    """A cache table with the normal columns and types and NO rows.
+
+    Written by ``alleleflux-cache-allele-freq --allow_empty`` for a genome
+    that has no QC-passing sample at a timepoint.  The workflow fixes its list
+    of cache files before any QC table is read, so such a job must still
+    produce a file; its readers (``utilities/cache_io``) then find no sample
+    and no row in it.
+
+    The columns and types are spelled from the constants above, never guessed
+    from data, and equal those of a cache that has rows:
+
+    * the label columns of ``CACHE_CATEGORICAL_COLUMNS`` -> dictionary-encoded
+      text (what a pandas category becomes in Arrow);
+    * ``position``, ``total_coverage`` and the four counts -> int32
+      (``PROFILE_READ_DTYPES``);
+    * the four ``*_frequency`` columns -> float32 (``calculate_frequencies``);
+    * ``contig`` and ``gene_id`` -> plain text.
+
+    Parameters
+    ----------
+    data_type : str
+        ``"longitudinal"`` (columns ``CACHE_COLUMNS_LONGITUDINAL``, with
+        ``time``) or ``"single"`` (``CACHE_COLUMNS_BASE``, without).
+
+    Returns
+    -------
+    pyarrow.Table
+        Zero rows.  Example: ``empty_cache_table("longitudinal").num_rows``
+        is 0 and its column names are ``CACHE_COLUMNS_LONGITUDINAL``.
+
+    Raises
+    ------
+    ValueError
+        On any other ``data_type``.
+    """
+    if data_type not in ("single", "longitudinal"):
+        raise ValueError(
+            f"data_type must be 'single' or 'longitudinal', got {data_type!r}"
+        )
+    columns = (
+        CACHE_COLUMNS_LONGITUDINAL
+        if data_type == "longitudinal"
+        else CACHE_COLUMNS_BASE
+    )
+    fields = []
+    for name in columns:
+        if name in CACHE_CATEGORICAL_COLUMNS:
+            # Checked first: ref_base is read as text from the profile and
+            # made a category afterwards, so it is listed in both constants.
+            # int8 codes are what pandas hands Arrow for a category with
+            # fewer than 128 values (one sample per row group in a real cache).
+            arrow_type = pa.dictionary(pa.int8(), pa.string())
+        elif PROFILE_READ_DTYPES.get(name) == "int32":
+            arrow_type = pa.int32()
+        elif name in NUCLEOTIDES:
+            arrow_type = pa.float32()
+        else:
+            arrow_type = pa.string()  # contig, gene_id
+        fields.append(pa.field(name, arrow_type))
+    return pa.schema(fields).empty_table()
+
+
 # ---------------------------------------------------------------------------
 # QC loading
 # ---------------------------------------------------------------------------
@@ -125,10 +189,11 @@ logger = logging.getLogger(__name__)
 def load_qc_results(qc_file_path, mag_id):
     """Load a per-MAG QC TSV and return only the samples that passed.
 
-    Called by ``allele_freq_cache.py``'s ``union_qc_samples()`` to identify
-    which samples to include in the cache.  May be called with multiple QC
-    files (one per combination) so that the cache union covers every sample
-    relevant to this timepoint across all group combinations.
+    Called by ``allele_freq_cache.py`` to decide which samples go into the
+    cache of one genome at one timepoint.  The table is the genome's QC table
+    of that timepoint (``QC/QC_{timepoint}/{mag}_QC.tsv``); it lists every
+    sample of the timepoint, passing or not, and is header-only when the
+    genome has no profiled sample there.
 
     Parameters
     ----------
@@ -143,12 +208,13 @@ def load_qc_results(qc_file_path, mag_id):
         Rows where ``coverage_threshold_passed == True``, with at minimum:
         sample_id, file_path, group, subjectID, replicate, breadth,
         average_coverage, genome_size, and ``time`` (for longitudinal data).
+        MAY BE EMPTY (no sample passed, or a header-only table): the caller
+        decides whether that is an error (``--allow_empty``).
 
     Raises
     ------
     ValueError
-        If the QC file has no ``coverage_threshold_passed`` column, or if
-        no samples passed the threshold.
+        If the QC file has no ``coverage_threshold_passed`` column.
     """
     logger.info(f"Loading QC results from {qc_file_path}")
 
@@ -163,16 +229,13 @@ def load_qc_results(qc_file_path, mag_id):
     # Keep only samples that cleared both breadth and average-coverage thresholds.
     # This mirrors the original allele_freq.py filter — the QC step has already
     # computed the boolean; we just respect it here.
+    # Zero passing rows is returned as it is, not raised: under --allow_empty
+    # the cache writer turns it into a zero-row cache, otherwise it stops.
     passed_df = qc_df[qc_df["coverage_threshold_passed"] == True].copy()
 
-    if passed_df.empty:
-        raise ValueError(
-            f"No samples passed coverage threshold for MAG {mag_id}. "
-            f"Total samples in QC file: {len(qc_df)}"
-        )
-
     logger.info(
-        f"Loaded {len(passed_df)} samples (out of {len(qc_df)} total) that passed coverage and breadth thresholds"
+        f"MAG {mag_id}: {len(passed_df)} samples (out of {len(qc_df)} total) "
+        f"passed coverage and breadth thresholds"
     )
 
     return passed_df

@@ -715,322 +715,6 @@ def generate_dnds_analysis_targets(tp, gr):
         targets.append(dnds_sentinel(tp, gr, subject))
     return targets
 
-# Test the following functions before uncommenting. They are not all 100% up to date and might need modification. Be careful.
-"""
-def get_two_sample_targets(test_type):
-    # Only generate targets if use_significance_tests is enabled
-    if not config["analysis"].get("use_significance_tests", True):
-        return []
-        
-    # Define subdirectory and file suffix based on the test type.
-    if test_type == "two_sample_unpaired":
-        subdir = "two_sample_unpaired"
-        suffix = "_two_sample_unpaired.tsv.gz"
-    elif test_type == "two_sample_paired":
-        subdir = "two_sample_paired"
-        suffix = "_two_sample_paired.tsv.gz"
-    else:
-        raise ValueError("test_type must be either 'unpaired' or 'paired'")
-    targets = []
-    for tp in timepoints_labels:
-        for gr in groups_labels:
-            for mag in get_mags_by_eligibility(tp, gr, eligibility_type=test_type):
-                targets.append(
-                    os.path.join(
-                        OUTDIR,
-                        "significance_tests",
-                        f"{subdir}_{tp}-{gr}",
-                        f"{mag}{suffix}",
-                    )
-                )
-    return targets
-
-def get_single_sample_targets():
-    # Only generate targets if use_significance_tests is enabled
-    if not config["analysis"].get("use_significance_tests", True):
-        return []
-        
-    targets = []
-    for tp in timepoints_labels:
-        for gr in groups_labels:
-            for mag, group in get_single_sample_entries(tp, gr):
-                targets.append(
-                    os.path.join(
-                        OUTDIR,
-                        "significance_tests",
-                        f"single_sample_{tp}-{gr}",
-                        f"{mag}_single_sample_{group}.tsv.gz",
-                    )
-                )
-    return targets
-
-def get_lmm_targets():
-    # Only generate targets if use_lmm is enabled
-    if not config["analysis"].get("use_lmm", True):
-        return []
-        
-    targets = []
-    for tp in timepoints_labels:
-        for gr in groups_labels:
-            for mag in get_mags_by_eligibility(tp, gr):
-                targets.append(
-                    os.path.join(
-                        OUTDIR,
-                        "significance_tests",
-                        f"lmm_{tp}-{gr}",
-                        f"{mag}_lmm.tsv.gz",
-                    )
-                )
-    return targets
-
-    
-
-
-def get_gene_scores_targets():
-    targets = []
-    if config["analysis"].get("use_significance_tests", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                for test_type in ["two_sample_unpaired", "two_sample_paired"]:
-
-                    # Only generate targets if there are eligible MAGs
-                    mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
-                    if mags:  # Only proceed if there are eligible MAGs
-                        group_str = ""  # no group marker for two-sample tests
-                        for mag in mags:
-                            prefix = f"{mag}_{test_type}{group_str}"
-                            base_dir = os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "processed",
-                                f"gene_scores_{tp}-{gr}",
-                            )
-                            targets.extend(
-                                [
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_combined.tsv"
-                                    ),
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_individual.tsv"
-                                    ),
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_overlapping.tsv"
-                                    ),
-                                ]
-                            )
-                # Only include single sample targets if data_type is longitudinal
-                if DATA_TYPE == "longitudinal":
-                    sample_entries = get_single_sample_entries(tp, gr)
-                    if sample_entries:  # Only proceed if there are eligible MAGs
-                        for mag, grp in sample_entries:
-                            group_str = f"_{grp}"
-                            prefix = f"{mag}_single_sample{group_str}"
-                            base_dir = os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "processed",
-                                f"gene_scores_{tp}-{gr}",
-                            )
-                            targets.extend(
-                                [
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_combined.tsv"
-                                    ),
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_individual.tsv"
-                                    ),
-                                    os.path.join(
-                                        base_dir, f"{prefix}_gene_scores_overlapping.tsv"
-                                    ),
-                                ]
-                            )
-    return targets
-
-def get_cmh_test_targets():
-    targets = []
-    if config["analysis"].get("use_cmh", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                # Only process timepoint combinations with two timepoints
-                # CMH uses paired eligibility
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type="cmh")
-                if mags:  # Only proceed if there are eligible MAGs
-                    for mag in mags:
-                        targets.append(
-                            os.path.join(
-                                OUTDIR,
-                                "significance_tests",
-                                f"cmh_{tp}-{gr}",
-                                f"{mag}_cmh.tsv.gz",
-                            )
-                        )
-    return targets
-
-
-
-def get_significance_scores_targets():
-    targets = []
-    if config["analysis"].get("use_significance_tests", True):
-        # For two-sample tests (unpaired and paired)
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                for test_type in ["two_sample_unpaired", "two_sample_paired"]:
-                    mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
-                    if mags:  # Only proceed if there are eligible MAGs
-                        for mag in mags:
-                            # Using group_str for non-CMH test types
-                            group_str = ""  # no group marker for two-sample tests
-                            targets.append(
-                                os.path.join(
-                                    OUTDIR,
-                                    "scores",
-                                    "intermediate",
-                                    f"MAG_scores_{tp}-{gr}",
-                                    f"{mag}_score_{test_type}{group_str}.tsv",
-                                )
-                            )
-        # For single-sample tests - only include if data_type is longitudinal
-        if DATA_TYPE == "longitudinal":
-            for tp in timepoints_labels:
-                for gr in groups_labels:
-                    sample_entries = get_single_sample_entries(tp, gr)
-                    for mag, group in sample_entries:
-                        # Using group_str for single-sample test type
-                        group_str = f"_{group}"
-                        targets.append(
-                            os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "intermediate",
-                                f"MAG_scores_{tp}-{gr}",
-                                f"{mag}_score_single_sample{group_str}.tsv",
-                            )
-                        )
-    # Add LMM scores
-    if config["analysis"].get("use_lmm", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                group_str = ""  # no group marker for LMM
-                # Use the unpaired eligibility type for LMM
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type="lmm")
-                if mags:
-                    for mag in mags:
-                        targets.append(
-                            os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "intermediate",
-                                f"MAG_scores_{tp}-{gr}",
-                                f"{mag}_score_lmm{group_str}.tsv",
-                            )
-                        )
-    # Add CMH scores
-    if config["analysis"].get("use_cmh", True):  # Updated to check for CMH scores 
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                # Use the paired eligibility type for CMH
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type="cmh")
-                if mags: 
-                    # Get the focus timepoint from our global mapping
-                    focus_tp = focus_timepoints.get(tp)
-                    if not focus_tp:
-                        raise ValueError(f"No focus timepoint defined for {tp}, skipping CMH score targets")
-                    for mag in mags:
-                        # Using focus for CMH test type, no group_str
-                        # focus = f"_{focus_tp}"
-                        targets.append(
-                            os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "intermediate",
-                                f"MAG_scores_{tp}-{gr}",
-                                f"{mag}_score_cmh_{focus_tp}.tsv",
-                            )
-                        )
-    return targets
-
-def get_combined_scores_targets():
-    targets = []
-    # Two-sample tests: group_str is empty.
-    if config["analysis"].get("use_significance_tests", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                for test_type in ["two_sample_unpaired", "two_sample_paired"]:
-                    # Only generate targets if there are eligible MAGs for this test type
-                    mags = get_mags_by_eligibility(tp, gr, eligibility_type=test_type)
-                    if mags:  # Only proceed if there are eligible MAGs
-                        group_str = ""  # no group marker for two-sample tests
-                        targets.append(
-                            os.path.join(
-                                OUTDIR,
-                                "scores",
-                                "processed",
-                                "combined",
-                                f"scores_{test_type}-{tp}-{gr}{group_str}-MAGs.tsv",
-                            )
-                        )
-        # Single-sample tests: group_str is "_" plus the sample group.
-        # Only include if data_type is longitudinal
-        if DATA_TYPE == "longitudinal":
-            for tp in timepoints_labels:
-                for gr in groups_labels:
-                    # get_single_sample_entries returns (mag, group) pairs for a given timepoint and group.
-                    sample_entries = get_single_sample_entries(tp, gr)
-                    if sample_entries:  # Only proceed if there are eligible MAGs
-                        unique_groups = sorted(set([grp for mag, grp in sample_entries]))
-                        for grp in unique_groups:
-                            group_str = f"_{grp}"
-                            targets.append(
-                                os.path.join(
-                                    OUTDIR,
-                                    "scores",
-                                    "processed",
-                                    "combined",
-                                    f"scores_single_sample-{tp}-{gr}{group_str}-MAGs.tsv",
-                                )
-                            )
-    # Add LMM targets if enabled
-    if config["analysis"].get("use_lmm", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                # Only generate targets if there are eligible MAGs
-                # Use the unpaired eligibility type for LMM
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type="lmm")
-                if mags:  # Only proceed if there are eligible MAGs
-                    group_str = ""  # no group marker for LMM
-                    targets.append(
-                        os.path.join(
-                            OUTDIR,
-                            "scores",
-                            "processed",
-                            "combined",
-                            f"scores_lmm-{tp}-{gr}{group_str}-MAGs.tsv",
-                        )
-                    )
-                    
-    # Add CMH targets if enabled
-    if config["analysis"].get("use_cmh", True):
-        for tp in timepoints_labels:
-            for gr in groups_labels:
-                # Only process if we have eligible MAGs
-                mags = get_mags_by_eligibility(tp, gr, eligibility_type="cmh")
-                if mags:
-                    # Get the focus timepoint from our global mapping
-                    focus_tp = focus_timepoints.get(tp)
-                    if not focus_tp:
-                        raise ValueError(f"No focus timepoint defined for {tp}.")
-                    targets.append(
-                        os.path.join(
-                            OUTDIR,
-                            "scores",
-                            "processed",
-                            "combined",
-                            f"scores_cmh-{tp}-{gr}-MAGs-{focus_tp}.tsv",
-                        )
-                    )
-    return targets
-"""
-
 def get_tested_mags():
     """The MAG universe for pairwise ANI and everything downstream of it: every MAG
     that is eligible for at least one enabled test in at least one configured
@@ -1135,24 +819,43 @@ def generate_rising_origin_targets():
     return [os.path.join(OUTDIR, "baseline_presence", "rising_origin", "rising_origin_summary.tsv")]
 
 
-def _cache_universe():
-    """Every (timepoints_label, groups_label, mag, timepoint) a cache job exists for.
+def _cache_universe(witness_timepoints):
+    """Every (timepoints_label, groups_label, mag, timepoint) a cache file is read at.
 
-    The one definition of "which cache files this run produces": a cache file
-    exists per (MAG, timepoint) for every MAG that passes QC eligibility in some
-    configured comparison.  The three helpers below are slices of this walk, so
-    the sidecar targets, the per-MAG inputs (pairwise ANI) and the
-    per-comparison inputs (baseline presence, dN/dS) can never disagree.  Reads
-    the QC eligibility checkpoint, so every caller is checkpoint-dependent:
-    call them from get_final_pipeline_outputs or a rule's input *function*,
-    never at parse time.
+    A cache file exists per (MAG, timepoint) for every MAG that passes QC
+    eligibility in some configured comparison.  At which timepoints depends on
+    who is asking:
 
-    Example: comparisons pre_end and pre_post x g1_g2, MAG_7 eligible in both,
-    MAG_9 only in pre_end -> yields (pre_end, g1_g2, MAG_7, pre), (.., end),
-    (pre_post, g1_g2, MAG_7, pre), (.., post), (pre_end, g1_g2, MAG_9, pre), (.., end).
+    * ``witness_timepoints`` False: the timepoints of the comparison itself
+      (two for longitudinal data, one for single).  What the statistics,
+      pairwise ANI and dN/dS read.
+    * ``witness_timepoints`` True: under a dated cohort baseline scope with a
+      de novo analysis on (``COHORT_WITNESSES_ACTIVE``, common.smk), every
+      witness timepoint (``CACHE_TIMEPOINTS``): a genome's samples at any of
+      them may testify that an allele was already there, whether or not the
+      genome is tested at that timepoint.  When the condition is not met this
+      is the same walk as False.
+
+    The helpers below are slices of this one walk, so the sidecar targets, the
+    per-MAG inputs (pairwise ANI) and the per-comparison inputs (baseline
+    presence, gene de novo, dN/dS) can never disagree.  Reads the QC
+    eligibility checkpoint, so every caller is checkpoint-dependent: call them
+    from get_final_pipeline_outputs or a rule's input *function*, never at
+    parse time.
+
+    Example: comparisons a_b and a_c x g1_g2; M1 eligible in both, M2 in a_b
+    only; the sheet also holds timepoint x, so CACHE_TIMEPOINTS is a, b, c, x.
+    False -> (a_b, g1_g2, M1, a), (.., b), (a_b, g1_g2, M2, a), (.., b),
+    (a_c, g1_g2, M1, a), (.., c).  True under the cohort condition -> each of
+    (a_b, M1), (a_b, M2) and (a_c, M1) at a, b, c and x: M2 gets caches at c
+    and x although it is tested in a_b only.
     """
+    widen = witness_timepoints and COHORT_WITNESSES_ACTIVE
     for tp in timepoints_labels:
-        tps = tp.split("_") if DATA_TYPE == "longitudinal" else [tp]
+        if widen:
+            tps = CACHE_TIMEPOINTS
+        else:
+            tps = tp.split("_") if DATA_TYPE == "longitudinal" else [tp]
         for gr in groups_labels:
             for mag in _get_mags_by_eligibility(tp, gr, eligibility_type="all"):
                 for timepoint in tps:
@@ -1161,7 +864,8 @@ def _cache_universe():
 
 def generate_allele_freq_cache_sidecar_targets():
     """Every site-depth-filter sidecar the cache jobs of this run will write
-    (one next to each cache file of ``_cache_universe``).
+    (one next to each cache file of ``_cache_universe``, witness caches
+    included: the sidecar of a zero-row witness cache is header-only).
 
     Example: 80 and 79 QC-eligible MAGs in two comparisons sharing ``pre`` ->
     sidecars for the union of MAGs at pre, end and post.
@@ -1172,42 +876,50 @@ def generate_allele_freq_cache_sidecar_targets():
                 : -len(".parquet")
             ]
             + "_site_depth_filter.tsv"
-            for _, _, mag, timepoint in _cache_universe()
+            for _, _, mag, timepoint in _cache_universe(True)
         }
     )
 
 
 def allele_freq_cache_files_for_mag(mag_id):
-    """The cache files of one MAG across every comparison it is QC-eligible in
-    (pairwise ANI's inputs: one job per MAG, group- and comparison-blind).
+    """The cache files of one MAG at the timepoints of every comparison it is
+    QC-eligible in (pairwise ANI's inputs: one job per MAG, group- and
+    comparison-blind).  Never the witness-only caches: ANI compares the samples
+    of the comparisons the genome is tested in, and must not change with the
+    de novo settings.  The rule reads its QC tables off these paths
+    (``qc_tables_for_cache_files``), so the samples are exactly these files'.
 
     Example: a MAG eligible in pre_end and pre_post -> its caches at pre, end
-    and post; one eligible only in pre_end -> pre and end (its post samples,
-    if any passed QC, are then skipped by the ANI CLI with a warning).
+    and post; one eligible only in pre_end -> pre and end (its post samples
+    are not compared).
     """
     return sorted(
         {
             get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
-            for _, _, mag, timepoint in _cache_universe()
+            for _, _, mag, timepoint in _cache_universe(False)
             if mag == mag_id
         }
     )
 
 
-def allele_freq_cache_files_for_comparison(timepoints_label, groups_label):
+def allele_freq_cache_files_for_comparison(timepoints_label, groups_label,
+                                           witness_timepoints):
     """The cache files of one comparison: every QC-eligible MAG of that
-    (timepoints, groups) combination at each of its timepoints (baseline
-    presence's and dN/dS's inputs).  A superset of the MAGs they will actually
-    open (those with significant sites, known only at run time), declared so a
-    deleted or stale cache re-triggers the cache job instead of surfacing as a
-    FileNotFoundError inside the consumer.
+    (timepoints, groups) combination, at each of its own timepoints
+    (``witness_timepoints`` False: dN/dS) or at every witness timepoint
+    (True: baseline presence and gene de novo, which read baseline witnesses
+    under the cohort scope; see ``_cache_universe``).  A superset of the MAGs
+    the command will actually open (those with significant sites, known only
+    at run time), declared so a deleted or stale cache re-triggers the cache
+    job instead of surfacing as a FileNotFoundError inside the consumer.
 
-    Example: pre_post x g1_g2 with 80 QC-eligible MAGs -> 160 cache paths.
+    Example: pre_post x g1_g2 with 80 QC-eligible MAGs -> 160 cache paths;
+    with witnesses under the cohort condition and 9 witness timepoints -> 720.
     """
     return sorted(
         {
             get_allele_freq_cache_path(mag_wildcard=mag, timepoint_wildcard=timepoint)
-            for tp, gr, mag, timepoint in _cache_universe()
+            for tp, gr, mag, timepoint in _cache_universe(witness_timepoints)
             if (tp, gr) == (timepoints_label, groups_label)
         }
     )

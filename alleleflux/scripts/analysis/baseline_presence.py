@@ -102,13 +102,14 @@ import pandas as pd
 from alleleflux.scripts.analysis.ani.classify import BASES
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
 from alleleflux.scripts.utilities.cache_io import (
-    cache_path,
     cache_samples,
     load_cache_sites,
 )
 from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.sample_metadata import (
     META_OPTIONAL,
+    add_witness_args,
+    cohort_witness_rows,
     validate_collection_dates,
 )
 
@@ -1242,23 +1243,18 @@ def _assess_one_mag(job: tuple) -> pd.DataFrame:
     cache passed QC for it and is assessed at every candidate site, with zero
     reads (not_covered) where the cache has no row for that position; a sample
     with no rows at all did not pass QC for this MAG and gets no rows.
+
+    Every timepoint in ``timepoints`` must have a cache file for the MAG: a
+    missing one raises ``FileNotFoundError`` naming the path (``cache_io``).
+    The workflow builds a cache of every tested genome at every witness
+    timepoint, zero rows when the genome has no QC-passing sample there, so a
+    missing file means witnesses would be lost without a trace; a zero-row
+    file simply contributes no sample.
     Module-level so it pickles into ``multiprocessing.Pool``.
     """
     mag_id, cache_dir, timepoints, sample_ids, candidates, model, min_freq, min_cov = (
         job
     )
-    # Under cohort every timepoint of the sheet is requested; a genome has no
-    # cache file at a timepoint where it was not QC-eligible, so there are no
-    # QC-passing samples to assess there: skip it, say so, never crash.
-    present = [
-        tp for tp in timepoints if os.path.exists(cache_path(cache_dir, mag_id, tp))
-    ]
-    if len(present) < len(timepoints):
-        logger.info(
-            f"{mag_id}: no cache file at timepoint(s) "
-            f"{[tp for tp in timepoints if tp not in present]} (not QC-eligible there): skipped"
-        )
-    timepoints = present
     cand = candidates[["contig", "position", "allele"]].drop_duplicates()
     wanted = set(map(str, sample_ids))
     roster = sorted(
@@ -1399,15 +1395,45 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
             for t in (earlier, later)
         )
     )
-    # Timepoints the per-MAG workers read from the cache, and the sheet's
-    # timepoint order (the cohort fallback when dates cannot order the baseline).
     # Which timepoints the per-MAG workers read from the cache: the comparison's
-    # two, plus every other one under a DATED cohort scope (dates alone can
-    # place them before or after the first carrier).  Without dates the cohort
-    # baseline is the comparison's earlier timepoint (baseline_rows), so the
-    # other timepoints are not read at all.
-    sheet_timepoints = list(dict.fromkeys(meta["time"]))
+    # two, plus every other one that is read under a DATED cohort scope (dates
+    # alone can place them before or after the first carrier).  Without dates
+    # the cohort baseline is the comparison's earlier timepoint (baseline_rows),
+    # so the other timepoints are not read at all.
     timepoints = [earlier, later]
+    if args.baseline_scope == "cohort":
+        # Whether the sheet is dated is asked of the WHOLE sheet, before any
+        # sample is set aside below: the workflow asks the same question of
+        # the same rows when it decides which caches to build.
+        dated = meta["collection_date"].notna() & (
+            meta["collection_date"].astype(str).str.strip() != ""
+        )
+        n_sheet = len(meta)
+        undated_samples = sorted(meta.loc[~dated, "sample_id"])
+        # Who may testify: a sample outside the comparison is read only when
+        # its timepoint and its group are in the two lists the workflow built
+        # caches for (no list = no restriction).  The comparison's own samples
+        # are always read.
+        read = cohort_witness_rows(
+            meta,
+            meta["is_comparison_sample"],
+            args.witness_timepoints,
+            args.witness_groups,
+        )
+        if not read.all():
+            left_out = meta[~read]
+            logger.info(
+                f"cohort scope: {len(left_out)} sample(s) of the sheet not read as "
+                f"baseline witnesses (timepoint outside --witness_timepoints "
+                f"{args.witness_timepoints} or group outside --witness_groups "
+                f"{args.witness_groups}): groups {sorted(left_out['group'].unique())}, "
+                f"timepoints {sorted(left_out['time'].unique())}"
+            )
+            meta = meta[read].copy()
+    # The timepoints of the samples that are read, in the sheet's order (the
+    # comparison's two under every scope but cohort).  Used for the cache reads
+    # below and for the row order of the long table.
+    read_timepoints = list(dict.fromkeys(meta["time"]))
     if args.baseline_scope == "cohort":
         extra = meta[~meta["is_comparison_sample"]]
         logger.info(
@@ -1423,22 +1449,18 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         # back to the sheet's timepoint order, warn once.  SOME dates = a data
         # error: ordering by label while some samples are dated would silently
         # change the baseline, so stop and name every undated sample.
-        dated = meta["collection_date"].notna() & (
-            meta["collection_date"].astype(str).str.strip() != ""
-        )
         if dated.any() and not dated.all():
-            missing = sorted(meta.loc[~dated, "sample_id"])
             raise ValueError(
                 f"--baseline_scope cohort needs a collection_date (YYYY-MM-DD) for "
-                f"every sample or for none; {len(missing)} of {len(meta)} are blank: "
-                f"{missing}"
+                f"every sample or for none; {len(undated_samples)} of {n_sheet} are "
+                f"blank: {undated_samples}"
             )
         if dated.all():
-            timepoints = sheet_timepoints
+            timepoints = read_timepoints
         else:
             logger.warning(
                 f"cohort scope: no collection_date in the metadata, so nothing can "
-                f"place the other timepoints {sorted(set(sheet_timepoints) - {earlier, later})} "
+                f"place the other timepoints {sorted(set(read_timepoints) - {earlier, later})} "
                 f"before or after the first carrier; the baseline is the comparison's "
                 f"earlier timepoint {earlier!r} only (as under --baseline_scope "
                 f"comparison).  Add a collection_date column to use the full cohort."
@@ -1597,11 +1619,12 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     # Earlier timepoint before later within a site: an ordered categorical sorts
     # by comparison order, not alphabetically ("end" < "pre" would flip them).
     # Other timepoints (cohort scope) follow, in the sheet's order; a label
-    # missing from the categories would turn into NaN, so every label is listed.
+    # missing from the categories would turn into NaN, so every label that is
+    # read is listed.
     long["time"] = pd.Categorical(
         long["time"],
         categories=[earlier, later]
-        + [t for t in sheet_timepoints if t not in (earlier, later)],
+        + [t for t in read_timepoints if t not in (earlier, later)],
         ordered=True,
     )
     long = long[LONG_COLUMNS].sort_values(
@@ -1716,6 +1739,7 @@ def main():
             "'before' means an earlier timepoint label and a warning is logged)."
         ),
     )
+    add_witness_args(parser)
     parser.add_argument(
         "--min_cov",
         type=int,

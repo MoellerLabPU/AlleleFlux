@@ -61,7 +61,9 @@ _DENSE_DTYPE = np.uint16
 _DENSE_MAX = np.iinfo(_DENSE_DTYPE).max
 
 
-def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
+def qc_passing_samples(
+    qc_files: list[str], mag_id: str, groups: list[str] | None = None
+) -> pd.DataFrame:
     """Samples that cleared AlleleFlux QC for this MAG, unioned across QC files.
 
     One QC file exists per MAG **per timepoint** and lists EVERY sample of that
@@ -80,9 +82,16 @@ def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
         -> 30 rows: the 16 + 14 passing samples; the header-only table adds none
 
     Note the caller chooses the scope: pass ONE file and the roster is exactly
-    that timepoint's samples; pass all files (what the Snakemake rule does) and
-    the roster spans every timepoint, which is what within-subject cross-timepoint
-    pairs need.
+    that timepoint's samples; pass several (the Snakemake rule passes the
+    timepoints the genome is tested at) and the roster spans them, which is
+    what within-subject cross-timepoint pairs need.
+
+    ``groups`` narrows the roster to the named groups.  The QC tables can list
+    samples of groups that sit in no comparison (baseline witnesses of the de
+    novo analysis under ``cohort_witnesses: sheet``); pairwise ANI keeps to
+    the configured groups, so the rule names them.  Same example with
+    ``groups=["fat"]`` and 9 of the 30 passing samples in another group -> 21
+    rows.
 
     Parameters
     ----------
@@ -91,6 +100,10 @@ def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
         quality_control.py's real output files.
     mag_id : str
         Only used for log/error context; the files are already per-MAG.
+    groups : list of str, optional
+        Keep only samples whose ``group`` is one of these (compared as text, so
+        a numeric label such as 20 matches the table's "20").  ``None`` = every
+        group.
 
     Returns
     -------
@@ -120,6 +133,10 @@ def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
         # The verdict column arrives as real bools (pandas parses TSV True/False);
         # keep only rows that passed.
         passing = table[table["coverage_threshold_passed"] == True]  # noqa: E712
+        if groups is not None:
+            # "group" is read as str (_QC_DTYPES); the wanted labels are cast
+            # the same way so 20 and "20" are one group.
+            passing = passing[passing["group"].isin({str(g) for g in groups})]
         # Keep whatever metadata columns this file has -- 'time' is absent for
         # single-timepoint data, and the outputs simply omit what was never there.
         available = [c for c in _QC_KEEP_COLUMNS if c in passing.columns]
@@ -141,12 +158,14 @@ def qc_passing_samples(qc_files: list[str], mag_id: str) -> pd.DataFrame:
         .drop_duplicates(subset=["sample_id"])
         .reset_index(drop=True)
     )
+    in_groups = "" if groups is None else f" in group(s) {[str(g) for g in groups]}"
     if combined.empty:
         logger.warning(
-            f"MAG {mag_id}: no sample passed QC in any of {len(qc_files)} QC file(s)"
+            f"MAG {mag_id}: no sample passed QC{in_groups} in any of "
+            f"{len(qc_files)} QC file(s)"
         )
     else:
-        logger.info(f"MAG {mag_id}: {len(combined)} samples passed QC")
+        logger.info(f"MAG {mag_id}: {len(combined)} samples passed QC{in_groups}")
     return combined
 
 

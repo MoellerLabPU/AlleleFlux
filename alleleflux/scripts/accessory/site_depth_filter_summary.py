@@ -63,15 +63,19 @@ def main(argv=None):
         )
     # sample_id / mag_id / timepoint are labels: read them as str so numeric
     # looking labels (group "20", timepoint "5") never become integers.
-    run = pd.concat(
-        [
-            pd.read_csv(
-                f, sep="\t", dtype={"sample_id": str, "mag_id": str, "timepoint": str}
-            )
-            for f in files
-        ],
-        ignore_index=True,
-    )
+    tables = [
+        pd.read_csv(
+            f, sep="\t", dtype={"sample_id": str, "mag_id": str, "timepoint": str}
+        )
+        for f in files
+    ]
+    # A zero-row cache (a genome with no QC-passing sample at a timepoint) has
+    # a header-only sidecar.  It holds no sample, and a table with no rows has
+    # no number columns for pandas to go by, so it stays out of the stack.
+    # When EVERY sidecar is header-only the first one stands in, so the run
+    # table is written with its columns and no row.
+    with_rows = [table for table in tables if not table.empty] or tables[:1]
+    run = pd.concat(with_rows, ignore_index=True)
     run.to_csv(args.output, sep="\t", index=False)
 
     # Per MAG x timepoint: the ceiling's bite as a fraction of covered positions.
@@ -88,7 +92,9 @@ def main(argv=None):
     roll_path = os.path.splitext(args.output)[0] + "_by_mag.tsv"
     roll.to_csv(roll_path, sep="\t", index=False)
     logger.info(
-        f"{len(run):,} sample rows from {len(files)} sidecars -> {args.output}; "
+        f"{len(run):,} sample rows from {len(files)} sidecars "
+        f"({len(files) - sum(not table.empty for table in tables)} header-only) "
+        f"-> {args.output}; "
         f"{len(roll)} MAG x timepoint rows -> {roll_path}"
     )
     return 0

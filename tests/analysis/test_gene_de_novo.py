@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 
 from alleleflux.scripts.analysis.gene_de_novo import (
@@ -1096,6 +1097,76 @@ def _write_run(tmp, plant_control_standing=True):
     return tmp
 
 
+def _add_witness_sample(run, with_cache=True, empty_cache=False):
+    """Add one sample OUTSIDE the comparison to a ``_write_run`` directory.
+
+    Mouse w1 of a third group ``oth`` at a third timepoint ``mid``, collected
+    before every other sample.  With ``with_cache`` its cache file is written:
+    40 A at every base and 20 T at 150, the letter that later rises in cage A,
+    so under the cohort scope it testifies that T was already there (or, with
+    ``empty_cache``, the zero-row file the workflow writes for a genome that
+    has no QC-passing sample at that timepoint).
+    """
+    from alleleflux.scripts.analysis.allele_frequency._allele_freq_common import (
+        empty_cache_table,
+    )
+
+    sheet = os.path.join(run, "metadata.tsv")
+    meta = pd.read_csv(sheet, sep="\t", dtype=str)
+    witness = {
+        "sample_id": "w1_mid",
+        "subjectID": "w1",
+        "group": "oth",
+        "replicate": "W",
+        "time": "mid",
+        "collection_date": "2023-06-01",
+    }
+    pd.concat([meta, pd.DataFrame([witness])], ignore_index=True).to_csv(
+        sheet, sep="\t", index=False
+    )
+    if not with_cache:
+        return
+    folder = os.path.join(run, "allele_freq_cache", "mid")
+    os.makedirs(folder)
+    path = os.path.join(folder, "M1_mid_allele_frequency.parquet")
+    if empty_cache:
+        pq.write_table(empty_cache_table("longitudinal"), path)
+        return
+    template = pd.read_parquet(
+        os.path.join(run, "allele_freq_cache", "pre", "M1_pre_allele_frequency.parquet")
+    )
+    rows = template[template["sample_id"].astype(str) == "t1_pre"].copy()
+    for col, value in (
+        ("sample_id", "w1_mid"),
+        ("group", "oth"),
+        ("subjectID", "w1"),
+        ("replicate", "W"),
+        ("time", "mid"),
+    ):
+        rows[col] = pd.Categorical([value] * len(rows))
+    at_150 = rows["position"] == 150
+    rows.loc[at_150, ["A", "T"]] = [20, 20]
+    rows.loc[at_150, ["A_frequency", "T_frequency"]] = [0.5, 0.5]
+    rows.to_parquet(path, index=False)
+
+
+def _origin_at(out, position):
+    """The verdict of the candidate at ``position`` in the per-MAG events table."""
+    events = pd.read_csv(os.path.join(out, "M1_gene_de_novo_events.tsv"), sep="\t")
+    return events.loc[events["position"] == position, "origin"].item()
+
+
+def _tables(out):
+    """Every table the command wrote, as text keyed by file name."""
+    return {
+        name: pd.read_csv(os.path.join(out, name), sep="\t", dtype=str).to_csv(
+            index=False
+        )
+        for name in sorted(os.listdir(out))
+        if name.endswith(".tsv")
+    }
+
+
 def _run_cli(run, out, *extra):
     return subprocess.run(
         [
@@ -1177,6 +1248,122 @@ class TestGeneDeNovoCLI:
             "D": 0,
         }
         assert (cages["covered_bp_total"] == GENOME).all()
+
+    # ---- Phase 3b: witnesses outside the comparison, and the two lists that
+    # say which of them the workflow built caches for.
+    def test_cohort_witness_at_a_third_timepoint_makes_the_allele_standing(
+        self, tmp_path
+    ):
+        """The reference case for the tests below: w1_mid (another group,
+        another timepoint, collected first) already carries the T that rises
+        in cage A, so that rise is standing variation, not an event."""
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        out = str(tmp_path / "out")
+        done = _run_cli(run, out, "--strain_gate", "none")
+        assert done.returncode == 0, done.stderr
+        assert _origin_at(out, 150) == "standing_variation"
+        assert _origin_at(out, 250) == "de_novo"  # cage B's T at 250: no witness
+
+    def test_cohort_missing_cache_is_an_error_naming_the_file(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run, with_cache=False)
+        done = _run_cli(run, str(tmp_path / "out"), "--strain_gate", "none")
+        assert done.returncode != 0
+        assert "FileNotFoundError" in done.stderr
+        assert "M1_mid_allele_frequency.parquet" in done.stderr
+
+    def test_cohort_zero_row_cache_at_a_third_timepoint_changes_nothing(self, tmp_path):
+        """The genome has no QC-passing sample at ``mid``: the workflow wrote a
+        zero-row cache there.  Every table equals the run on the sheet without
+        that sample."""
+        plain_run = _write_run(tmp_path / "plain")
+        plain_out = str(tmp_path / "plain_out")
+        assert _run_cli(plain_run, plain_out, "--strain_gate", "none").returncode == 0
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run, empty_cache=True)
+        out = str(tmp_path / "out")
+        done = _run_cli(run, out, "--strain_gate", "none")
+        assert done.returncode == 0, done.stderr
+        assert _tables(out) == _tables(plain_out)
+
+    def test_witness_lists_covering_the_sheet_change_nothing(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        plain_out, listed_out = str(tmp_path / "plain"), str(tmp_path / "listed")
+        assert _run_cli(run, plain_out, "--strain_gate", "none").returncode == 0
+        done = _run_cli(
+            run,
+            listed_out,
+            "--strain_gate",
+            "none",
+            "--witness_timepoints",
+            "pre",
+            "post",
+            "mid",
+            "--witness_groups",
+            "trt",
+            "ctl",
+            "oth",
+        )
+        assert done.returncode == 0, done.stderr
+        assert _tables(listed_out) == _tables(plain_out)
+        assert "not read as baseline witnesses" not in done.stderr
+
+    def test_a_sample_outside_the_witness_timepoints_does_not_testify(self, tmp_path):
+        """``mid`` is left out of the witness timepoints: w1_mid is not read (its
+        cache is not even there), so cage A's T at 150 is an event again and
+        the run says one sample was left out."""
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run, with_cache=False)
+        out = str(tmp_path / "out")
+        done = _run_cli(
+            run, out, "--strain_gate", "none", "--witness_timepoints", "pre", "post"
+        )
+        assert done.returncode == 0, done.stderr
+        assert _origin_at(out, 150) == "de_novo"
+        assert "1 sample(s) of the sheet not read as baseline witnesses" in done.stderr
+
+    def test_a_sample_outside_the_witness_groups_does_not_testify(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        out = str(tmp_path / "out")
+        done = _run_cli(
+            run,
+            out,
+            "--strain_gate",
+            "none",
+            "--witness_timepoints",
+            "pre",
+            "post",
+            "mid",
+            "--witness_groups",
+            "trt",
+            "ctl",
+        )
+        assert done.returncode == 0, done.stderr
+        assert _origin_at(out, 150) == "de_novo"
+        assert "1 sample(s) of the sheet not read as baseline witnesses" in done.stderr
+
+    def test_the_comparisons_own_samples_are_never_filtered_out(self, tmp_path):
+        """Lists naming only the witness's timepoint and group: the comparison's
+        own samples are read all the same, so the tables equal the plain run."""
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        plain_out, listed_out = str(tmp_path / "plain"), str(tmp_path / "listed")
+        assert _run_cli(run, plain_out, "--strain_gate", "none").returncode == 0
+        done = _run_cli(
+            run,
+            listed_out,
+            "--strain_gate",
+            "none",
+            "--witness_timepoints",
+            "mid",
+            "--witness_groups",
+            "oth",
+        )
+        assert done.returncode == 0, done.stderr
+        assert _tables(listed_out) == _tables(plain_out)
 
     def test_carrier_gate_reads_the_turnover_table(self, tmp_path):
         run = _write_run(tmp_path / "run")

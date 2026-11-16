@@ -32,11 +32,13 @@ rule baseline_presence:
         ),
         turnover=_baseline_presence_turnover_inputs,
         # The comparison's cache files (every QC-eligible MAG at both timepoints,
-        # a superset of the MAGs with candidates): declared so a missing or stale
-        # cache re-runs the cache job rather than failing inside this command.
-        # The CLI still resolves per-MAG files from the cache_dir param.
+        # a superset of the MAGs with candidates; under the cohort scope at
+        # every witness timepoint too): declared so a missing or stale cache
+        # re-runs the cache job rather than failing inside this command, which
+        # stops on a missing file.  The CLI still resolves per-MAG files from
+        # the cache_dir param.
         caches=lambda wildcards: allele_freq_cache_files_for_comparison(
-            wildcards.timepoints, wildcards.groups
+            wildcards.timepoints, wildcards.groups, witness_timepoints=True
         ),
         metadata=config["input"]["metadata_path"],
     output:
@@ -68,6 +70,13 @@ rule baseline_presence:
         # within-group summary family (single_sample / lmm_across_time); the CLI
         # refuses the rest.
         baseline_scope=(DE_NOVO_RULE_PARAMS or {}).get("baseline_scope", "cohort"),
+        # Who may testify under the cohort scope: the timepoints and groups the
+        # workflow built QC and caches for (common.smk; set by
+        # analysis.baseline_presence.cohort_witnesses).  The command reads no
+        # sheet sample outside these two lists, so it asks for exactly the
+        # caches declared above.  Ignored by the command under every other scope.
+        witness_timepoints=" ".join(CACHE_TIMEPOINTS),
+        witness_groups=" ".join(WITNESS_GROUPS),
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -89,6 +98,8 @@ rule baseline_presence:
             --threshold_column {params.threshold_column} \
             --threshold {params.threshold} \
             --baseline_scope {params.baseline_scope} \
+            --witness_timepoints {params.witness_timepoints} \
+            --witness_groups {params.witness_groups} \
             --cache_dir {params.cache_dir} \
             --metadata {input.metadata} \
             --output_dir {params.output_dir} \

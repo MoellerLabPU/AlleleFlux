@@ -51,12 +51,23 @@ def _load(outdir, eligible, timepoints, groups, data_type="longitudinal"):
             f"{mag_wildcard}_{timepoint_wildcard}_allele_frequency.parquet",
         )
 
+    # The single timepoints of the comparisons, in first-appearance order
+    # (common.smk's unique_timepoints).
+    unique = []
+    for label in timepoints:
+        for part in label.split("_") if data_type == "longitudinal" else [label]:
+            if part not in unique:
+                unique.append(part)
     namespace = {
         "os": os,
         "OUTDIR": outdir,
         "DATA_TYPE": data_type,
         "timepoints_labels": timepoints,
         "groups_labels": groups,
+        # No cohort witnesses in these tests (tests/test_cache_universe.py
+        # covers them): every list is the comparisons' own timepoints.
+        "CACHE_TIMEPOINTS": unique,
+        "COHORT_WITNESSES_ACTIVE": False,
         "_get_mags_by_eligibility": lambda tp, gr, eligibility_type: eligible.get(
             (tp, gr), []
         ),
@@ -127,13 +138,13 @@ class TestSidecarTargets:
         )  # not eligible anywhere
         # pre_post has only MAG_A, at its own two timepoints (never 'end')
         assert fns["allele_freq_cache_files_for_comparison"](
-            "pre_post", "g1_g2"
+            "pre_post", "g1_g2", witness_timepoints=False
         ) == sorted([cache("MAG_A", "pre"), cache("MAG_A", "post")])
         assert fns["allele_freq_cache_files_for_comparison"](
-            "pre_end", "g1_g2"
+            "pre_end", "g1_g2", witness_timepoints=False
         ) == sorted([cache(m, tp) for m in ("MAG_A", "MAG_B") for tp in ("pre", "end")])
         # the three slices cover exactly the same (mag, timepoint) pairs
-        universe = {(m, tp) for _, _, m, tp in fns["_cache_universe"]()}
+        universe = {(m, tp) for _, _, m, tp in fns["_cache_universe"](False)}
         assert universe == {
             ("MAG_A", "pre"),
             ("MAG_A", "end"),

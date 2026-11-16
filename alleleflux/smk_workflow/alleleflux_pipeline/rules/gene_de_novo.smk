@@ -33,9 +33,11 @@ rule gene_de_novo:
         mean_changes=lambda wildcards: generate_allele_analysis_targets(
             wildcards.timepoints, wildcards.groups
         ),
-        # The comparison's cache files (both timepoints, every eligible MAG).
+        # The comparison's cache files: every eligible MAG at both timepoints,
+        # and under the cohort scope at every witness timepoint too (the
+        # command reads baseline witnesses there and stops on a missing file).
         caches=lambda wildcards: allele_freq_cache_files_for_comparison(
-            wildcards.timepoints, wildcards.groups
+            wildcards.timepoints, wildcards.groups, witness_timepoints=True
         ),
         turnover=_gene_de_novo_turnover_inputs,
         metadata=config["input"]["metadata_path"],
@@ -62,6 +64,10 @@ rule gene_de_novo:
         ),
         # the shared de novo rules + this analysis's own knobs, one string (common.smk)
         knob_args=GENE_DE_NOVO_ARGS,
+        # who may testify under the cohort scope: the timepoints and groups the
+        # workflow built caches for, the SAME two lists baseline_presence gets
+        witness_timepoints=" ".join(CACHE_TIMEPOINTS),
+        witness_groups=" ".join(WITNESS_GROUPS),
         # the cages-per-group floor is the run's replicate floor (decision 8)
         min_cages=config["quality_control"]["min_sample_num"],
         fdr_arg=(
@@ -91,6 +97,8 @@ rule gene_de_novo:
             --mag_mapping {input.mag_mapping} \
             --output_dir {params.output_dir} \
             {params.knob_args} \
+            --witness_timepoints {params.witness_timepoints} \
+            --witness_groups {params.witness_groups} \
             --min_cages {params.min_cages} \
             {params.fdr_arg} \
             --min_cov {params.min_cov} \
