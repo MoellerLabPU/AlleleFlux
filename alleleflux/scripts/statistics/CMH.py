@@ -158,6 +158,7 @@ def prepare_cmh_input(
 
     The function performs the following steps:
     - Splits the input DataFrame into two groups based on the provided group names.
+    - Turns category labels (group, replicate) into plain text for this site's rows.
     - Aggregates nucleotide counts by contig, position, group, and replicate.
     - Identifies replicates shared between both groups and filters out those not present in both.
     - Pivots the data so that each row corresponds to a replicate, and columns represent nucleotide counts per group.
@@ -181,6 +182,13 @@ def prepare_cmh_input(
     Optional[pd.DataFrame]
         A DataFrame formatted for CMH test input, containing only informative bases and shared replicates,
         or None if requirements are not met (e.g., insufficient replicates or informative bases).
+
+    Notes
+    -----
+    A replicate is a pair only when BOTH groups have a row for it at this site,
+    whichever way the caller stores the labels.  Example: replicates 1-4, the
+    fourth with reads in ``fat`` and no row in ``control`` -> three pairs
+    (1, 2, 3); with ``min_sample_num`` 4 the site is not tested (``None``).
     """
     # Split group into two based on group name
     group1_df = df_group[df_group["group"] == group_1_name]
@@ -191,6 +199,22 @@ def prepare_cmh_input(
 
     # Combine both groups for aggregation
     combined_df = pd.concat([group1_df, group2_df])
+
+    # Labels as plain text for the rest of this function.  The loader hands
+    # group / replicate over as pandas categories when the input files hold
+    # the same label sets (as text otherwise), and a category remembers every
+    # label it has seen.  Grouping on categories makes pandas add a zero row
+    # for each (group, replicate) combination that has no data, so a replicate
+    # with NO row in one group came out as a "shared" replicate: min_sample_num
+    # was met by pairs with reads on one side only, and a label with no row at
+    # all reached R as an empty stratum, which mantelhaen.test refuses.  As
+    # text, only the rows that exist are grouped.  Done here, on one site's
+    # handful of rows, so the big table keeps its compact category columns.
+    # astype(object), not astype(str): a missing label stays missing instead
+    # of becoming the text "nan".
+    for label_column in ("group", "replicate"):
+        if isinstance(combined_df[label_column].dtype, pd.CategoricalDtype):
+            combined_df[label_column] = combined_df[label_column].astype(object)
 
     # Aggregate nucleotide counts by contig, position, group, and replicate
     # Get the sum of each nucleotide for each replicate
