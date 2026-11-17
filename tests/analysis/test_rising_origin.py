@@ -39,8 +39,11 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from alleleflux.scripts.analysis.baseline_presence import WITNESS_COUNT_COLUMNS
+from alleleflux.scripts.analysis.de_novo_rules import assign_blocks
 from alleleflux.scripts.analysis.rising_origin import (
     CALLED,
+    DE_NOVO,
     ORIGINS,
     apply_strain_gate,
     attach_carrier_gate,
@@ -84,10 +87,35 @@ def _rising_rows(within=True):
                 "n_mice": 4,
                 "origin_any_mouse": origin,
                 "16mo_mice_allele_present": carriers,
+                # written by every baseline-presence run; empty when the run
+                # did not name its pre-treatment timepoints (no split)
+                **dict.fromkeys(WITNESS_COUNT_COLUMNS, np.nan),
             }
             for i, (mag, allele, rose, origin, carriers) in enumerate(rows)
         ]
     )
+
+
+FIRST_SEEN = "first_seen_after_treatment_began"
+
+
+def _with_split(rows, first_seen=(("MAG_A", "G"),)):
+    """The same rising rows as a run WITH pre-treatment timepoints writes them.
+
+    Every row gets witness counts (8 pre-treatment witnesses covered, 1 with
+    the allele, 0 below detection; 3 on-treatment covered, 1 with it).  The
+    ``first_seen`` (mag, allele) rows, standing in the base fixture, become
+    ``first_seen_after_treatment_began`` with no pre-treatment carrier
+    (8 / 0 / 0 / 3 / 3).
+    """
+    out = rows.copy()
+    out[WITNESS_COUNT_COLUMNS] = [8, 1, 0, 3, 1]
+    for mag, allele in first_seen:
+        hit = (out.mag_id == mag) & (out.allele == allele)
+        assert hit.sum() == 1, (mag, allele)
+        out.loc[hit, "origin_any_mouse"] = FIRST_SEEN
+        out.loc[hit, WITNESS_COUNT_COLUMNS] = [8, 0, 0, 3, 3]
+    return out
 
 
 def _write_turnover(directory):
@@ -206,6 +234,27 @@ class TestNormaliseOrigin(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalise_origin("de_novo_candidate_below_detection_at_9mo", "5mo", "16mo")
 
+    def test_first_seen_after_treatment_is_a_known_label(self):
+        # it carries no timepoint name, so it passes through unchanged
+        self.assertEqual(normalise_origin(FIRST_SEEN, "5mo", "16mo"), FIRST_SEEN)
+
+    def test_it_is_a_called_verdict_but_not_a_de_novo_one(self):
+        """Five verdicts: standing, first seen after treatment began, de novo,
+        de novo below detection, new strain.  The cluster rule and the strain
+        gate act on the two de novo origins only."""
+        self.assertEqual(
+            CALLED,
+            [
+                "standing_variation",
+                FIRST_SEEN,
+                "de_novo",
+                "de_novo_below_detection",
+                "new_strain",
+            ],
+        )
+        self.assertEqual(DE_NOVO, ("de_novo", "de_novo_below_detection"))
+        self.assertEqual(ORIGINS[:5], CALLED)
+
 
 class TestLoadRising(unittest.TestCase):
     def setUp(self):
@@ -261,6 +310,22 @@ class TestLoadRising(unittest.TestCase):
 
     def test_no_rising_file_raises(self):
         with self.assertRaises(FileNotFoundError):
+            load_rising(self.tmp)
+
+    def test_witness_counts_and_the_third_label_are_read(self):
+        _with_split(_rising_rows()).to_csv(
+            os.path.join(self.tmp, WITHIN), sep="\t", index=False
+        )
+        got = load_rising(self.tmp)
+        row = got[(got.mag_id == "MAG_A") & (got.allele == "G")].iloc[0]
+        self.assertEqual(row.origin, FIRST_SEEN)
+        self.assertEqual([int(row[c]) for c in WITNESS_COUNT_COLUMNS], [8, 0, 0, 3, 3])
+
+    def test_table_without_the_witness_columns_raises(self):
+        _rising_rows().drop(columns=WITNESS_COUNT_COLUMNS[0]).to_csv(
+            os.path.join(self.tmp, WITHIN), sep="\t", index=False
+        )
+        with self.assertRaisesRegex(ValueError, WITNESS_COUNT_COLUMNS[0]):
             load_rising(self.tmp)
 
     def test_missing_column_raises(self):
@@ -548,6 +613,36 @@ class TestApplyStrainGate(unittest.TestCase):
             ],
         )
 
+    def test_no_gate_relabels_first_seen_after_treatment(self):
+        """In a replaced MAG, with carriers that changed strain: still not a
+        de novo origin, so every gate leaves it alone."""
+        frame = pd.DataFrame(
+            [(FIRST_SEEN, "replaced", "new_strain_carriers")],
+            columns=["origin", "strain_class", "carrier_strain_status"],
+        )
+        for gate in ("group", "carrier", "both", "none"):
+            self.assertEqual(
+                list(apply_strain_gate(frame, gate)["origin"]), [FIRST_SEEN], gate
+            )
+
+    def test_the_cluster_rule_ignores_first_seen_after_treatment(self):
+        """Three alleles 100 bp apart in one group: two first-seen, one de
+        novo.  The de novo one has no de novo neighbour, so it is no block and
+        the first-seen ones keep their label."""
+        alleles = pd.DataFrame(
+            {
+                "mag_id": "M",
+                "contig": "c1",
+                "position": [100, 200, 300],
+                "allele": "A",
+                "rose_in": "40",
+                "origin": [FIRST_SEEN, "de_novo", FIRST_SEEN],
+            }
+        )
+        got = assign_blocks(alleles, 1000, 0)
+        self.assertEqual(list(got["origin"]), [FIRST_SEEN, "de_novo", FIRST_SEEN])
+        self.assertEqual(list(got["block_id"]), ["", "", ""])
+
     def test_none_changes_nothing(self):
         f = self._frame()
         self.assertEqual(
@@ -599,7 +694,9 @@ class TestSummarise(unittest.TestCase):
         self.assertEqual(
             sorted(diet.origin),
             sorted(
-                o for o in ORIGINS if o not in ("new_strain", "strain_undetermined")
+                o
+                for o in ORIGINS
+                if o not in ("new_strain", "strain_undetermined", FIRST_SEEN)
             ),
         )
         self.assertTrue((diet.strain_class == "all").all())
@@ -615,6 +712,57 @@ class TestSummarise(unittest.TestCase):
         nc = self._cell(summ, None, "40", "all", "baseline_not_covered")
         self.assertAlmostEqual(nc.pct_of_all, 100 * 1 / 5)
         self.assertTrue(np.isnan(nc.pct_of_called))
+
+    def _split_summary(self):
+        """The same six alleles from a run with pre-treatment timepoints:
+        MAG_A G (rose in 40) is first-seen-after-treatment instead of standing."""
+        folder = os.path.join(self.tmp, "split")
+        os.makedirs(folder)
+        rows = _rising_rows()
+        _with_split(rows[rows.mag_id != "MAG_D"]).to_csv(
+            os.path.join(folder, WITHIN), sep="\t", index=False
+        )
+        return summarise(load_rising(folder))
+
+    def test_split_off_gives_no_row_for_the_third_label(self):
+        # the fixture's witness columns are empty: the run made no split, so
+        # the label cannot occur and gets no zero row
+        self.assertNotIn(FIRST_SEEN, set(summarise(self.rising).origin))
+
+    def test_split_on_counts_the_third_label_beside_standing(self):
+        """Group 40, 5 rising alleles: first seen 1 (MAG_A G), standing 0,
+        de novo 1, de novo below detection 1, not present later 1, baseline
+        not covered 1.  Called = 3 of them, as before the split: the allele
+        only moved from one verdict to another."""
+        summ = self._split_summary()
+        fs = self._cell(summ, None, "40", "all", FIRST_SEEN)
+        self.assertEqual((int(fs.n_alleles), int(fs.n_mags)), (1, 1))
+        self.assertEqual((int(fs.n_rising), int(fs.n_called)), (5, 3))
+        self.assertAlmostEqual(fs.pct_of_all, 100 * 1 / 5)
+        self.assertAlmostEqual(fs.pct_of_called, 100 * 1 / 3)
+        st = self._cell(summ, None, "40", "all", "standing_variation")
+        self.assertEqual((int(st.n_alleles), st.pct_of_called), (0, 0.0))
+        # the called percentages of a block still add up to 100
+        called = summ[(summ.rose_in == "40") & summ.origin.isin(CALLED)]
+        self.assertAlmostEqual(called.pct_of_called.sum(), 100.0)
+
+    def test_split_on_gives_a_zero_row_where_the_label_does_not_occur(self):
+        # AL has one rising allele (de novo): the third label is a 0 row, not a gap
+        al = self._cell(self._split_summary(), None, "AL", "all", FIRST_SEEN)
+        self.assertEqual((int(al.n_alleles), al.pct_of_all), (0, 0.0))
+
+    def test_every_other_count_is_the_same_with_and_without_the_split(self):
+        """Only the standing row and the new row differ between the two runs."""
+        plain = summarise(self.rising)
+        split = self._split_summary()
+        keys = ["rose_in", "strain_class", "origin"]
+        same = split[~split.origin.isin(["standing_variation", FIRST_SEEN])]
+        merged = same.merge(plain, on=keys, suffixes=("_split", "_plain"))
+        self.assertEqual(len(merged), len(same))
+        for column in ("n_alleles", "n_mags", "n_rising", "n_called"):
+            self.assertEqual(
+                merged[f"{column}_split"].tolist(), merged[f"{column}_plain"].tolist()
+            )
 
     def test_zero_counts_are_rows_not_gaps(self):
         summ = summarise(self.rising)
@@ -844,6 +992,38 @@ class TestRisingOriginCLI(unittest.TestCase):
             os.path.join(self.out, "rising_origin_alleles.tsv"), sep="\t", dtype=str
         )
         self.assertNotIn("block_event", set(alleles["origin"]))
+
+    def test_split_run_end_to_end(self):
+        """Rising tables from a run with pre-treatment timepoints: the allele
+        table keeps the label and the witness counts, the summary has the new
+        row in every block, and the carrier gate does not touch the label."""
+        _with_split(_rising_rows()).to_csv(
+            os.path.join(self.rising_dir, WITHIN), sep="\t", index=False
+        )
+        done = self._run("--turnover_dir", self.turnover)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        row = self._origin(self._alleles(), "MAG_A", "G")
+        self.assertEqual(row.origin, FIRST_SEEN)
+        self.assertEqual([int(row[c]) for c in WITNESS_COUNT_COLUMNS], [8, 0, 0, 3, 3])
+        summ = pd.read_csv(
+            os.path.join(self.out, "rising_origin_summary.tsv"), sep="\t", dtype=str
+        )
+        new = summ[summ.origin == FIRST_SEEN]
+        self.assertEqual(sorted(new.rose_in), ["40", "AL"])
+        self.assertEqual(
+            new.set_index("rose_in").n_alleles.to_dict(), {"40": "1", "AL": "0"}
+        )
+
+    def test_plain_run_has_the_witness_columns_empty_and_no_new_row(self):
+        done = self._run("--strain_gate", "none")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        alleles = self._alleles()
+        for column in WITNESS_COUNT_COLUMNS:
+            self.assertTrue(alleles[column].isna().all(), column)
+        summ = pd.read_csv(
+            os.path.join(self.out, "rising_origin_summary.tsv"), sep="\t"
+        )
+        self.assertNotIn(FIRST_SEEN, set(summ.origin))
 
     def test_without_classification(self):
         done = self._run("--strain_gate", "none")

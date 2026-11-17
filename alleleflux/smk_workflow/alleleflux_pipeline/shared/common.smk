@@ -626,6 +626,92 @@ def cohort_reads_whole_sheet(witnesses_active, cohort_witnesses):
     return bool(witnesses_active and cohort_witnesses == "sheet")
 
 
+def check_pre_treatment_timepoints(pre_treatment, meta_sheet, witness_timepoints,
+                                   sheet_dated):
+    """Check ``pre_treatment_timepoints`` against the sheet; return it unchanged.
+
+    ``analysis.baseline_presence.pre_treatment_timepoints`` names the
+    timepoints sampled BEFORE treatment began (design D10-D11).  Under the
+    dated cohort scope the de novo commands use it to split "not de novo" in
+    two: a pre-treatment witness carried the allele (standing variation), or
+    only witnesses sampled after treatment began did (first seen after
+    treatment began).  A wrong list would move alleles between those two
+    labels without any error later, so it is checked here, while the Snakefile
+    is being read, before any job is submitted.
+
+    Parameters: ``pre_treatment`` is the list from ``de_novo_rule_params``
+    (labels as text); ``meta_sheet`` the metadata sheet read as text (column
+    ``time``); ``witness_timepoints`` every timepoint whose samples are read
+    as baseline witnesses (the comparisons' timepoints plus, under
+    ``cohort_witnesses: sheet``, the sheet-only ones); ``sheet_dated`` whether
+    every sample carries a collection date (``sheet_fully_dated``).
+
+    Returns ``pre_treatment``.  An empty list is returned at once: no split
+    was asked for, so there is nothing to check.
+
+    Raises ``ValueError`` when the list is not empty and:
+
+    * the sheet is not fully dated (the commands then narrow the baseline to
+      the comparison's earlier timepoint, where no witness is "on treatment");
+    * a label is not a timepoint of the sheet (naming the label and listing
+      the sheet's timepoints);
+    * a label is a timepoint of the sheet but no witness timepoint: under
+      ``cohort_witnesses: comparisons`` a timepoint outside every comparison
+      is not read, so none of its samples could ever testify.
+
+    Example: the sheet has ``base``, ``mid`` and ``late``; witnesses are read
+    at all three.  ``["base"]`` -> ``["base"]``; ``["bas"]`` -> error naming
+    ``bas``.  With witnesses read at ``base`` and ``late`` only, ``["mid"]``
+    -> error naming ``mid``.
+    """
+    if not pre_treatment:
+        return pre_treatment
+    if not sheet_dated:
+        raise ValueError(
+            "analysis.baseline_presence.pre_treatment_timepoints is set "
+            f"({pre_treatment}) but the metadata sheet has no collection_date for "
+            "every sample.  Without dates the cohort baseline is the comparison's "
+            "earlier timepoint only, so no witness is sampled after treatment "
+            "began; add the dates or empty the list"
+        )
+    # The sheet is read as text; a blank time cell is NaN and is no timepoint
+    # (it must not turn into the label "nan").
+    sheet_times = set(meta_sheet["time"].dropna().astype(str).str.strip()) - {""}
+    unknown = [t for t in pre_treatment if t not in sheet_times]
+    if unknown:
+        raise ValueError(
+            f"analysis.baseline_presence.pre_treatment_timepoints: {unknown} "
+            f"is/are not a timepoint of the metadata sheet (its timepoints: "
+            f"{sorted(sheet_times)})"
+        )
+    witnesses = {str(t) for t in witness_timepoints}
+    unread = [t for t in pre_treatment if t not in witnesses]
+    if unread:
+        raise ValueError(
+            f"analysis.baseline_presence.pre_treatment_timepoints: {unread} "
+            "sit(s) in no timepoints_combinations entry, and under "
+            "cohort_witnesses: comparisons only compared timepoints are read as "
+            "baseline witnesses, so no sample there could ever testify.  Set "
+            "cohort_witnesses: sheet, or drop the label"
+        )
+    return pre_treatment
+
+
+def pre_treatment_cli_arg(pre_treatment):
+    """The ``--pre_treatment_timepoints`` words both de novo rules paste in.
+
+    Empty list -> ``""``: the flag is left out altogether, so a run without
+    the setting issues exactly the commands of before.
+
+    Example: ``["base"]`` -> ``"--pre_treatment_timepoints base"``;
+    ``["base", "mid"]`` -> ``"--pre_treatment_timepoints base mid"``;
+    ``[]`` -> ``""``.
+    """
+    if not pre_treatment:
+        return ""
+    return "--pre_treatment_timepoints " + " ".join(pre_treatment)
+
+
 # Defined this early (it used to sit with the other de novo helpers further
 # down) because the cache-timepoint list below reads its baseline scope before
 # the wildcard constraints are declared.  Body unchanged.
@@ -642,6 +728,14 @@ def de_novo_rule_params():
       ``sheet`` (default; any sample of the metadata sheet) or ``comparisons``
       (only samples at a compared timepoint in a compared group).  Kept as
       read under every other scope, where nothing uses it;
+    * ``pre_treatment_timepoints`` -- the timepoints sampled before treatment
+      began, a list of labels kept as text (default ``[]``: no split).  Under
+      the cohort scope the two de novo commands use it to tell "a
+      pre-treatment witness carried the allele" (standing variation) from
+      "only witnesses sampled after treatment began did" (first seen after
+      treatment began).  A filled list under any other scope stops the run;
+      whether each label is a timepoint of the sheet is checked where the
+      sheet is read (``check_pre_treatment_timepoints``);
     * ``cluster_window_bp`` / ``max_de_novo_neighbours`` -- the cluster rule
       (de novo alleles within the window on one contig in one group are one
       block event; more than the tolerated neighbours -> block_event);
@@ -658,7 +752,7 @@ def de_novo_rule_params():
 
     Example: a config with only ``summary`` in the block ->
     ``{"baseline_scope": "cohort", "cohort_witnesses": "sheet",
-    "cluster_window_bp": 1000, "max_de_novo_neighbours": 0,
+    "pre_treatment_timepoints": [], "cluster_window_bp": 1000, "max_de_novo_neighbours": 0,
     "strain_gate": "carrier", "min_determined_carriers": 3}``.
     """
     # The vocabularies, spelled here (not module-level) so the function is
@@ -668,9 +762,34 @@ def de_novo_rule_params():
     STRAIN_GATES = ("carrier", "group", "both", "none")
     analysis = config.get("analysis", {}) or {}
     block = analysis.get("baseline_presence", {}) or {}
+    # pre_treatment_timepoints: a YAML list.  A key left empty reads as None
+    # and means "no list".  Anything else that is not a list is refused: a
+    # bare ``t0`` is one string, and reading it item by item would turn it
+    # into the timepoints "t" and "0".
+    raw_pre_treatment = block.get("pre_treatment_timepoints")
+    if raw_pre_treatment is None:
+        raw_pre_treatment = []
+    if not isinstance(raw_pre_treatment, (list, tuple)):
+        raise ValueError(
+            "analysis.baseline_presence.pre_treatment_timepoints must be a list of "
+            f"timepoint labels, e.g. [\"t0\"]; got {raw_pre_treatment!r}"
+        )
+    pre_treatment = []
+    for label in raw_pre_treatment:
+        # Labels are kept as text with the spaces around them removed (the
+        # sheet is read the same way), so 5 and "5" are one timepoint.
+        text = "" if label is None else str(label).strip()
+        if not text:
+            raise ValueError(
+                "analysis.baseline_presence.pre_treatment_timepoints holds a blank "
+                f"label: {list(raw_pre_treatment)!r}"
+            )
+        if text not in pre_treatment:  # a repeated label is said once
+            pre_treatment.append(text)
     p = {
         "baseline_scope": str(block.get("baseline_scope", "cohort")),
         "cohort_witnesses": str(block.get("cohort_witnesses", "sheet")),
+        "pre_treatment_timepoints": pre_treatment,
         "cluster_window_bp": int(block.get("cluster_window_bp", 1000)),
         "max_de_novo_neighbours": int(block.get("max_de_novo_neighbours", 0)),
         "strain_gate": str(block.get("strain_gate", "carrier")),
@@ -686,6 +805,16 @@ def de_novo_rule_params():
         raise ValueError(
             f"analysis.baseline_presence.cohort_witnesses must be one of "
             f"{COHORT_WITNESSES}, got {p['cohort_witnesses']!r}"
+        )
+    # Refused, not ignored (user ruling 2026-11-16): only the cohort scope
+    # reads witnesses sampled after treatment began, and the list is empty by
+    # default, so a filled one under another scope is a mistake.
+    if p["pre_treatment_timepoints"] and p["baseline_scope"] != "cohort":
+        raise ValueError(
+            "analysis.baseline_presence.pre_treatment_timepoints "
+            f"({p['pre_treatment_timepoints']}) only applies under baseline_scope: "
+            f"cohort; this run has baseline_scope: {p['baseline_scope']}.  Empty the "
+            "list or set baseline_scope: cohort"
         )
     if p["strain_gate"] not in STRAIN_GATES:
         raise ValueError(
@@ -1325,10 +1454,18 @@ for tp_label in timepoints_labels:
 #   cohort, witnesses: sheet    -> ["a", "b", "c", "x"], ["g1", "g2", "g3"]
 #   cohort, witnesses: comparisons -> ["a", "b", "c"],   ["g1", "g2"], and a
 #     genome tested in a_b only still gets a cache at c (first flag).
+#
+# A third list says which of the witness timepoints were sampled BEFORE
+# treatment began (design D10-D11):
+#
+#   PRE_TREATMENT_TIMEPOINTS  analysis.baseline_presence.pre_treatment_timepoints,
+#                             checked against the sheet and the witness
+#                             timepoints.  Empty (the default) = no split.
 COHORT_WITNESSES_ACTIVE = False
 COHORT_READS_WHOLE_SHEET = False
 EXTRA_CACHE_TIMEPOINTS = []
 EXTRA_WITNESS_GROUPS = []
+PRE_TREATMENT_TIMEPOINTS = []
 if DATA_TYPE == "longitudinal":
     _analysis = config.get("analysis", {}) or {}
     _use_baseline_presence = bool(_analysis.get("use_baseline_presence", False))
@@ -1367,10 +1504,33 @@ if DATA_TYPE == "longitudinal":
             f"extra group(s) {EXTRA_WITNESS_GROUPS} ({_n_extra_samples} samples "
             "outside every comparison)"
         )
+    # The pre-treatment list, read with the other de novo knobs above (so
+    # only when a de novo analysis is on) and checked against the sheet while
+    # it is still in memory.  The witness timepoints handed in are the ones
+    # CACHE_TIMEPOINTS is built from just below.
+    if _use_baseline_presence or _use_gene_de_novo:
+        PRE_TREATMENT_TIMEPOINTS = check_pre_treatment_timepoints(
+            _de_novo_params["pre_treatment_timepoints"],
+            _meta_sheet,
+            unique_timepoints + EXTRA_CACHE_TIMEPOINTS,
+            sheet_fully_dated(_meta_sheet),
+        )
+    if PRE_TREATMENT_TIMEPOINTS:
+        _n_pre_treatment = int(
+            _meta_sheet["time"].astype(str).str.strip().isin(PRE_TREATMENT_TIMEPOINTS).sum()
+        )
+        logger.info(
+            f"pre-treatment timepoint(s) {PRE_TREATMENT_TIMEPOINTS}: "
+            f"{_n_pre_treatment} of {len(_meta_sheet)} samples of the sheet; a "
+            "witness at any other timepoint counts as sampled after treatment began"
+        )
     del _meta_sheet
 CACHE_TIMEPOINTS = unique_timepoints + EXTRA_CACHE_TIMEPOINTS
 # group_values holds text already (the config's treatment and control names).
 WITNESS_GROUPS = [str(g) for g in group_values] + EXTRA_WITNESS_GROUPS
+# "" when the list is empty, so the two de novo commands are then issued
+# exactly as before the setting existed.
+PRE_TREATMENT_ARG = pre_treatment_cli_arg(PRE_TREATMENT_TIMEPOINTS)
 
 # QC and the allele-frequency cache are both built once per single timepoint
 # and are group-independent: the cache of (MAG, timepoint) reads the QC table

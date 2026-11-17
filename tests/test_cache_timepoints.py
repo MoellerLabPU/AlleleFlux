@@ -21,6 +21,14 @@ decide this while the Snakefile is being read:
   comparison, ordered by their first collection date.
 * ``extra_witness_groups``     -- the sheet groups outside every comparison.
 
+Two more check and pass on ``analysis.baseline_presence.pre_treatment_timepoints``
+(the timepoints sampled before treatment began, design D10-D11):
+
+* ``check_pre_treatment_timepoints`` -- every label is a timepoint of the
+  sheet AND one whose samples are read as witnesses, on a fully dated sheet.
+* ``pre_treatment_cli_arg``          -- the flag both de novo rules pass, or
+  nothing at all when the list is empty.
+
 Sliced out of the ``.smk`` source and exec'd alone, as in
 ``test_timepoint_order.py``; pandas is handed in because the helpers use it.
 """
@@ -46,6 +54,8 @@ FUNCS = (
     "extra_witness_groups",
     "cohort_witnesses_active",
     "cohort_reads_whole_sheet",
+    "check_pre_treatment_timepoints",
+    "pre_treatment_cli_arg",
 )
 
 
@@ -272,3 +282,73 @@ class TestSheetFullyDated:
     def test_false_on_a_blank_cell(self, blank):
         sheet = _sheet(times=["a", "b"], dates=["2020-01-01", blank])
         assert _load()["sheet_fully_dated"](sheet) is False
+
+
+class TestPreTreatmentTimepoints:
+    """``pre_treatment_timepoints`` against the sheet and the witness timepoints.
+
+    Small sheet used throughout: timepoints ``base`` (2020), ``mid`` (2021)
+    and ``late`` (2022); the comparison is ``base`` vs ``late``; ``mid`` sits
+    in no comparison.
+    """
+
+    SHEET_TIMES = ["base", "base", "mid", "late", "late"]
+    DATES = ["2020-01-01", "2020-01-02", "2021-01-01", "2022-01-01", "2022-01-02"]
+
+    def _check(self, labels, witness_timepoints, sheet_dated=True, times=None):
+        fn = _load()["check_pre_treatment_timepoints"]
+        sheet = _sheet(times or self.SHEET_TIMES, self.DATES if times is None else None)
+        return fn(labels, sheet, witness_timepoints, sheet_dated)
+
+    def test_an_empty_list_is_returned_as_is_whatever_the_sheet(self):
+        # No split asked for: nothing to check, also on an undated sheet.
+        assert self._check([], ["base", "late"]) == []
+        assert self._check([], ["base", "late"], sheet_dated=False) == []
+
+    def test_labels_of_the_sheet_that_are_read_as_witnesses_pass(self):
+        assert self._check(["base"], ["base", "late", "mid"]) == ["base"]
+        assert self._check(["base", "mid"], ["base", "late", "mid"]) == ["base", "mid"]
+
+    def test_a_label_that_is_no_timepoint_of_the_sheet_is_named(self):
+        # A typo ("bas") must stop the run in seconds, not after the statistics.
+        with pytest.raises(ValueError, match=r"\['bas'\].*not.*timepoint") as err:
+            self._check(["base", "bas"], ["base", "late", "mid"])
+        # The message lists what the sheet does hold, so the fix is one look away.
+        assert "base" in str(err.value) and "mid" in str(err.value)
+
+    def test_a_number_label_matches_the_text_cell_of_the_sheet(self):
+        fn = _load()["check_pre_treatment_timepoints"]
+        sheet = _sheet([5, 5, 10], ["2020-01-01", "2020-01-02", "2021-01-01"])
+        assert fn(["5"], sheet, ["5", "10"], True) == ["5"]
+
+    def test_a_label_nobody_reads_as_a_witness_is_refused(self):
+        # cohort_witnesses: comparisons reads only the compared timepoints
+        # (base, late).  "mid" is in the sheet, but none of its samples would
+        # ever testify, so calling it pre-treatment can change nothing.
+        with pytest.raises(ValueError, match=r"\['mid'\].*cohort_witnesses"):
+            self._check(["base", "mid"], ["base", "late"])
+
+    def test_a_sheet_without_complete_dates_is_refused(self):
+        # Without dates the commands narrow the baseline to the comparison's
+        # earlier timepoint; no witness can then be "on treatment".
+        with pytest.raises(ValueError, match="collection_date"):
+            self._check(["base"], ["base", "late"], sheet_dated=False)
+
+    def test_blank_time_cells_are_never_a_timepoint(self):
+        fn = _load()["check_pre_treatment_timepoints"]
+        sheet = _sheet(["base", "late"], ["2020-01-01", "2022-01-01"])
+        sheet.loc[1, "time"] = None
+        with pytest.raises(ValueError, match="not.*timepoint"):
+            fn(["nan"], sheet, ["base", "nan"], True)
+
+
+class TestPreTreatmentCliArg:
+    def test_an_empty_list_adds_nothing_to_the_command(self):
+        # The rules paste this string into the command line: with no list the
+        # command must be exactly the one of before.
+        assert _load()["pre_treatment_cli_arg"]([]) == ""
+
+    def test_labels_follow_the_flag_separated_by_spaces(self):
+        fn = _load()["pre_treatment_cli_arg"]
+        assert fn(["base"]) == "--pre_treatment_timepoints base"
+        assert fn(["base", "mid"]) == "--pre_treatment_timepoints base mid"

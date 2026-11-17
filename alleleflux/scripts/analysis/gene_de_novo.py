@@ -81,7 +81,10 @@ from alleleflux.scripts.analysis.de_novo_rules import (
     CARRIER_NEW_STRAIN,
     CARRIER_UNDETERMINED,
     DE_NOVO_ORIGINS,
+    FIRST_SEEN_AFTER_TREATMENT,
+    STANDING_VARIATION,
     assign_blocks,
+    carried_allele_origin,
     carrier_strain_verdicts,
 )
 
@@ -96,6 +99,7 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.sample_metadata import (
     META_OPTIONAL,
     add_witness_args,
+    checked_pre_treatment_timepoints,
     cohort_witness_rows,
     validate_collection_dates,
 )
@@ -106,7 +110,12 @@ logger = logging.getLogger(__name__)
 # The per-cage origin words.  The three "counted" ones come from
 # de_novo_rules (DE_NOVO_ORIGINS + BLOCK_EVENT); the rest mirror rising
 # origin's vocabulary so a reader of both tables meets one set of words.
-ORIGIN_STANDING = "standing_variation"
+ORIGIN_STANDING = STANDING_VARIATION
+# With --pre_treatment_timepoints: a baseline witness carried the allele, but
+# none sampled before treatment began.  Reported, never counted as an event
+# (is_event): counting it would count one mutation again at every later
+# timepoint and in every cage it spreads to.
+ORIGIN_FIRST_SEEN_AFTER_TREATMENT = FIRST_SEEN_AFTER_TREATMENT
 ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION = DE_NOVO_ORIGINS
 ORIGIN_NEW_STRAIN = "new_strain"
 ORIGIN_NOT_PRESENT_LATER = "not_present_later"
@@ -444,6 +453,7 @@ def classify_cage_rises(
     strain_gate: str,
     min_determined_carriers: int,
     turnover: pd.DataFrame | None,
+    pre_treatment=None,
 ) -> pd.DataFrame:
     """Phase 2's three questions, asked of every candidate rise with the CAGE as the unit.
 
@@ -465,7 +475,14 @@ def classify_cage_rises(
        samples, ``cohort`` = every sample dated before the first carrier
        (``baseline_cutoff``).  No covered baseline sample ->
        ``baseline_not_covered``; any ``present`` -> ``standing_variation``; any
-       ``below_detection`` -> ``de_novo_below_detection``; else ``de_novo``;
+       ``below_detection`` -> ``de_novo_below_detection``; else ``de_novo``.
+       With ``pre_treatment`` (the timepoints sampled before treatment began;
+       None = no split) "any ``present``" is split by who carries the letter:
+       a baseline sample at a pre-treatment timepoint ->
+       ``standing_variation``; only baseline samples at other timepoints ->
+       ``first_seen_after_treatment_began``
+       (``de_novo_rules.carried_allele_origin``, the same rule the site-level
+       command uses);
     4. **blocks** (``de_novo_rules.assign_blocks``) over the de novo rows of
        one cage (``rose_in`` = the cage): neighbours within ``window_bp`` on a
        contig, more than ``max_neighbours`` of them -> ``block_event`` with a
@@ -482,7 +499,9 @@ def classify_cage_rises(
     cohort baseline is the comparison's earlier timepoint (``baseline_rows``).
 
     Returns ``rises``' columns plus ``VERDICT_COLUMNS``, same row order.
-    Which rows count as events is ``is_event``'s decision, not this one's.
+    Which rows count as events is ``is_event``'s decision, not this one's
+    (``first_seen_after_treatment_began`` never does, and neither the cluster
+    rule nor the strain gate touches it: both act on the two de novo origins).
 
     Example (cohort, min_cov 5, bar 3 at 40x): cage A = m1 + m2, candidate T
     at 3000; every earlier sample has 40 A and 0 T, m1's later sample 20 A /
@@ -528,6 +547,13 @@ def classify_cage_rises(
     )
     is_later = time == str(tps.later)
     is_earlier = time == str(tps.earlier)
+    # Which rows were sampled before treatment began (labels compared as
+    # text, like every other label here).  Only read when the split is on.
+    is_pre_treatment = (
+        np.isin(time, [str(t) for t in pre_treatment])
+        if pre_treatment is not None
+        else None
+    )
     # One verdict column per letter that rose anywhere: (status words, present flags).
     verdict = {}
     for letter in sorted(set(rises["allele"].astype(str))):
@@ -600,7 +626,16 @@ def classify_cage_rises(
         if not covered.any():
             rec["origin"] = ORIGIN_BASELINE_NOT_COVERED
         elif (covered & p_idx).any():
-            rec["origin"] = ORIGIN_STANDING
+            # Some covered baseline sample carries the letter.  Without the
+            # split that is standing variation; with it, standing variation
+            # needs one of the carrying samples to be a pre-treatment one.
+            rec["origin"] = (
+                ORIGIN_STANDING
+                if is_pre_treatment is None
+                else carried_allele_origin(
+                    bool((covered & p_idx & is_pre_treatment[idx]).any())
+                )
+            )
         elif (covered & (s_idx == EVIDENCE_BELOW_DETECTION)).any():
             rec["origin"] = ORIGIN_DE_NOVO_BELOW_DETECTION
         else:
@@ -649,7 +684,10 @@ def is_event(origin: pd.Series, block_rule: str) -> pd.Series:
 
     ``de_novo`` and ``de_novo_below_detection`` always; ``block_event`` only
     under ``block_rule == "once"`` (one event per block; ``exclude``, the
-    default, drops blocks as Phase 2 does).  Nothing else ever counts.
+    default, drops blocks as Phase 2 does).  Nothing else ever counts:
+    ``first_seen_after_treatment_began`` is a reported label only (design
+    D12), so the gene and cage counts and both tests are the same with and
+    without ``--pre_treatment_timepoints``.
 
     Example: origins [de_novo, block_event, standing_variation] -> exclude:
     [True, False, False]; once: [True, True, False].
@@ -964,6 +1002,7 @@ def _count_one_mag(job: dict) -> tuple[str, pd.DataFrame, pd.DataFrame, dict]:
             strain_gate=job["strain_gate"],
             min_determined_carriers=job["min_determined_carriers"],
             turnover=turnover,
+            pre_treatment=job["pre_treatment"],
         )
     gene_cage, totals = gene_tables(
         events,
@@ -1043,10 +1082,12 @@ def hunt_the_hot_genes(args: argparse.Namespace) -> int:
     # plus every other sample of the sheet under a DATED cohort scope.
     loaded = comparison_meta
     timepoints = [earlier, later]
+    sheet_dated = False  # asked under the cohort scope only (below)
     if args.baseline_scope == "cohort":
         dated = meta["collection_date"].notna() & (
             meta["collection_date"].astype(str).str.strip() != ""
         )
+        sheet_dated = bool(dated.all())
         if dated.any() and not dated.all():
             missing = sorted(meta.loc[~dated, "sample_id"])
             raise ValueError(
@@ -1089,6 +1130,19 @@ def hunt_the_hot_genes(args: argparse.Namespace) -> int:
                 f"--baseline_scope comparison).  Add a collection_date column to "
                 f"use the full cohort."
             )
+    # Which of the timepoints read were sampled before treatment began (None =
+    # flag not given = no split); the same check as alleleflux-baseline-presence,
+    # made before any table is read or written.
+    pre_treatment = checked_pre_treatment_timepoints(
+        args.pre_treatment_timepoints, args.baseline_scope, sheet_dated, timepoints
+    )
+    if pre_treatment is not None:
+        on_treatment = sorted(set(timepoints) - set(pre_treatment))
+        logger.info(
+            f"pre-treatment timepoint(s) {pre_treatment}: "
+            f"{int(loaded['time'].isin(pre_treatment).sum())} of {len(loaded)} samples "
+            f"read; a witness at {on_treatment} counts as sampled after treatment began"
+        )
 
     # ---- 2. genes and contig lengths, once, then per MAG
     genes = load_genes(args.prodigal_fasta)
@@ -1133,6 +1187,9 @@ def hunt_the_hot_genes(args: argparse.Namespace) -> int:
                 "min_cov": args.min_cov,
                 "min_freq": args.min_freq,
                 "baseline_scope": args.baseline_scope,
+                # None unless --pre_treatment_timepoints was given (dated
+                # cohort scope): the third label in the events table
+                "pre_treatment": pre_treatment,
                 "cluster_window_bp": args.cluster_window_bp,
                 "max_de_novo_neighbours": args.max_de_novo_neighbours,
                 "strain_gate": args.strain_gate,

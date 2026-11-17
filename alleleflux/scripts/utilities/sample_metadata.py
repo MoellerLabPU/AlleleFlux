@@ -26,6 +26,15 @@ witnesses.  The workflow names the timepoints and groups it built QC and
 allele-frequency caches for (``--witness_timepoints``, ``--witness_groups``);
 the two commands share the flags and the row filter defined here, so they
 read exactly the same samples and never ask for a cache that was not built.
+
+Pre-treatment timepoints (``checked_pre_treatment_timepoints``)
+---------------------------------------------------------------
+``--pre_treatment_timepoints`` names the timepoints sampled BEFORE treatment
+began.  Under the dated cohort scope a witness at any other timepoint was
+sampled after treatment began, and an allele carried by such witnesses only
+is labelled "first seen after treatment began" instead of standing variation.
+The flag is defined with the witness flags and checked by one function, so
+both commands refuse the same mistakes.
 """
 
 from __future__ import annotations
@@ -72,11 +81,15 @@ def validate_collection_dates(meta: pd.DataFrame) -> None:
 
 
 def add_witness_args(parser) -> None:
-    """Add ``--witness_timepoints`` and ``--witness_groups`` to a de novo command.
+    """Add the witness flags to a de novo command.
 
-    One definition for both commands, so the two flags mean the same thing in
-    each.  Both default to ``None`` = no restriction (a run by hand reads every
-    sample of the sheet, as before the flags existed).
+    ``--witness_timepoints`` and ``--witness_groups`` say which samples
+    outside the comparison are read; both default to ``None`` = no restriction
+    (a run by hand reads every sample of the sheet, as before the flags
+    existed).  ``--pre_treatment_timepoints`` says which of the timepoints
+    read were sampled before treatment began; default ``None`` = no split.
+
+    One definition for both commands, so the flags mean the same thing in each.
     """
     parser.add_argument(
         "--witness_timepoints",
@@ -102,6 +115,87 @@ def add_witness_args(parser) -> None:
             "any group of the sheet."
         ),
     )
+    parser.add_argument(
+        "--pre_treatment_timepoints",
+        nargs="+",
+        default=None,
+        help=(
+            "cohort scope on a dated sheet only: the timepoints sampled BEFORE "
+            "treatment began.  An allele that a pre-treatment baseline witness "
+            "carried is standing variation; one that only witnesses at other "
+            "timepoints carried is labelled first_seen_after_treatment_began.  "
+            "Default: no split (every allele a witness carried is standing "
+            "variation).  An error under any other scope, on an undated sheet, "
+            "or for a label that is no timepoint of the samples read."
+        ),
+    )
+
+
+def checked_pre_treatment_timepoints(
+    pre_treatment, baseline_scope: str, sheet_dated: bool, read_timepoints
+):
+    """Check ``--pre_treatment_timepoints``; return the labels as text, or None.
+
+    The split "standing variation" / "first seen after treatment began" asks
+    one question of the baseline witnesses that carry an allele: was any of
+    them sampled before treatment began?  That question only exists when
+    witnesses can come from several timepoints, which is the cohort scope on
+    a fully dated sheet.  Everywhere else the flag could change nothing, so it
+    is refused rather than ignored: a silently unused list reads like a split
+    that found no on-treatment allele.
+
+    Parameters
+    ----------
+    pre_treatment : list or None
+        The flag's values (``None`` = flag not given).
+    baseline_scope : str
+        The run's ``--baseline_scope``.
+    sheet_dated : bool
+        True when every sample of the sheet carries a collection date.
+    read_timepoints : iterable
+        The timepoints of the samples the command reads (after the witness
+        lists were applied).
+
+    Returns
+    -------
+    ``None`` when the flag was not given (no split); otherwise the labels as
+    text, each once, in the order given.
+
+    Raises
+    ------
+    ValueError
+        The flag is given and: the scope is not ``cohort``; or the sheet is
+        not fully dated; or a label is not one of ``read_timepoints`` (naming
+        the label and the timepoints that are read).
+
+    Example: ``(["t0"], "cohort", True, ["t0", "t1", "tx"])`` -> ``["t0"]``;
+    ``(None, "comparison", False, [...])`` -> ``None``;
+    ``(["t9"], "cohort", True, ["t0", "t1"])`` -> error naming ``t9``.
+    """
+    if pre_treatment is None:
+        return None
+    if baseline_scope != "cohort":
+        raise ValueError(
+            f"--pre_treatment_timepoints {list(pre_treatment)} only applies under "
+            f"--baseline_scope cohort; this run has --baseline_scope {baseline_scope}"
+        )
+    if not sheet_dated:
+        raise ValueError(
+            f"--pre_treatment_timepoints {list(pre_treatment)} needs a collection_date "
+            "for every sample: without dates the cohort baseline is the comparison's "
+            "earlier timepoint only, so no witness is sampled after treatment began"
+        )
+    # Text on both sides (the sheet is read as text; a label may be typed as a
+    # number), each label once, order kept.
+    labels = list(dict.fromkeys(str(t).strip() for t in pre_treatment))
+    read = [str(t) for t in read_timepoints]
+    unknown = [t for t in labels if t not in read]
+    if unknown:
+        raise ValueError(
+            f"--pre_treatment_timepoints: {unknown} is/are not a timepoint of the "
+            f"samples read (timepoints read: {sorted(read)})"
+        )
+    return labels
 
 
 def cohort_witness_rows(

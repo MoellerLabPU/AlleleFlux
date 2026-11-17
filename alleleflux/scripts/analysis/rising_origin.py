@@ -9,7 +9,18 @@ alleles were already present at the earlier timepoint and how many were not.
 Origin categories (``origin``), from the rising table's ``origin_any_mouse``
 with the timepoint names taken out so every comparison shares one vocabulary:
 
-    standing_variation       present in >= 1 covered earlier sample ("any" rule)
+    standing_variation       present in >= 1 covered earlier sample ("any" rule);
+                             in a run that names its pre-treatment timepoints,
+                             in >= 1 covered PRE-TREATMENT baseline sample
+    first_seen_after_treatment_began
+                             only in a run that names its pre-treatment
+                             timepoints: present in >= 1 covered baseline
+                             sample, but in none taken before treatment began.
+                             It may have arisen under treatment; it may also
+                             have been there all along in no sampled
+                             pre-treatment witness.  A verdict of its own,
+                             never a de novo origin: the cluster rule and the
+                             strain gate do not touch it
     de_novo                  covered earlier samples, the allele in none of them
     de_novo_below_detection  only a few reads at the earlier timepoint, under
                              the detection bar
@@ -34,7 +45,11 @@ with the timepoint names taken out so every comparison shares one vocabulary:
     not_present_later        no covered later sample of the group shows it
     baseline_not_covered     no earlier sample deep enough to judge
 
-The first four are verdicts (``CALLED``); the last four are not.  The
+The first five are verdicts (``CALLED``); the last four are not.  Whether a
+run made the split is read from the rising tables themselves: their
+witness-count columns (``n_pre_treatment_witnesses_covered`` ...) are filled
+only when it did, and only then does the summary carry a row for
+``first_seen_after_treatment_began``.  The
 cluster rule runs BEFORE any strain gate: whether alleles sit together is a
 fact about positions, so it is judged on every candidate before a gate can
 relabel some of them (a gate that ran first would hide neighbours and could
@@ -90,15 +105,16 @@ by the gate.
 Outputs (``--output_dir``)
 --------------------------
 * ``rising_origin_alleles.tsv`` -- every rising allele with its ``origin``,
-  ``block_id`` / ``n_de_novo_neighbours``, and, when the inputs were given,
+  the five witness counts of its rising-table row (empty when the run made no
+  split), ``block_id`` / ``n_de_novo_neighbours``, and, when the inputs were given,
   ``floor`` / ``strain_status`` / ``strain_class`` (group verdict) and
   ``carrier_strain_status`` / ``n_carriers`` / ``n_carriers_determined`` /
   ``n_carriers_strain_changed`` (carrier verdict).
 * ``rising_origin_summary.tsv`` -- one row per floor x comparison x group x
   strain class x origin, zero counts included: ``n_alleles``, ``n_mags``,
   ``n_rising`` / ``n_called`` (the block's totals), ``pct_of_all`` (of every
-  rising allele in the block) and ``pct_of_called`` (of the four verdicts; NaN
-  for the two non-verdicts).  Strain classes: each class present plus ``all``;
+  rising allele in the block) and ``pct_of_called`` (of the verdicts; NaN
+  for the non-verdicts).  Strain classes: each class present plus ``all``;
   without verdicts only ``all`` and no floor.  Comparisons and groups are
   never pooled: the control appears once per comparison.
 
@@ -116,8 +132,12 @@ import re
 import numpy as np
 import pandas as pd
 
-from alleleflux.scripts.analysis.baseline_presence import parse_comparison
+from alleleflux.scripts.analysis.baseline_presence import (
+    WITNESS_COUNT_COLUMNS,
+    parse_comparison,
+)
 from alleleflux.scripts.analysis.de_novo_rules import (
+    FIRST_SEEN_AFTER_TREATMENT,
     BLOCK_EVENT,
     CARRIER_NEW_STRAIN,
     CARRIER_SAME_STRAIN,
@@ -129,9 +149,12 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
-# Origin categories, in report order; the first four are verdicts.
+# Origin categories, in report order; the first five are verdicts.
 ORIGINS = [
     "standing_variation",
+    # only in a run that names its pre-treatment timepoints: a baseline
+    # witness carried the allele, none of them a pre-treatment one
+    FIRST_SEEN_AFTER_TREATMENT,
     "de_novo",
     "de_novo_below_detection",
     "new_strain",
@@ -140,7 +163,7 @@ ORIGINS = [
     "not_present_later",
     "baseline_not_covered",
 ]
-CALLED = ORIGINS[:4]
+CALLED = ORIGINS[:5]
 DE_NOVO = ("de_novo", "de_novo_below_detection")  # the only origins a gate relabels
 STRAIN_GATES = ("carrier", "group", "both", "none")
 # Precedence of a gate verdict under ``both`` (user ruling 2026-10-26): an
@@ -174,6 +197,11 @@ REQUIRED = [
     "n_replicates",
     "n_mice",
     "origin_any_mouse",
+    # The baseline witnesses per treatment class, written by every
+    # baseline-presence run and filled only when it named its pre-treatment
+    # timepoints.  Carried into the allele table; "any value filled" is how
+    # this command knows the run made the split (split_is_on).
+    *WITNESS_COUNT_COLUMNS,
 ]
 BLOCK = ["floor", "comparison", "period", "age", "test_type", "rose_in", "strain_class"]
 SUMMARY_COLUMNS = BLOCK + [
@@ -209,11 +237,13 @@ def normalise_origin(origin: str, earlier: str, later: str) -> str:
 
     Example (5mo -> 16mo): ``de_novo_candidate_below_detection_at_5mo`` ->
     ``de_novo_below_detection``; ``5mo_not_covered`` -> ``baseline_not_covered``.
-    An unknown label raises (a label from another comparison means the file
+    ``standing_variation`` and ``first_seen_after_treatment_began`` carry no
+    timepoint name and pass through.  An unknown label raises (a label from another comparison means the file
     name and its contents disagree).
     """
     mapping = {
         "standing_variation": "standing_variation",
+        FIRST_SEEN_AFTER_TREATMENT: FIRST_SEEN_AFTER_TREATMENT,
         "de_novo_candidate": "de_novo",
         f"de_novo_candidate_below_detection_at_{earlier}": "de_novo_below_detection",
         f"allele_not_present_at_{later}": "not_present_later",
@@ -556,6 +586,21 @@ def apply_strain_gate(alleles: pd.DataFrame, gate: str) -> pd.DataFrame:
     return out
 
 
+def split_is_on(alleles: pd.DataFrame) -> bool:
+    """Did the run name its pre-treatment timepoints (three labels, not two)?
+
+    Read from the data: baseline presence fills the witness-count columns of
+    every rising row when it was given the list and leaves them all empty
+    otherwise, so one filled cell answers for the whole run (the setting is
+    run-wide).  Asking the tables, not a flag, means the summary can never
+    disagree with the rising tables it counts.
+
+    Example: ``n_pre_treatment_witnesses_covered`` = [8, 8, 5] -> True;
+    all empty -> False.
+    """
+    return bool(alleles[WITNESS_COUNT_COLUMNS[0]].notna().any())
+
+
 def summarise(alleles: pd.DataFrame) -> pd.DataFrame:
     """Counts and percentages per floor x comparison x group x strain class x origin.
 
@@ -564,8 +609,17 @@ def summarise(alleles: pd.DataFrame) -> pd.DataFrame:
     comparison x group together; floors and comparisons are never pooled).
     Every origin gets a row, zero counts included, so a plot never has gaps.
     ``pct_of_all`` divides by ``n_rising`` (all rising alleles in the block),
-    ``pct_of_called`` by ``n_called`` (the four verdicts) and is NaN for the two
-    non-verdicts.
+    ``pct_of_called`` by ``n_called`` (the verdicts, ``CALLED``) and is NaN for
+    the non-verdicts.
+
+    ``first_seen_after_treatment_began`` has rows only when the run made the
+    split (``split_is_on``); it is a verdict, so it is in ``n_called``.  An
+    allele with that label would read ``standing_variation`` without the
+    split, so ``n_called`` is the same number either way.
+
+    Example (one block, 5 rising alleles, split on): first seen 1, standing
+    0, de novo 1, de novo below detection 1, not present later 1, baseline
+    not covered 1 -> n_called 3; first seen: pct_of_all 20.0, pct_of_called 33.3.
     """
     gated = (
         "strain_class" in alleles.columns or "carrier_strain_status" in alleles.columns
@@ -576,12 +630,15 @@ def summarise(alleles: pd.DataFrame) -> pd.DataFrame:
         )
     else:
         tagged = alleles.assign(strain_class="all", floor=np.nan)
-    # Without any strain input the two gate outcomes cannot occur: no zero rows for them.
-    origins = (
-        ORIGINS
-        if gated
-        else [o for o in ORIGINS if o not in ("new_strain", CARRIER_UNDETERMINED)]
-    )
+    # Origins that cannot occur in this run get no zero rows: the two gate
+    # outcomes without any strain input, and the third label in a run that
+    # made no split.
+    impossible = set()
+    if not gated:
+        impossible |= {"new_strain", CARRIER_UNDETERMINED}
+    if not split_is_on(alleles):
+        impossible.add(FIRST_SEEN_AFTER_TREATMENT)
+    origins = [o for o in ORIGINS if o not in impossible]
     rows = []
     for block, g in tagged.groupby(BLOCK, sort=True, dropna=False):
         n_rising = len(g)

@@ -57,6 +57,7 @@ class TestDeNovoRuleParams:
         assert fns["de_novo_rule_params"]() == {
             "baseline_scope": "cohort",
             "cohort_witnesses": "sheet",
+            "pre_treatment_timepoints": [],
             "cluster_window_bp": 1000,
             "max_de_novo_neighbours": 0,
             "strain_gate": "carrier",
@@ -145,6 +146,72 @@ class TestDeNovoRuleParams:
             "de_novo_rule_cli_args"
         ]()
         assert "cohort_witnesses" not in args and "comparisons" not in args
+
+    def test_pre_treatment_timepoints_default_to_an_empty_list(self):
+        # No list = no split: the two labels of before (de novo / standing).
+        assert (
+            _load(_cfg({}))["de_novo_rule_params"]()["pre_treatment_timepoints"] == []
+        )
+        assert (
+            _load(_cfg(None))["de_novo_rule_params"]()["pre_treatment_timepoints"] == []
+        )
+        # An empty key in the YAML (``pre_treatment_timepoints:``) reads as None.
+        assert (
+            _load(_cfg({"pre_treatment_timepoints": None}))["de_novo_rule_params"]()[
+                "pre_treatment_timepoints"
+            ]
+            == []
+        )
+
+    def test_pre_treatment_labels_are_kept_as_text(self):
+        # The sheet is read as text, so a YAML number 5 and the text "5" are
+        # the same timepoint; spaces around a label and a repeated label go.
+        p = _load(_cfg({"pre_treatment_timepoints": [5, " t0 ", "5", "t0"]}))[
+            "de_novo_rule_params"
+        ]()
+        assert p["pre_treatment_timepoints"] == ["5", "t0"]
+
+    def test_pre_treatment_timepoints_must_be_a_list(self):
+        # ``pre_treatment_timepoints: t0`` is one string; reading it letter by
+        # letter would make "t" and "0" two timepoints.
+        for not_a_list in ("t0", 5, {"t0": True}):
+            with pytest.raises(ValueError, match="pre_treatment_timepoints.*list"):
+                _load(_cfg({"pre_treatment_timepoints": not_a_list}))[
+                    "de_novo_rule_params"
+                ]()
+
+    def test_a_blank_pre_treatment_label_is_refused(self):
+        for blank in ("", "  ", None):
+            with pytest.raises(ValueError, match="pre_treatment_timepoints.*blank"):
+                _load(_cfg({"pre_treatment_timepoints": ["t0", blank]}))[
+                    "de_novo_rule_params"
+                ]()
+
+    @pytest.mark.parametrize("scope", ["individual", "own_group", "comparison"])
+    def test_pre_treatment_timepoints_under_another_scope_stop_the_run(self, scope):
+        # Only the cohort scope reads witnesses outside the comparison's
+        # earlier timepoint, so only there can a witness be "on treatment".
+        # A filled list under any other scope is a mistake, not a leftover
+        # (user ruling 2026-11-16): stop, naming both settings.
+        with pytest.raises(
+            ValueError, match=f"pre_treatment_timepoints.*baseline_scope.*{scope}"
+        ):
+            _load(_cfg({"baseline_scope": scope, "pre_treatment_timepoints": ["t0"]}))[
+                "de_novo_rule_params"
+            ]()
+        # The template carries the line empty: that is accepted everywhere.
+        p = _load(_cfg({"baseline_scope": scope, "pre_treatment_timepoints": []}))[
+            "de_novo_rule_params"
+        ]()
+        assert p["pre_treatment_timepoints"] == []
+
+    def test_pre_treatment_timepoints_never_reach_the_rising_origin_flags(self):
+        # They are a flag of the two commands that read samples;
+        # alleleflux-rising-origin only counts the labels it is handed.
+        args = _load(_cfg({"pre_treatment_timepoints": ["t0"]}))[
+            "de_novo_rule_cli_args"
+        ]()
+        assert "pre_treatment" not in args and "t0" not in args
 
     def test_negative_numbers_raise(self):
         with pytest.raises(ValueError, match="cluster_window_bp"):

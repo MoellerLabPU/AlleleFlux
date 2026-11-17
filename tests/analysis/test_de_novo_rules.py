@@ -315,3 +315,29 @@ class TestCarrierStrainVerdicts:
         tbl = _turnover([("m1", "pre_end", "m1_end", "maybe")])
         with pytest.raises(ValueError):
             carrier_strain_verdicts(["m1"], tbl, "pre_end", 1)
+
+
+# ---------------------------------------------------------------------------
+# carried_allele_origin: the split of "an earlier sample carried the allele"
+# ---------------------------------------------------------------------------
+def test_an_allele_a_pre_treatment_witness_carried_is_standing_variation():
+    from alleleflux.scripts.analysis.de_novo_rules import (
+        STANDING_VARIATION,
+        carried_allele_origin,
+    )
+
+    assert carried_allele_origin(True) == STANDING_VARIATION == "standing_variation"
+
+
+def test_an_allele_only_on_treatment_witnesses_carried_is_first_seen_after_treatment():
+    from alleleflux.scripts.analysis.de_novo_rules import (
+        DE_NOVO_ORIGINS,
+        FIRST_SEEN_AFTER_TREATMENT,
+        carried_allele_origin,
+    )
+
+    assert carried_allele_origin(False) == FIRST_SEEN_AFTER_TREATMENT
+    assert FIRST_SEEN_AFTER_TREATMENT == "first_seen_after_treatment_began"
+    # Not a de novo origin: the cluster rule and the strain gate, which act on
+    # DE_NOVO_ORIGINS only, never touch it.
+    assert FIRST_SEEN_AFTER_TREATMENT not in DE_NOVO_ORIGINS

@@ -13,8 +13,12 @@ t1; the sheet also holds a group C and a timepoint tx.
 """
 
 import pandas as pd
+import pytest
 
-from alleleflux.scripts.utilities.sample_metadata import cohort_witness_rows
+from alleleflux.scripts.utilities.sample_metadata import (
+    checked_pre_treatment_timepoints,
+    cohort_witness_rows,
+)
 
 
 def _sheet():
@@ -106,3 +110,42 @@ def test_the_mask_follows_the_sheets_own_index():
     )
     assert list(mask.index) == [5, 0, 3]
     assert _read(meta, mask) == ["a_t0"]
+
+
+# ---------------------------------------------------------------------------
+# --pre_treatment_timepoints: which timepoints were sampled before treatment
+# began.  The two commands share one check, so they refuse the same mistakes.
+# Read timepoints below: t0 and t1 (the comparison) and tx (a witness-only one).
+# ---------------------------------------------------------------------------
+READ = ["t0", "t1", "tx"]
+
+
+def test_no_flag_means_no_split():
+    """Flag left out -> None, under any scope and on any sheet: nothing to check."""
+    assert checked_pre_treatment_timepoints(None, "cohort", True, READ) is None
+    assert checked_pre_treatment_timepoints(None, "comparison", False, READ) is None
+
+
+def test_labels_come_back_as_text_once_each_in_the_order_given():
+    got = checked_pre_treatment_timepoints(["t0", "tx", "t0"], "cohort", True, READ)
+    assert got == ["t0", "tx"]
+    # a label typed as a number matches the text cell of the sheet
+    assert checked_pre_treatment_timepoints([5], "cohort", True, ["5", "10"]) == ["5"]
+
+
+@pytest.mark.parametrize("scope", ["individual", "own_group", "comparison"])
+def test_the_flag_under_another_scope_is_refused(scope):
+    """Only the cohort scope reads witnesses sampled after treatment began."""
+    with pytest.raises(ValueError, match=f"pre_treatment_timepoints.*cohort.*{scope}"):
+        checked_pre_treatment_timepoints(["t0"], scope, True, READ)
+
+
+def test_the_flag_on_an_undated_sheet_is_refused():
+    """Without dates the cohort baseline is the earlier timepoint only."""
+    with pytest.raises(ValueError, match="collection_date"):
+        checked_pre_treatment_timepoints(["t0"], "cohort", False, READ)
+
+
+def test_a_label_no_read_sample_has_is_refused_naming_it():
+    with pytest.raises(ValueError, match=r"\['t9'\].*t0.*t1.*tx"):
+        checked_pre_treatment_timepoints(["t0", "t9"], "cohort", True, READ)

@@ -68,6 +68,11 @@ rule gene_de_novo:
         # workflow built caches for, the SAME two lists baseline_presence gets
         witness_timepoints=" ".join(CACHE_TIMEPOINTS),
         witness_groups=" ".join(WITNESS_GROUPS),
+        # Which witness timepoints were sampled before treatment began
+        # (analysis.baseline_presence.pre_treatment_timepoints, checked in
+        # common.smk): "--pre_treatment_timepoints A [B ...]", or an empty
+        # string when the list is empty, so the command is then unchanged.
+        pre_treatment_arg=PRE_TREATMENT_ARG,
         # the cages-per-group floor is the run's replicate floor (decision 8)
         min_cages=config["quality_control"]["min_sample_num"],
         fdr_arg=(
@@ -99,6 +104,7 @@ rule gene_de_novo:
             {params.knob_args} \
             --witness_timepoints {params.witness_timepoints} \
             --witness_groups {params.witness_groups} \
+            {params.pre_treatment_arg} \
             --min_cages {params.min_cages} \
             {params.fdr_arg} \
             --min_cov {params.min_cov} \

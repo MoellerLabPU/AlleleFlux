@@ -55,6 +55,26 @@ an age series), never a fixed t0/t1 vocabulary.  In this file "t0" and "t1" appe
 as placeholders in templates and as shorthand in comments for "the earlier /
 the later timepoint of the comparison".
 
+Three labels (``--pre_treatment_timepoints``; dated cohort scope only).  The
+cohort scope calls an allele standing as soon as any earlier-dated sample
+carried it, but some earlier-dated samples were taken AFTER treatment began,
+and an allele first seen in one of those may have arisen under treatment.
+With the pre-treatment timepoints named, ``origin_any_mouse`` asks one more
+question of the witnesses (the covered samples dated before the first
+carrier) that carry the allele::
+
+    none carries it                          de novo (unchanged)
+    a pre-treatment witness carries it       standing_variation
+    only on-treatment witnesses carry it     first_seen_after_treatment_began
+
+Which samples testify does not change; five columns report the witnesses per
+class (``WITNESS_COUNT_COLUMNS``), so a label resting on few pre-treatment
+witnesses can be seen.  Small example: witnesses w1, w2 (pre-treatment,
+clean) and w3 (on treatment, 6 G reads of 30) -> first seen after treatment
+began; pre-treatment 2 covered / 0 carrying, on treatment 1 covered / 1
+carrying.  Without the flag the label is ``standing_variation`` as before
+and the five columns are empty.
+
 Which samples count (``--baseline_scope``; see ``baseline_rows`` for all four):
 
 * ``cohort`` (default): every QC-passing sample of the whole run, any group, any
@@ -101,6 +121,10 @@ import pandas as pd
 
 from alleleflux.scripts.analysis.ani.classify import BASES
 from alleleflux.scripts.analysis.ani.null_model import build_error_model
+from alleleflux.scripts.analysis.de_novo_rules import (
+    FIRST_SEEN_AFTER_TREATMENT,
+    carried_allele_origin,
+)
 from alleleflux.scripts.utilities.cache_io import (
     cache_samples,
     load_cache_sites,
@@ -109,6 +133,7 @@ from alleleflux.scripts.utilities.logging_config import setup_logging
 from alleleflux.scripts.utilities.sample_metadata import (
     META_OPTIONAL,
     add_witness_args,
+    checked_pre_treatment_timepoints,
     cohort_witness_rows,
     validate_collection_dates,
 )
@@ -160,6 +185,28 @@ ORIGIN_ABSENT_AT_T1 = "allele_absent_at_{t1}"  # t1 covered, zero reads of the a
 ORIGIN_T1_NOT_COVERED = "{t1}_not_covered"  # t1 too thin: nothing to explain
 # Site-level only (origin_any_mouse): no covered t1 sample shows the allele at all.
 ORIGIN_NOT_SEEN_AT_T1 = "allele_not_present_at_{t1}"
+# Site-level only, and only with --pre_treatment_timepoints under the dated
+# cohort scope: a baseline witness carried the allele, but none of the
+# carrying witnesses was sampled before treatment began (de_novo_rules).
+ORIGIN_FIRST_SEEN_AFTER_TREATMENT = FIRST_SEEN_AFTER_TREATMENT
+
+# The baseline witnesses of one row, split by treatment class.  A witness is a
+# covered baseline sample; "pre_treatment" = its timepoint is one of
+# --pre_treatment_timepoints, "on_treatment" = any other timepoint.  Filled
+# only when the flag is given; empty cells otherwise.  The two "covered"
+# counts add up to n_{t0}_samples_covered and the two "allele_present" counts
+# to n_{t0}_samples_allele_present.
+WITNESS_COUNT_COLUMNS = [
+    "n_pre_treatment_witnesses_covered",
+    "n_pre_treatment_witnesses_allele_present",
+    # pre-treatment witnesses with a few reads of the allele under the
+    # detection bar: they do not carry it by the presence rule, so they never
+    # make it standing, but a first_seen_after_treatment_began label with a
+    # count here is a weaker call
+    "n_pre_treatment_witnesses_below_detection",
+    "n_on_treatment_witnesses_covered",
+    "n_on_treatment_witnesses_allele_present",
+]
 
 # ``--summary`` families -> the stem of the per-base p-value column in that family's
 # source files.  A summary family fixes the file (``p_value_summary_{family}_*.tsv``),
@@ -749,6 +796,10 @@ SUMMARY_COLUMN_TEMPLATES = [
     # OWN earlier sample was covered and clean, the strictest per-mouse evidence
     "n_baseline_reads",
     "n_carriers_own_baseline_absent",
+    # the covered baseline samples split by treatment class (the numbers
+    # behind standing_variation vs first_seen_after_treatment_began); empty
+    # without --pre_treatment_timepoints
+    *WITNESS_COUNT_COLUMNS,
     # same-mouse numbers: the strict framing, one count per de-novo/standing verdict
     "n_mice_standing_variation",
     "n_mice_de_novo_candidate",
@@ -899,6 +950,7 @@ def _site_record(
     t0: pd.DataFrame,
     t1: pd.DataFrame,
     tps: Timepoints,
+    pre_treatment=None,
 ) -> dict:
     """One summary record: the verdict and counts for one (site, allele).
 
@@ -908,6 +960,18 @@ def _site_record(
     (the earlier samples by default; the carriers' own, or every earlier-dated
     sample of the run, under the other scopes).  ``site_rows`` supplies the
     site-level columns (``q_value``, ``n_candidate_alleles``).
+
+    ``pre_treatment`` (the timepoints sampled before treatment began; None =
+    no split) turns on the third label and fills ``WITNESS_COUNT_COLUMNS``:
+    the covered baseline rows are split by whether their ``time`` is in the
+    list, and an allele that would read ``standing_variation`` reads
+    ``first_seen_after_treatment_began`` when no pre-treatment row carries it.
+    Every other origin is untouched.
+
+    Example (pre_treatment ["t0"]): covered baseline rows w1, w2 at t0 without
+    the allele and w3 at another timepoint with it -> origin
+    ``first_seen_after_treatment_began``, counts 2 / 0 / 0 / 1 / 1; had w1
+    carried it -> ``standing_variation``, counts 2 / 1 / 0 / 1 / 1.
     """
     t0_cov = t0[t0["allele_status"] != EVIDENCE_NOT_COVERED]
     t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
@@ -931,6 +995,25 @@ def _site_record(
         origin = ORIGIN_DE_NOVO
     else:
         origin = tps.name(ORIGIN_T0_NOT_COVERED)
+    # Three labels: which class of witness carried the allele.  The witnesses
+    # themselves (t0_cov) are exactly the ones judged above; this only looks
+    # at each one's timepoint.  Without the list the five counts stay empty.
+    witness_counts = dict.fromkeys(WITNESS_COUNT_COLUMNS, np.nan)
+    if pre_treatment is not None:
+        is_pre = t0_cov["time"].astype(str).isin([str(t) for t in pre_treatment])
+        carries = t0_cov["allele_present"].astype(bool)
+        below = t0_cov["allele_status"] == EVIDENCE_BELOW_DETECTION
+        witness_counts = {
+            "n_pre_treatment_witnesses_covered": int(is_pre.sum()),
+            "n_pre_treatment_witnesses_allele_present": int((is_pre & carries).sum()),
+            "n_pre_treatment_witnesses_below_detection": int((is_pre & below).sum()),
+            "n_on_treatment_witnesses_covered": int((~is_pre).sum()),
+            "n_on_treatment_witnesses_allele_present": int((~is_pre & carries).sum()),
+        }
+        # Only an allele some witness carried is split; de novo, "not seen at
+        # the later timepoint" and "baseline not covered" keep their label.
+        if origin == ORIGIN_STANDING:
+            origin = carried_allele_origin(bool((is_pre & carries).any()))
     # Calendar evidence: the first carrier's date, and the earliest dated row
     # among everything judged (t0 + t1) in which the allele is present.
     fc = first_carrier(t1_cov)
@@ -970,6 +1053,7 @@ def _site_record(
             "n_carriers_own_baseline_absent": int(
                 (t1["origin_in_own_mouse"] == ORIGIN_DE_NOVO).sum()
             ),
+            **witness_counts,
         }
     )
     for label in (ORIGIN_STANDING, ORIGIN_DE_NOVO, ORIGIN_DE_NOVO_BELOW_DETECTION):
@@ -1002,6 +1086,7 @@ def summarise_sites(
     long: pd.DataFrame,
     tps: Timepoints,
     scope: str = "comparison",
+    pre_treatment=None,
 ) -> pd.DataFrame:
     """One row per site x allele: the few numbers the baseline question asks for.
 
@@ -1020,6 +1105,9 @@ def summarise_sites(
         Earlier / later timepoint labels; spells the column names.
     scope
         Which rows are the baseline (``baseline_rows``).
+    pre_treatment
+        The timepoints sampled before treatment began, or None (no split).
+        Only given under the dated cohort scope (``--pre_treatment_timepoints``).
 
     Returns
     -------
@@ -1028,7 +1116,14 @@ def summarise_sites(
         shows the allele; else standing_variation if any covered pre sample has
         it present; else de_novo_candidate_below_detection_at_pre if any pre
         has it below detection; else de_novo_candidate if any covered pre is
-        absent; else pre_not_covered.
+        absent; else pre_not_covered.  With ``pre_treatment``,
+        standing_variation needs a PRE-TREATMENT baseline sample with the
+        allele present; when only other baseline samples have it the origin is
+        first_seen_after_treatment_began.
+      n_pre_treatment_witnesses_* / n_on_treatment_witnesses_* -- the covered
+        baseline samples and those with the allele present, per treatment
+        class, plus the pre-treatment ones below detection
+        (``WITNESS_COUNT_COLUMNS``); empty without ``pre_treatment``.
       n_pre_samples_allele_present / n_pre_samples_covered -- present pre samples
         over pre samples deep enough to judge; n_replicates_with_allele_at_pre --
         distinct replicates among the present ones; pre_mice_allele_present --
@@ -1060,7 +1155,7 @@ def summarise_sites(
         t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
         carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
         t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1))
-        rows.append(_site_record(key, sub, t0, t1, tps))
+        rows.append(_site_record(key, sub, t0, t1, tps, pre_treatment))
     return pd.DataFrame(rows, columns=summary_columns(tps))
 
 
@@ -1087,6 +1182,7 @@ def summarise_rising(
     change: pd.DataFrame,
     tps: Timepoints,
     scope: str = "comparison",
+    pre_treatment=None,
 ) -> pd.DataFrame:
     """One row per (site, allele, group the allele ROSE in).
 
@@ -1116,6 +1212,10 @@ def summarise_rising(
         Earlier / later timepoint labels.
     scope
         As in ``summarise_sites``.
+    pre_treatment
+        As in ``summarise_sites``: the third label and the witness counts,
+        judged on this row's own baseline (the ``rose_in`` group's first
+        carrier sets the cut-off date).
 
     Returns
     -------
@@ -1164,7 +1264,7 @@ def summarise_rising(
             t1_cov = t1[t1["allele_status"] != EVIDENCE_NOT_COVERED]
             carriers = set(t1_cov.loc[t1_cov["allele_present"], "subjectID"])
             t0 = baseline_rows(sub, scope, tps, carriers, baseline_cutoff(t1))
-            record = _site_record(key, sub, t0, t1, tps)
+            record = _site_record(key, sub, t0, t1, tps, pre_treatment)
             record.update(
                 {
                     "rose_in": group,
@@ -1401,6 +1501,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     # the cohort baseline is the comparison's earlier timepoint (baseline_rows),
     # so the other timepoints are not read at all.
     timepoints = [earlier, later]
+    sheet_dated = False  # asked under the cohort scope only (below)
     if args.baseline_scope == "cohort":
         # Whether the sheet is dated is asked of the WHOLE sheet, before any
         # sample is set aside below: the workflow asks the same question of
@@ -1410,6 +1511,7 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
         )
         n_sheet = len(meta)
         undated_samples = sorted(meta.loc[~dated, "sample_id"])
+        sheet_dated = bool(dated.all())
         # Who may testify: a sample outside the comparison is read only when
         # its timepoint and its group are in the two lists the workflow built
         # caches for (no list = no restriction).  The comparison's own samples
@@ -1465,6 +1567,23 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
                 f"earlier timepoint {earlier!r} only (as under --baseline_scope "
                 f"comparison).  Add a collection_date column to use the full cohort."
             )
+    # Which of the timepoints read were sampled before treatment began (None =
+    # flag not given = no split).  Checked here, before the first table is
+    # read or written: refused under any scope but a dated cohort, and for a
+    # label that none of the samples read carries.
+    pre_treatment = checked_pre_treatment_timepoints(
+        args.pre_treatment_timepoints,
+        args.baseline_scope,
+        sheet_dated,
+        read_timepoints,
+    )
+    if pre_treatment is not None:
+        on_treatment = sorted(set(read_timepoints) - set(pre_treatment))
+        logger.info(
+            f"pre-treatment timepoint(s) {pre_treatment}: "
+            f"{int(meta['time'].isin(pre_treatment).sum())} of {len(meta)} samples "
+            f"read; a witness at {on_treatment} counts as sampled after treatment began"
+        )
 
     # ---- 2. Significant sites of the chosen test, then their candidate alleles per MAG.
     summary_dir = os.path.join(args.run_dir, "p_value_summary", args.comparison)
@@ -1635,11 +1754,13 @@ def chase_the_ancestors(args: argparse.Namespace) -> int:
     # ---- 5. Summary (every reported allele) and rising table (only the allele
     # that rose, per group, judged on that group's later samples); write all three.
     scope = args.baseline_scope
-    summary = summarise_sites(long, tps, scope)
+    # pre_treatment (step 1) is None unless the flag was given under a dated
+    # cohort scope; with it the summary and rising tables carry three labels.
+    summary = summarise_sites(long, tps, scope, pre_treatment)
     # The change is the comparison's (both timepoints, its mice): cohort rows
     # of other groups are baseline material only.
     change = frequency_change_by_group(long[_comparison_mask(long)], tps)
-    rising = summarise_rising(long, change, tps, scope)
+    rising = summarise_rising(long, change, tps, scope, pre_treatment)
     stem = os.path.join(
         args.output_dir,
         f"{args.comparison}_{output_label(args.summary, test_type)}_baseline_presence",

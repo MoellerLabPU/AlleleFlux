@@ -8,6 +8,9 @@ section 2.
 * :func:`assign_blocks` -- the cluster rule (spec 2.3): de novo alleles that sit
   within a window of each other on one contig, in one group, are one block
   event, never counted as independent de novo mutations.
+* :func:`carried_allele_origin` -- the split of "an earlier sample carried the
+  allele" by WHEN that sample was taken: before treatment began (standing
+  variation) or only after (first seen after treatment began).
 """
 
 from __future__ import annotations
@@ -22,6 +25,43 @@ import pandas as pd
 # gate; standing alleles and the two non-verdicts never do.
 DE_NOVO_ORIGINS = ("de_novo", "de_novo_below_detection")
 BLOCK_EVENT = "block_event"
+
+# The two origins of an allele that at least one baseline witness carried.
+# One spelling for the site-level tables, the run-level tally and the
+# gene-level events table.
+STANDING_VARIATION = "standing_variation"
+FIRST_SEEN_AFTER_TREATMENT = "first_seen_after_treatment_began"
+
+
+def carried_allele_origin(carried_by_a_pre_treatment_witness: bool) -> str:
+    """The origin of an allele that at least one baseline witness carried.
+
+    A baseline witness is a sample dated before the allele's first carrier.
+    When the run names its pre-treatment timepoints, every witness is either
+    pre-treatment or was sampled after treatment began, and the origin depends
+    on which of them carried the allele:
+
+    * a pre-treatment witness carried it -> ``standing_variation``: the allele
+      was in the population before treatment;
+    * only witnesses sampled after treatment began carried it ->
+      ``first_seen_after_treatment_began``: it may have arisen under
+      treatment.  A label, not a proof: an allele that was there all along but
+      in no sampled pre-treatment witness reads the same.
+
+    Call it only for an allele some witness carried, and only when the split
+    is on; the callers keep ``standing_variation`` otherwise.  The one
+    definition both de novo commands use, so they cannot disagree.
+
+    Example: carriers among the witnesses are one on-treatment sample ->
+    ``carried_allele_origin(False)`` -> ``"first_seen_after_treatment_began"``;
+    one on-treatment and one pre-treatment sample -> ``carried_allele_origin(True)``
+    -> ``"standing_variation"``.
+    """
+    return (
+        STANDING_VARIATION
+        if carried_by_a_pre_treatment_witness
+        else FIRST_SEEN_AFTER_TREATMENT
+    )
 
 
 def assign_blocks(

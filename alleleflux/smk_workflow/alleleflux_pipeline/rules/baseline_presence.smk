@@ -77,6 +77,11 @@ rule baseline_presence:
         # caches declared above.  Ignored by the command under every other scope.
         witness_timepoints=" ".join(CACHE_TIMEPOINTS),
         witness_groups=" ".join(WITNESS_GROUPS),
+        # Which witness timepoints were sampled before treatment began
+        # (analysis.baseline_presence.pre_treatment_timepoints, checked in
+        # common.smk): "--pre_treatment_timepoints A [B ...]", or an empty
+        # string when the list is empty, so the command is then unchanged.
+        pre_treatment_arg=PRE_TREATMENT_ARG,
         # The presence rule, the SAME dict pairwise_ani reads (common.smk), so
         # "present" means one thing across the ANI table and this one.
         min_cov=PRESENCE_RULE["min_cov"],
@@ -100,6 +105,7 @@ rule baseline_presence:
             --baseline_scope {params.baseline_scope} \
             --witness_timepoints {params.witness_timepoints} \
             --witness_groups {params.witness_groups} \
+            {params.pre_treatment_arg} \
             --cache_dir {params.cache_dir} \
             --metadata {input.metadata} \
             --output_dir {params.output_dir} \

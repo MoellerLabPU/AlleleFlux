@@ -7,6 +7,7 @@ the real console script.
 """
 
 import gzip
+import itertools
 import os
 import shutil
 import subprocess
@@ -24,7 +25,10 @@ from alleleflux.scripts.analysis.baseline_presence import (
     EVIDENCE_BELOW_DETECTION,
     EVIDENCE_NOT_COVERED,
     EVIDENCE_PRESENT,
+    ORIGIN_DE_NOVO,
+    ORIGIN_FIRST_SEEN_AFTER_TREATMENT,
     ORIGIN_STANDING,
+    WITNESS_COUNT_COLUMNS,
     Timepoints,
     label_origin_in_own_mouse,
     allele_p_column,
@@ -586,6 +590,11 @@ class TestSummariseSites(unittest.TestCase):
                 "end_mice_allele_present",
                 "n_baseline_reads",
                 "n_carriers_own_baseline_absent",
+                "n_pre_treatment_witnesses_covered",
+                "n_pre_treatment_witnesses_allele_present",
+                "n_pre_treatment_witnesses_below_detection",
+                "n_on_treatment_witnesses_covered",
+                "n_on_treatment_witnesses_allele_present",
                 "n_mice_standing_variation",
                 "n_mice_de_novo_candidate",
                 "n_mice_de_novo_candidate_below_detection_at_pre",
@@ -942,6 +951,324 @@ class TestSummariseRising(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Three labels (design D10): under the dated cohort scope "an earlier sample
+# carried the allele" splits by WHICH witness carried it.
+# ---------------------------------------------------------------------------
+# What one witness looks like at the site, as (status, allele reads, total reads).
+WITNESS_READS = {
+    "carries": (EVIDENCE_PRESENT, 6, 30),
+    "clean": (EVIDENCE_ABSENT, 0, 30),
+    "below": (EVIDENCE_BELOW_DETECTION, 1, 30),
+    "thin": (EVIDENCE_NOT_COVERED, 0, 2),
+}
+FIRST_CARRIER_DATE = "2021-06-01"
+
+
+def _witness_site(witnesses, position=10):
+    """Long-table rows of ONE site of allele G that rose in group ``a``.
+
+    The comparison is t0 -> t1.  One carrier, mouse c1 of group ``a``, has G at
+    t1 on 2021-06-01.  ``witnesses`` are samples of another group ``x``
+    (never comparison samples), each ``(timepoint, state, date)`` with
+    ``state`` a key of ``WITNESS_READS``.  Example: ``("t0", "carries",
+    "2020-01-10")`` is a sample at timepoint t0, dated before the first
+    carrier, with G present.
+    """
+    site = {
+        "mag_id": "MAG_A",
+        "contig": "c1",
+        "position": position,
+        "gene_id": "g1",
+        "allele": "G",
+        "test_type": "two_sample_paired_tTest",
+        "group_analyzed": "",
+    }
+    rows = [
+        {
+            **site,
+            "sample_id": "c1_t1",
+            "subjectID": "c1",
+            "replicate": "r1",
+            "group": "a",
+            "time": "t1",
+            "allele_status": EVIDENCE_PRESENT,
+            "allele_reads": 20,
+            "total_reads": 30,
+            "allele_present": True,
+            "allele_frequency": 20 / 30,
+            "collection_date": FIRST_CARRIER_DATE,
+            "is_comparison_sample": True,
+        }
+    ]
+    for i, (timepoint, state, date) in enumerate(witnesses, start=1):
+        status, reads, total = WITNESS_READS[state]
+        rows.append(
+            {
+                **site,
+                "sample_id": f"w{i}",
+                "subjectID": f"w{i}",
+                "replicate": f"rw{i}",
+                "group": "x",
+                "time": timepoint,
+                "allele_status": status,
+                "allele_reads": reads,
+                "total_reads": total,
+                "allele_present": status == EVIDENCE_PRESENT,
+                "allele_frequency": (
+                    np.nan if status == EVIDENCE_NOT_COVERED else reads / total
+                ),
+                "collection_date": date,
+                "is_comparison_sample": False,
+            }
+        )
+    return rows
+
+
+class TestThreeLabels(unittest.TestCase):
+    """Pre-treatment timepoint: t0.  A witness at any other timepoint (here
+    ``tm``) was sampled after treatment began.  All witnesses are dated; the
+    first carrier is dated 2021-06-01."""
+
+    TPS = Timepoints("t0", "t1")
+    PRE = ["t0"]
+
+    def _summary(self, witnesses, pre_treatment=PRE):
+        long = label_origin_in_own_mouse(
+            pd.DataFrame(_witness_site(witnesses)), self.TPS
+        )
+        return summarise_sites(
+            long, self.TPS, "cohort", pre_treatment=pre_treatment
+        ).iloc[0]
+
+    def _counts(self, row):
+        return tuple(int(row[c]) for c in WITNESS_COUNT_COLUMNS)
+
+    def test_the_five_count_columns_are_named(self):
+        self.assertEqual(
+            WITNESS_COUNT_COLUMNS,
+            [
+                "n_pre_treatment_witnesses_covered",
+                "n_pre_treatment_witnesses_allele_present",
+                "n_pre_treatment_witnesses_below_detection",
+                "n_on_treatment_witnesses_covered",
+                "n_on_treatment_witnesses_allele_present",
+            ],
+        )
+        self.assertEqual(
+            ORIGIN_FIRST_SEEN_AFTER_TREATMENT, "first_seen_after_treatment_began"
+        )
+
+    def test_only_an_on_treatment_witness_carries_it_reads_first_seen_after_treatment(
+        self,
+    ):
+        """Two clean pre-treatment witnesses, one on-treatment witness with G:
+        nobody sampled before treatment had it."""
+        got = self._summary(
+            [
+                ("t0", "clean", "2020-01-10"),
+                ("t0", "clean", "2020-02-10"),
+                ("tm", "carries", "2020-07-10"),
+            ]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_FIRST_SEEN_AFTER_TREATMENT)
+        self.assertEqual(got.first_detection_date, "2020-07-10")
+
+    def test_a_pre_treatment_witness_also_carries_it_reads_standing(self):
+        """The same on-treatment carrier, still the earliest sample with G, but
+        a LATER-dated pre-treatment witness carries it too.  The first
+        detection date is the same as in the test above; only the per-class
+        counts tell the two cases apart."""
+        got = self._summary(
+            [
+                ("t0", "clean", "2020-01-10"),
+                ("t0", "carries", "2020-09-10"),
+                ("tm", "carries", "2020-07-10"),
+            ]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_STANDING)
+        self.assertEqual(got.first_detection_date, "2020-07-10")
+        self.assertEqual(self._counts(got), (2, 1, 0, 1, 1))
+
+    def test_pre_treatment_sample_dated_after_the_first_carrier_does_not_testify(
+        self,
+    ):
+        """A pre-treatment sample with G, dated AFTER the first carrier: the
+        calendar rule is unchanged, it is no witness, so it neither makes the
+        allele standing nor enters the counts."""
+        got = self._summary(
+            [
+                ("t0", "clean", "2020-01-10"),
+                ("tm", "carries", "2020-07-10"),
+                ("t0", "carries", "2021-08-10"),
+            ]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_FIRST_SEEN_AFTER_TREATMENT)
+        self.assertEqual(self._counts(got), (1, 0, 0, 1, 1))
+
+    def test_no_witness_carries_it_is_still_de_novo(self):
+        got = self._summary(
+            [("t0", "clean", "2020-01-10"), ("tm", "clean", "2020-07-10")]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_DE_NOVO)
+        self.assertEqual(self._counts(got), (1, 0, 0, 1, 0))
+
+    def test_witness_counts_report_covered_and_carrying_per_class(self):
+        """The worked example: w1, w2 clean pre-treatment; w3 on treatment with
+        G; w4 on treatment, 2 reads (too thin to judge); w5 pre-treatment with
+        G but dated after the first carrier.
+        -> pre-treatment: 2 covered, 0 carrying; on treatment: 1 covered, 1 carrying."""
+        got = self._summary(
+            [
+                ("t0", "clean", "2020-01-10"),
+                ("t0", "clean", "2020-02-10"),
+                ("tm", "carries", "2020-07-10"),
+                ("tm", "thin", "2020-08-10"),
+                ("t0", "carries", "2021-08-10"),
+            ]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_FIRST_SEEN_AFTER_TREATMENT)
+        self.assertEqual(self._counts(got), (2, 0, 0, 1, 1))
+        # the two classes add up to the existing all-witness columns
+        self.assertEqual(int(got.n_t0_samples_covered), 3)
+        self.assertEqual(int(got.n_t0_samples_allele_present), 1)
+
+    def test_a_pre_treatment_witness_below_detection_is_counted_not_called(self):
+        """One G read in 30 in a pre-treatment witness is under the detection
+        bar: by the presence rule that witness does not carry G, so the label
+        stays first-seen-after-treatment; the third count flags the weak call."""
+        got = self._summary(
+            [("t0", "below", "2020-01-10"), ("tm", "carries", "2020-07-10")]
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_FIRST_SEEN_AFTER_TREATMENT)
+        self.assertEqual(self._counts(got), (1, 0, 1, 1, 1))
+
+    def test_several_pre_treatment_timepoints(self):
+        got = self._summary(
+            [("t0", "clean", "2020-01-10"), ("tm", "carries", "2020-07-10")],
+            pre_treatment=["t0", "tm"],
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_STANDING)
+        self.assertEqual(self._counts(got), (2, 1, 0, 0, 0))
+
+    def test_without_the_flag_the_label_is_standing_and_the_counts_are_blank(self):
+        """No list = no split: the label of before, and the five columns are in
+        the header (one layout for every run) but empty."""
+        got = self._summary(
+            [("t0", "clean", "2020-01-10"), ("tm", "carries", "2020-07-10")],
+            pre_treatment=None,
+        )
+        self.assertEqual(got.origin_any_mouse, ORIGIN_STANDING)
+        for column in WITNESS_COUNT_COLUMNS:
+            self.assertIn(column, summary_columns(self.TPS))
+            self.assertTrue(pd.isna(got[column]), column)
+
+    def test_the_rising_table_carries_the_same_label_and_counts(self):
+        """The rising table judges the group the allele rose in (a); its row
+        gets the same split."""
+        rows = _witness_site(
+            [("t0", "clean", "2020-01-10"), ("tm", "carries", "2020-07-10")]
+        )
+        long = label_origin_in_own_mouse(pd.DataFrame(rows), self.TPS)
+        keys = ["mag_id", "contig", "position", "gene_id", "test_type"]
+        change = pd.DataFrame(
+            [
+                {
+                    **{k: rows[0][k] for k in keys},
+                    "group_analyzed": "",
+                    "allele": "G",
+                    "group": "a",
+                    "frequency_change": 0.5,
+                    "n_replicates": 1,
+                    "n_mice": 1,
+                }
+            ]
+        )
+        got = summarise_rising(long, change, self.TPS, "cohort", pre_treatment=self.PRE)
+        self.assertEqual(list(got.columns), rising_columns(self.TPS))
+        row = got.iloc[0]
+        self.assertEqual(row.rose_in, "a")
+        self.assertEqual(row.origin_any_mouse, ORIGIN_FIRST_SEEN_AFTER_TREATMENT)
+        self.assertEqual(self._counts(row), (1, 0, 0, 1, 1))
+        plain = summarise_rising(long, change, self.TPS, "cohort").iloc[0]
+        self.assertEqual(plain.origin_any_mouse, ORIGIN_STANDING)
+
+    def test_labels_match_the_plain_definition_on_every_small_witness_set(self):
+        """Brute force.  A witness is one of 12 kinds: (pre-treatment / on
+        treatment) x (carries G / clean / too thin to judge) x (dated before /
+        after the first carrier).  Every set of 1 to 4 witnesses (witnesses
+        are interchangeable, so every multiset: 12 + 78 + 364 + 1365 = 1819
+        sites) goes through the real summary in one table; label and counts
+        must equal the definition written out below in plain Python."""
+        kinds = list(
+            itertools.product(
+                ("t0", "tm"), ("carries", "clean", "thin"), ("before", "after")
+            )
+        )
+        cases = [
+            combo
+            for k in range(1, 5)
+            for combo in itertools.combinations_with_replacement(kinds, k)
+        ]
+        self.assertEqual(len(cases), 1819)
+        rows = []
+        for position, combo in enumerate(cases, start=1):
+            witnesses = [
+                # distinct days, all before (2020) or all after (2022) the carrier
+                (tp, state, f"{2020 if when == 'before' else 2022}-01-{i + 1:02d}")
+                for i, (tp, state, when) in enumerate(combo)
+            ]
+            rows.extend(_witness_site(witnesses, position=position))
+        long = label_origin_in_own_mouse(pd.DataFrame(rows), self.TPS)
+        got = summarise_sites(long, self.TPS, "cohort", pre_treatment=self.PRE)
+        got = got.set_index("position")
+        self.assertEqual(len(got), len(cases))
+        seen_labels = set()
+        for position, combo in enumerate(cases, start=1):
+            # --- the plain definition
+            testify = [w for w in combo if w[2] == "before"]
+            covered = [w for w in testify if w[1] != "thin"]
+            carrying = [w for w in covered if w[1] == "carries"]
+            if not covered:
+                want = "t0_not_covered"
+            elif not carrying:
+                want = ORIGIN_DE_NOVO
+            elif any(tp == "t0" for tp, _, _ in carrying):
+                want = ORIGIN_STANDING
+            else:
+                want = ORIGIN_FIRST_SEEN_AFTER_TREATMENT
+            want_counts = (
+                sum(tp == "t0" for tp, _, _ in covered),
+                sum(tp == "t0" for tp, _, _ in carrying),
+                0,  # no below-detection witness in this enumeration
+                sum(tp != "t0" for tp, _, _ in covered),
+                sum(tp != "t0" for tp, _, _ in carrying),
+            )
+            row = got.loc[position]
+            self.assertEqual(row.origin_any_mouse, want, combo)
+            self.assertEqual(self._counts(row), want_counts, combo)
+            # the two classes always add up to the all-witness columns
+            self.assertEqual(
+                int(row.n_t0_samples_covered), want_counts[0] + want_counts[3], combo
+            )
+            self.assertEqual(
+                int(row.n_t0_samples_allele_present),
+                want_counts[1] + want_counts[4],
+                combo,
+            )
+            seen_labels.add(want)
+        # the enumeration really reaches all four outcomes
+        self.assertEqual(
+            seen_labels,
+            {
+                "t0_not_covered",
+                ORIGIN_DE_NOVO,
+                ORIGIN_STANDING,
+                ORIGIN_FIRST_SEEN_AFTER_TREATMENT,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
 # End-to-end
 # ---------------------------------------------------------------------------
 def _write_profile(directory, sample, mag, rows):
@@ -1232,9 +1559,10 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         self.assertEqual((int(g.total_reads_pre), int(g.allele_reads_pre)), (92, 6))
         self.assertEqual((int(g.total_reads_end), int(g.allele_reads_end)), (120, 47))
         self.assertAlmostEqual(g.allele_frequency_end, 47 / 120)
-        self.assertEqual(
-            len(summ.columns), 29
-        )  # 22 + first_carrier_date, first_detection_date, first_detection_cohort
+        # 29 + the five witness counts (in the header of every run, empty
+        # here because no --pre_treatment_timepoints was given)
+        self.assertEqual(len(summ.columns), 34)
+        self.assertTrue(summ[WITNESS_COUNT_COLUMNS].isna().all().all())
 
     def test_strain_background_joins_when_given(self):
         tdir = os.path.join(self.tmp, "turnover")
@@ -1842,6 +2170,123 @@ class TestBaselinePresenceCLI(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self._outputs(), plain)
+
+    # ---- Phase 3b, three labels: the command is told which timepoints were
+    # sampled before treatment began (--pre_treatment_timepoints).
+    def test_pre_treatment_flag_under_another_scope_is_refused(self):
+        """Only the cohort scope reads a witness sampled after treatment began;
+        under `comparison` the flag could change nothing, so it stops the run
+        before any table is written."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        done = self._run(
+            "--baseline_scope", "comparison", "--pre_treatment_timepoints", "pre"
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("pre_treatment_timepoints", done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+    def test_pre_treatment_flag_on_an_undated_sheet_is_refused(self):
+        """No dates: the cohort baseline narrows to the earlier timepoint, where
+        every witness is a comparison sample.  The split cannot be made."""
+        self._add_cohort_samples(dates=None)
+        done = self._run(
+            "--baseline_scope", "cohort", "--pre_treatment_timepoints", "pre"
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("collection_date", done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+    def test_pre_treatment_label_that_no_read_sample_has_is_refused(self):
+        """A label that is no timepoint of the samples read (a typo, or a
+        timepoint left out of --witness_timepoints) names nobody."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        done = self._run(
+            "--baseline_scope", "cohort", "--pre_treatment_timepoints", "pr"
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("['pr']", done.stderr)
+        self.assertEqual(os.listdir(self.out) if os.path.isdir(self.out) else [], [])
+
+    WITNESS_COUNTS = [
+        "n_pre_treatment_witnesses_covered",
+        "n_pre_treatment_witnesses_allele_present",
+        "n_pre_treatment_witnesses_below_detection",
+        "n_on_treatment_witnesses_covered",
+        "n_on_treatment_witnesses_allele_present",
+    ]
+
+    def _rising(self):
+        return pd.read_csv(
+            os.path.join(
+                self.out,
+                "pre_end-fat_control_two_sample_paired_tTest_baseline_presence_rising.tsv",
+            ),
+            sep="\t",
+            dtype=str,
+        )
+
+    def _three_label_fixture(self):
+        """The cohort sheet with m1's pre sample cleaned of G: the only
+        earlier-dated sample with G is m5_mid (group other, 2016-09-01)."""
+        self._add_cohort_samples(self.COHORT_DATES)
+        prof = os.path.join(self.run, "profiles")
+        _write_profile(prof, "m1_pre", self.MAG, [(p, 30, 0, 0, 0) for p in range(6)])
+
+    def test_allele_carried_only_by_an_on_treatment_witness_end_to_end(self):
+        """'pre' is the pre-treatment timepoint, so m5_mid was sampled after
+        treatment began.  G: pre-treatment witnesses m1, m2 clean, m3 one read
+        (below detection), m4 too thin -> 3 covered, 0 carrying, 1 below the
+        bar; on treatment m5_mid carries it -> 1 covered, 1 carrying."""
+        self._three_label_fixture()
+        done = self._run(
+            "--baseline_scope", "cohort", "--pre_treatment_timepoints", "pre"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "first_seen_after_treatment_began")
+        self.assertEqual([int(g[c]) for c in self.WITNESS_COUNTS], [3, 0, 1, 1, 1])
+        self.assertEqual(g["pre_mice_allele_present"], "m5")
+        # the rising table: G rose in fat, same witnesses, same label
+        fat = self._rising().set_index("rose_in").loc["fat"]
+        self.assertEqual(fat["origin_any_mouse"], "first_seen_after_treatment_began")
+        self.assertEqual([int(fat[c]) for c in self.WITNESS_COUNTS], [3, 0, 1, 1, 1])
+        self.assertIn("pre-treatment timepoint(s) ['pre']", done.stderr)
+
+    def test_the_same_allele_is_standing_when_that_witness_is_pre_treatment(self):
+        self._three_label_fixture()
+        done = self._run(
+            "--baseline_scope", "cohort", "--pre_treatment_timepoints", "pre", "mid"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        g = self._summary().set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")
+        self.assertEqual([int(g[c]) for c in self.WITNESS_COUNTS], [4, 1, 1, 0, 0])
+
+    def test_without_the_flag_the_tables_keep_two_labels_and_blank_counts(self):
+        """No --pre_treatment_timepoints: G is standing as before, the five
+        count columns are in both headers and empty, and every other column
+        equals the run with the flag except the label itself."""
+        self._three_label_fixture()
+        done = self._run("--baseline_scope", "cohort")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        plain_summary, plain_rising = self._summary(dtype=str), self._rising()
+        g = plain_summary.set_index("allele").loc["G"]
+        self.assertEqual(g["origin_any_mouse"], "standing_variation")
+        for table in (plain_summary, plain_rising):
+            for column in self.WITNESS_COUNTS:
+                self.assertTrue(table[column].isna().all(), column)
+        done = self._run(
+            "--baseline_scope", "cohort", "--pre_treatment_timepoints", "pre"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        untouched = [
+            c
+            for c in plain_summary.columns
+            if c not in self.WITNESS_COUNTS + ["origin_any_mouse"]
+        ]
+        pd.testing.assert_frame_equal(
+            self._summary(dtype=str)[untouched], plain_summary[untouched]
+        )
 
 
 class TestCheckBaselineScope(unittest.TestCase):

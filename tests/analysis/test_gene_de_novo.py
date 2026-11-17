@@ -605,6 +605,138 @@ class TestIsEvent:
             is_event(pd.Series(["de_novo"]), "twice")
 
 
+FIRST_SEEN = "first_seen_after_treatment_began"
+MID_DATE = "2024-03-01"  # between pre (2024-01-15) and post (2024-04-15)
+
+
+def _sheet_with_mid():
+    """``_sheet_rows`` plus a sample of every mouse at a third timepoint
+    ``mid``, dated between pre and post."""
+    mid = pd.DataFrame(
+        [
+            (f"{m}_mid", m, rep, group, "mid", MID_DATE)
+            for m, (rep, group) in MICE.items()
+        ],
+        columns=[
+            "sample_id",
+            "subjectID",
+            "replicate",
+            "group",
+            "time",
+            "collection_date",
+        ],
+    )
+    return pd.concat([_sheet_rows(), mid], ignore_index=True)
+
+
+def _classify_three_timepoints(rises, counts, pre_treatment):
+    """``_classify`` on the three-timepoint sheet, cohort scope, blocks and gate off."""
+    return classify_cage_rises(
+        pd.DataFrame(rises),
+        _rows(counts),
+        _sheet_with_mid(),
+        mag_id="M",
+        tps=TPS,
+        scope="cohort",
+        model=MODEL,
+        min_freq=0.05,
+        min_cov=5,
+        window_bp=1000,
+        max_neighbours=10**6,
+        strain_gate="none",
+        min_determined_carriers=1,
+        turnover=None,
+        pre_treatment=pre_treatment,
+    )
+
+
+class TestFirstSeenAfterTreatment:
+    """Pre-treatment timepoint: ``pre``.  ``mid`` (dated between pre and
+    post) was sampled after treatment began.  T rises in cage A at 3000; m1
+    carries it at post."""
+
+    def _counts(self, mid_carrier=None, pre_carrier=None):
+        counts = _background([3000], tps=("pre", "mid", "post"))
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        if mid_carrier:
+            counts[(mid_carrier, "mid", 3000)] = (30, 0, 0, 10)
+        if pre_carrier:
+            counts[(pre_carrier, "pre", 3000)] = (30, 0, 0, 10)
+        return counts
+
+    def test_only_an_on_treatment_witness_carries_it(self):
+        """m9 (another group) has T at mid and nobody has it at pre."""
+        out = _classify_three_timepoints(
+            [_rise("cageA", "fat", 3000)], self._counts(mid_carrier="m9"), ["pre"]
+        )
+        assert out["origin"].tolist() == [FIRST_SEEN]
+        assert out["n_baseline_samples_present"].item() == 1
+        assert out["n_baseline_samples_covered"].item() == 8  # 4 pre + 4 mid
+
+    def test_a_pre_treatment_witness_carries_it_too(self):
+        out = _classify_three_timepoints(
+            [_rise("cageA", "fat", 3000)],
+            self._counts(mid_carrier="m9", pre_carrier="m3"),
+            ["pre"],
+        )
+        assert out["origin"].tolist() == ["standing_variation"]
+
+    def test_no_witness_carries_it_is_still_de_novo(self):
+        out = _classify_three_timepoints(
+            [_rise("cageA", "fat", 3000)], self._counts(), ["pre"]
+        )
+        assert out["origin"].tolist() == ["de_novo"]
+
+    def test_without_the_list_it_is_standing_variation(self):
+        out = _classify_three_timepoints(
+            [_rise("cageA", "fat", 3000)], self._counts(mid_carrier="m9"), None
+        )
+        assert out["origin"].tolist() == ["standing_variation"]
+
+    def test_both_timepoints_pre_treatment_is_standing_variation(self):
+        out = _classify_three_timepoints(
+            [_rise("cageA", "fat", 3000)],
+            self._counts(mid_carrier="m9"),
+            ["pre", "mid"],
+        )
+        assert out["origin"].tolist() == ["standing_variation"]
+
+    @pytest.mark.parametrize("block_rule", ["exclude", "once"])
+    def test_it_is_never_an_event(self, block_rule):
+        """Design D12: counting it would count one mutation again at every
+        later timepoint and cage it spreads to."""
+        assert not is_event(pd.Series([FIRST_SEEN]), block_rule).any()
+
+    def test_it_never_joins_a_block_or_passes_the_strain_gate(self):
+        """A de novo rise 100 bp away in the same cage: with the cluster rule
+        ON (no neighbour tolerated) the de novo one stays a lone de novo and
+        the first-seen one keeps its label, also under the carrier gate with
+        a carrier that changed strain."""
+        counts = _background([3000, 3100], tps=("pre", "mid", "post"))
+        counts[("m1", "post", 3000)] = (20, 0, 0, 20)
+        counts[("m9", "mid", 3000)] = (30, 0, 0, 10)  # witness for 3000 only
+        counts[("m1", "post", 3100)] = (20, 0, 0, 20)
+        out = classify_cage_rises(
+            pd.DataFrame([_rise("cageA", "fat", 3000), _rise("cageA", "fat", 3100)]),
+            _rows(counts),
+            _sheet_with_mid(),
+            mag_id="M",
+            tps=TPS,
+            scope="cohort",
+            model=MODEL,
+            min_freq=0.05,
+            min_cov=5,
+            window_bp=1000,
+            max_neighbours=0,
+            strain_gate="carrier",
+            min_determined_carriers=1,
+            turnover=_turnover({"m1": True}),
+            pre_treatment=["pre"],
+        )
+        assert out["origin"].tolist() == [FIRST_SEEN, "new_strain"]
+        assert out["block_id"].tolist() == ["", ""]
+
+
 class TestCohortWithoutDates:
     """A sheet with no collection_date cannot order a third timepoint against
     the comparison, and the sheet's row order says nothing (user 2026-11-02).
@@ -884,8 +1016,13 @@ from alleleflux.scripts.analysis.gene_de_novo import (
 from alleleflux.scripts.statistics.poisson_rate_tests import result_columns
 
 
-def _reference_origin(rises, rows, sheet, scope):
+def _reference_origin(rises, rows, sheet, scope, pre_treatment=None):
     """Stages 1-3 the slow way: Phase 2's functions called once per candidate.
+
+    With ``pre_treatment`` (timepoints sampled before treatment began) an
+    allele some baseline row carries is standing only when one of those rows
+    is at a pre-treatment timepoint; otherwise it is first seen after
+    treatment began.
 
     The oracle for the bulk implementation; written out in full here so a
     change to ``baseline_rows`` / ``baseline_cutoff`` / ``assess_rows`` that
@@ -914,7 +1051,11 @@ def _reference_origin(rises, rows, sheet, scope):
         if t0.empty:
             out.append("baseline_not_covered")
         elif t0["allele_present"].any():
-            out.append("standing_variation")
+            carrying = t0[t0["allele_present"]]
+            if pre_treatment is None or carrying["time"].isin(pre_treatment).any():
+                out.append("standing_variation")
+            else:
+                out.append("first_seen_after_treatment_began")
         elif (t0["allele_status"] == "below_detection").any():
             out.append("de_novo_below_detection")
         else:
@@ -963,6 +1104,53 @@ class TestClassifyInBulk:
         assert out["origin"].tolist() == expected
         # the grid exercises more than one verdict word (not a trivially uniform case)
         assert len(set(out["origin"])) >= 3
+
+    @pytest.mark.parametrize("pre_treatment", [["pre"], ["mid"], ["pre", "mid"]])
+    def test_three_labels_match_the_oracle_on_a_three_timepoint_grid(
+        self, pre_treatment
+    ):
+        """Random reads for every mouse at pre, mid and post (mid dated
+        between the two), cohort scope.  The bulk classifier and the
+        per-candidate oracle must give the same label at every candidate,
+        whichever timepoints are called pre-treatment."""
+        rng = np.random.default_rng(11)
+        positions = list(range(100, 160))
+        counts = {}
+        for m in MICE:
+            for tp in ("pre", "mid", "post"):
+                for p in positions:
+                    depth = int(rng.choice([2, 8, 20, 40, 60]))
+                    # mostly clean piles, so that "nobody carried it" and
+                    # "one class carried it" both occur often
+                    other = rng.integers(0, 4, size=3) * (rng.random(3) < 0.2)
+                    a = max(depth - int(other.sum()), 0)
+                    counts[(m, tp, p)] = (
+                        a,
+                        int(other[0]),
+                        int(other[1]),
+                        int(other[2]),
+                    )
+        rises = [
+            _rise(rep, group, p, allele)
+            for p in positions
+            for (rep, group) in {("cageA", "fat"), ("cageB", "fat"), ("cageC", "ctl")}
+            for allele in ("C", "G", "T")
+        ]
+        out = _classify_three_timepoints(rises, counts, pre_treatment)
+        expected = _reference_origin(
+            pd.DataFrame(rises),
+            _rows(counts),
+            _sheet_with_mid(),
+            "cohort",
+            pre_treatment,
+        )
+        assert out["origin"].tolist() == expected
+        labels = set(expected)
+        assert "standing_variation" in labels
+        if pre_treatment != ["pre", "mid"]:
+            assert "first_seen_after_treatment_began" in labels
+        else:  # every witness is pre-treatment: the third label cannot occur
+            assert "first_seen_after_treatment_began" not in labels
 
 
 # --- the CLI on a tiny run directory ---------------------------------------
@@ -1264,6 +1452,73 @@ class TestGeneDeNovoCLI:
         assert done.returncode == 0, done.stderr
         assert _origin_at(out, 150) == "standing_variation"
         assert _origin_at(out, 250) == "de_novo"  # cage B's T at 250: no witness
+
+    # ---- three labels: --pre_treatment_timepoints
+    def test_the_label_is_reported_and_no_count_or_test_moves(self, tmp_path):
+        """w1_mid carries the T that rises in cage A at 150.  With 'pre' as
+        the pre-treatment timepoint that witness was sampled after treatment
+        began, so the rise reads first_seen_after_treatment_began in the
+        events table.  It was not an event before (standing) and is not one
+        now: the gene, cage and test tables are identical text."""
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        plain_out, split_out = str(tmp_path / "plain"), str(tmp_path / "split")
+        assert _run_cli(run, plain_out, "--strain_gate", "none").returncode == 0
+        done = _run_cli(
+            run, split_out, "--strain_gate", "none", "--pre_treatment_timepoints", "pre"
+        )
+        assert done.returncode == 0, done.stderr
+        assert _origin_at(plain_out, 150) == "standing_variation"
+        assert _origin_at(split_out, 150) == "first_seen_after_treatment_began"
+        assert _origin_at(split_out, 250) == "de_novo"
+        assert _origin_at(split_out, 600) == "standing_variation"  # c1's own pre sample
+        plain, split = _tables(plain_out), _tables(split_out)
+        assert sorted(plain) == sorted(split)
+        events_file = "M1_gene_de_novo_events.tsv"
+        for name in plain:
+            if name != events_file:
+                assert plain[name] == split[name], name
+        # the events table differs in that one cell only
+        a = pd.read_csv(os.path.join(plain_out, events_file), sep="\t", dtype=str)
+        b = pd.read_csv(os.path.join(split_out, events_file), sep="\t", dtype=str)
+        assert list(a.columns) == list(b.columns) == EVENT_COLUMNS
+        differs = (a.fillna("") != b.fillna("")).any(axis=1)
+        assert a.loc[differs, "position"].tolist() == ["150"]
+        pd.testing.assert_frame_equal(
+            a.drop(columns="origin"), b.drop(columns="origin")
+        )
+
+    def test_a_witness_at_a_pre_treatment_timepoint_keeps_it_standing(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        _add_witness_sample(run)
+        plain_out, split_out = str(tmp_path / "plain"), str(tmp_path / "split")
+        assert _run_cli(run, plain_out, "--strain_gate", "none").returncode == 0
+        done = _run_cli(
+            run,
+            split_out,
+            "--strain_gate",
+            "none",
+            "--pre_treatment_timepoints",
+            "pre",
+            "mid",
+        )
+        assert done.returncode == 0, done.stderr
+        assert _tables(split_out) == _tables(plain_out)
+
+    def test_pre_treatment_flag_under_another_scope_is_refused(self, tmp_path):
+        run = _write_run(tmp_path / "run")
+        done = _run_cli(
+            run,
+            str(tmp_path / "out"),
+            "--strain_gate",
+            "none",
+            "--baseline_scope",
+            "comparison",
+            "--pre_treatment_timepoints",
+            "pre",
+        )
+        assert done.returncode != 0
+        assert "pre_treatment_timepoints" in done.stderr
 
     def test_cohort_missing_cache_is_an_error_naming_the_file(self, tmp_path):
         run = _write_run(tmp_path / "run")
