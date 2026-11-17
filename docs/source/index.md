@@ -4,6 +4,16 @@
 :alt: Documentation Status
 :target: https://alleleflux.readthedocs.io/en/latest/?badge=latest
 ```
+```{image} https://deepwiki.com/badge.svg
+:alt: Ask DeepWiki
+:target: https://deepwiki.com/MoellerLabPU/AlleleFlux
+```
+
+:::{admonition} 💬 Ask questions with AI
+:class: tip
+
+Prefer chatting over browsing? Ask any question about AlleleFlux — installation, configuration, pipeline internals, or interpreting results — on **[DeepWiki](https://deepwiki.com/MoellerLabPU/AlleleFlux)**. It indexes this repository and the documentation, and cites sources.
+:::
 
 ## Overview
 
@@ -32,9 +42,15 @@ getting_started/quickstart.md
 
 usage/input_preparation.md
 usage/running_workflow.md
+usage/allele_freq_cache_architecture.md
+usage/artifact_reuse_and_null_runs.md
 usage/visualization_guide.md
+usage/figures_and_report.md
 usage/interpreting_results.md
 usage/dnds_analysis.md
+usage/strain_turnover_analysis.md
+usage/gene_de_novo_analysis.md
+usage/regional_contrast_analysis.md
 ```
 
 ```{toctree}
@@ -54,6 +70,7 @@ reference/configuration.md
 reference/inputs.md
 reference/outputs.md
 reference/statistical_tests.md
+scripts/dnds_from_timepoints.md
 reference/faq.md
 ```
 

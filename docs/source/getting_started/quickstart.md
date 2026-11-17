@@ -64,8 +64,8 @@ analysis:
   use_lmm: true
   use_cmh: true
   timepoints_combinations:
-    - timepoint: ["pre", "post"]
-      focus: "post"
+    - earlier: pre
+      later: post
   groups_combinations:
     - ["treatment", "control"]
 ```
@@ -76,7 +76,7 @@ For a single-timepoint study:
 analysis:
   data_type: "single"
   timepoints_combinations:
-    - timepoint: ["baseline"]
+    - timepoint: baseline
   groups_combinations:
     - ["disease", "healthy"]
 ```
@@ -200,7 +200,7 @@ alleleflux-dnds-from-timepoints \
     --input p_value_summary.tsv \
     --output dnds/ \
     --mag_id Bacteroides_001 \
-    --profiles_dir profiles/ \
+    --cache_dir allele_freq_cache/ \
     --prodigal_fasta genes.fna \
     --fasta reference.fa \
     --ancestral_timepoint pre \

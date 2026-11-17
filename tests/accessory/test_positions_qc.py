@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -345,8 +347,11 @@ class TestProcessPositionsMagSample(TestPositionsQC):
             # Check breadth_genome: 4 positions with coverage / 1M genome = 0.000004
             self.assertAlmostEqual(result["breadth_genome"], 4 / 1000000)
 
-            # Check average_coverage (filtered): (10 + 20 + 40) / 3 = 23.33...
+            # Check average_coverage (covered-sites mean of the filtered rows)
+            # and the including-zeros mean over the 3 wanted positions: all
+            # three are covered, so both are (10 + 20 + 40) / 3 = 23.33...
             self.assertAlmostEqual(result["average_coverage"], 70.0 / 3)
+            self.assertAlmostEqual(result["average_coverage_including_zeros"], 70.0 / 3)
 
             # Check average_coverage_genome: 100 / 1M
             self.assertAlmostEqual(result["average_coverage_genome"], 100.0 / 1000000)
@@ -392,8 +397,12 @@ class TestProcessPositionsMagSample(TestPositionsQC):
             # Check breadth_genome (should still be calculated)
             self.assertAlmostEqual(result["breadth_genome"], 2.0 / 1000000)
 
-            # Check average_coverage: 30 / 1M
-            self.assertAlmostEqual(result["average_coverage"], 30.0 / 1000000)
+            # Check average_coverage_including_zeros: 30 / 1M; the covered-sites
+            # mean is 30 / 2 (decision 2026-10-15: two numbers, two jobs)
+            self.assertAlmostEqual(
+                result["average_coverage_including_zeros"], 30.0 / 1000000
+            )
+            self.assertAlmostEqual(result["average_coverage"], 15.0)
 
         finally:
             os.unlink(profile_file)
@@ -911,6 +920,146 @@ class TestEdgeCases(TestPositionsQC):
 
         finally:
             os.unlink(profile_file)
+
+
+class TestGenomeWithoutSamples(unittest.TestCase):
+    """A metadata folder may hold header-only files, and the tool copes.
+
+    The metadata step writes one ``{mag}_metadata.tsv`` per genome of the run
+    in every timepoint's folder: header-only when the genome has no sample at
+    that timepoint.  Such a genome has nothing to report at these positions,
+    so it is skipped with a warning and the other genomes are reported.  A
+    folder in which NO genome has a sample is still an error: there is
+    nothing to write, and silence would look like a finished run.
+
+    Layout: genome MAG_A is one 100-base contig; sample s1 covers all 100
+    positions at depth 10, sample s2 covers 5.  Genome MAG_B has a header-only
+    metadata file.  The positions file names both genomes.
+    """
+
+    HEADER = "sample_id\tsubjectID\ttime\tgroup\treplicate\tfile_path\tbam_path\n"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.meta = self.tmp / "inputMetadata_pre"
+        self.out = self.tmp / "positions_qc"
+        self.meta.mkdir()
+        (self.tmp / "ref.fa").write_text(
+            ">c1\n" + "A" * 100 + "\n>d1\n" + "C" * 100 + "\n"
+        )
+        (self.tmp / "mapping.tsv").write_text(
+            "mag_id\tcontig_id\nMAG_A\tc1\nMAG_B\td1\n"
+        )
+        (self.tmp / "positions.tsv").write_text(
+            "MAG\tcontig\tposition\nMAG_A\tc1\t1\nMAG_A\tc1\t2\nMAG_B\td1\t1\n"
+        )
+        rows = []
+        for sample, subject, group, n_positions in (
+            ("s1", "m1", "A", 100),
+            ("s2", "m2", "B", 5),
+        ):
+            profile = self.tmp / f"{sample}_MAG_A_profiled.tsv"
+            pd.DataFrame(
+                {
+                    "contig": ["c1"] * n_positions,
+                    "position": range(n_positions),
+                    "gene_id": ["g1"] * n_positions,
+                    "total_coverage": [10.0] * n_positions,
+                }
+            ).to_csv(profile, sep="\t", index=False)
+            rows.append(
+                f"{sample}\t{subject}\tpre\t{group}\tcage_{subject}\t{profile}\t/bams/{sample}.bam\n"
+            )
+        (self.meta / "MAG_A_metadata.tsv").write_text(self.HEADER + "".join(rows))
+        # MAG_B: profiled somewhere in the run, but no sample at this timepoint.
+        (self.meta / "MAG_B_metadata.tsv").write_text(self.HEADER)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _run(self):
+        """The real command on the fixture folder (``python -m``, so the test
+        runs the code of this checkout whatever is on PATH)."""
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alleleflux.scripts.accessory.positions_qc",
+                "--metadata_dir",
+                str(self.meta),
+                "--fasta",
+                str(self.tmp / "ref.fa"),
+                "--mag_mapping_file",
+                str(self.tmp / "mapping.tsv"),
+                "--positions_file",
+                str(self.tmp / "positions.tsv"),
+                "--output_dir",
+                str(self.out),
+                "--cpus",
+                "2",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_process_mag_has_nothing_to_report_for_a_genome_without_samples(self):
+        self.out.mkdir()
+        summaries = process_mag(
+            (
+                "MAG_B",
+                self.meta / "MAG_B_metadata.tsv",
+                {"MAG_A": 100, "MAG_B": 100},
+                {"c1": "MAG_A", "d1": "MAG_B"},
+                {"MAG_B": {("d1", 1)}},
+                self.out,
+                0.1,
+                1.0,
+                2,
+                "positions",
+                "longitudinal",
+            )
+        )
+        # Same shape as a genome with samples (three summaries), all absent.
+        self.assertEqual(summaries, (None, None, None))
+        # No table for a genome that was not read.
+        self.assertEqual(list(self.out.iterdir()), [])
+
+    def test_genome_without_samples_is_skipped_and_the_others_are_reported(self):
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # The genome with samples: one row per sample.
+        table = pd.read_csv(self.out / "MAG_A_positions_QC.tsv", sep="\t")
+        self.assertEqual(sorted(table["sample_id"]), ["s1", "s2"])
+        # The genome without samples: no table, absent from the summary, and
+        # named in the log so the reader knows why.
+        self.assertFalse((self.out / "MAG_B_positions_QC.tsv").exists())
+        overall = pd.read_csv(
+            self.out / "ALL_MAGs_positions_QC_overall_summary.tsv", sep="\t"
+        )
+        self.assertEqual(list(overall["MAG_ID"]), ["MAG_A"])
+        self.assertIn("MAG_B", done.stderr + done.stdout)
+        self.assertIn("skipped", done.stderr + done.stdout)
+
+    def test_folder_where_no_genome_has_a_sample_is_an_error(self):
+        # Every metadata file header-only: nothing to report at all.
+        (self.meta / "MAG_A_metadata.tsv").write_text(self.HEADER)
+        done = self._run()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("no sample in any of the 2 metadata file(s)", done.stderr)
+        # And no summary file that would look like a result.
+        self.assertFalse(
+            (self.out / "ALL_MAGs_positions_QC_overall_summary.tsv").exists()
+        )
+
+    def test_metadata_file_missing_a_column_is_still_an_error(self):
+        # Guard: only "no rows" is tolerated.  A file that is not a metadata
+        # table (here: no file_path column) must keep stopping the tool.
+        (self.meta / "MAG_B_metadata.tsv").write_text(
+            "sample_id\tsubjectID\ttime\tgroup\treplicate\n"
+        )
+        done = self._run()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("file_path", done.stderr)
 
 
 if __name__ == "__main__":
