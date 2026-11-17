@@ -1,0 +1,3 @@
+MAG_ID	num_samples	breadth_mean	average_coverage_mean	average_coverage_including_zeros_mean	median_coverage_mean	median_coverage_including_zeros_mean	coverage_std_mean	coverage_std_including_zeros_mean	length_weighted_coverage_mean
+MAG_001	8	1.0	47.54604591836734	47.54604591836734	46.75	46.75	21.134316472194797	21.134316472194794	47.54604591836734
+MAG_002	8	1.0	46.60219277673546	46.60219277673546	46.5	46.5	16.315836596781367	16.31583659678137	46.60219277673546

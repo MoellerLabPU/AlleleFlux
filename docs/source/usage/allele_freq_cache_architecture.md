@@ -87,7 +87,7 @@ All 6 group combinations read from these same 4 files.
 ```bash
 alleleflux-cache-allele-freq \
     --magID       MRGM_1079 \
-    --qc_files    {OUTDIR}/QC/QC_5mo_10mo/MRGM_1079_QC.tsv \
+    --qc_file     {OUTDIR}/QC/QC_{timepoint}/{mag}_QC.tsv \
     --timepoint   5mo \
     --data_type   longitudinal \
     --output_path {OUTDIR}/allele_freq_cache/5mo/MRGM_1079_5mo_allele_frequency.parquet \
@@ -96,9 +96,12 @@ alleleflux-cache-allele-freq \
 
 ### What the script does
 
-1. Loads `MRGM_1079_QC.tsv` from `QC/QC_5mo_10mo/` — this QC file covers all samples at
-   both `5mo` and `10mo`, across **all groups** (`1D`, `2D`, `20`, `40`, `AL`).
-2. Filters QC rows to `time == "5mo"` — retains only samples collected at `5mo`.
+1. Loads the MAG's QC table of the requested timepoint,
+   `QC/QC_{timepoint}/{mag}_QC.tsv`. The table lists every sample of that one timepoint,
+   across **all groups**.
+2. Keeps the samples that passed QC (`coverage_threshold_passed`). Every row already
+   belongs to the requested timepoint; the filter on `time` stays as a guard for a call by
+   hand with a table that holds several timepoints.
 3. Reads each sample's profile TSV in parallel (`--cpus` workers), computing per-base
    allele frequencies (`A_frequency`, `T_frequency`, `G_frequency`, `C_frequency`).
 4. Concatenates all per-sample DataFrames and writes a single Parquet file.
@@ -110,10 +113,10 @@ metadata columns `group`, `subjectID`, `replicate`, `time`.
 
 ### Why one QC file covers all groups
 
-QC is group-independent (pipeline optimization 2A). Each QC job runs once per timepoint
-combination and writes one QC file per MAG into `QC/QC_{tp_combo}/` — no groups component
-in the path. This QC file contains all samples from all groups at that timepoint, so the
-Stage 1 cache job can load it directly to get the full sample list.
+QC is built once per **single timepoint** and does not depend on groups or on comparisons.
+Each QC job writes one table per MAG into `QC/QC_{timepoint}/`; the path has no comparison
+and no groups component. The table lists the samples of every group at that timepoint, so
+the Stage 1 cache job reads it directly to get its sample list.
 
 ---
 
@@ -176,83 +179,61 @@ params:
 
 ---
 
-## Canonical QC File Selection
+## Which QC Table a Cache Job Reads
 
-The Stage 1 cache rule needs a QC file to know which samples to load. Because QC is
-group-independent, there is one QC file per `(tp_combo, MAG)`.
+There is one QC folder per single timepoint, so the answer needs no lookup: the cache job
+of `(MAG, timepoint)` reads that MAG's QC table of that same timepoint,
+`QC/QC_{timepoint}/{mag}_QC.tsv` (`get_timepoint_qc_file` in `shared/common.smk`).
 
-**The problem:** when the first combination resolves its Snakemake checkpoint, other
-combinations' QC directories may not exist yet. The cache rule cannot reference a QC file
-from a combination whose checkpoint has not fired.
+Example: comparisons `pre_post` and `pre_end` name three timepoints.
 
-**The solution:** use a *canonical* QC file — the QC file from the **first timepoint
-combination in config order** that contains the requested single timepoint. This file is
-always reachable via a direct rule dependency (not gated by another combination's
-checkpoint).
+| Cache job | QC table it reads |
+|---|---|
+| `(MAG_001, pre)` | `QC/QC_pre/MAG_001_QC.tsv` |
+| `(MAG_001, post)` | `QC/QC_post/MAG_001_QC.tsv` |
+| `(MAG_001, end)` | `QC/QC_end/MAG_001_QC.tsv` |
 
-### `timepoint_to_canonical_tp` in `shared/common.smk`
+The `pre` samples are read by QC once and cached once, although two comparisons use them.
 
-```python
-timepoint_to_canonical_tp = {}
-for tp_label in timepoints_labels:            # e.g. ["5mo_10mo", "5mo_16mo", "5mo_22mo"]
-    parts = tp_label.split("_")               # "5mo_10mo" → ["5mo", "10mo"]
-    for tp in parts:
-        if tp not in timepoint_to_canonical_tp:
-            timepoint_to_canonical_tp[tp] = tp_label   # first in config order wins
-```
+In the `allele_freq_cache` rule the declared input is the QC "done" marker of the timepoint
+(`QC/QC_{timepoint}/.qc_done`), and the table's path is passed to the command as a
+parameter. The QC step writes a table for every MAG of the run, header-only when the MAG
+has no profiled sample at that timepoint, so the table is there once the marker is.
 
-**Trace for the active DRIDO config:**
+---
 
-| Iteration | tp_label | tp | Already set? | Result |
-|---|---|---|---|---|
-| 1 | `5mo_10mo` | `5mo` | No | `"5mo"` → `"5mo_10mo"` |
-| 1 | `5mo_10mo` | `10mo` | No | `"10mo"` → `"5mo_10mo"` |
-| 2 | `5mo_16mo` | `5mo` | **Yes** | skip |
-| 2 | `5mo_16mo` | `16mo` | No | `"16mo"` → `"5mo_16mo"` |
-| 3 | `5mo_22mo` | `5mo` | **Yes** | skip |
-| 3 | `5mo_22mo` | `22mo` | No | `"22mo"` → `"5mo_22mo"` |
+## Witness Caches and Zero-Row Caches
 
-**Final map:**
+Normally a MAG gets a cache at the timepoints of the comparisons it is eligible in. One
+case needs more. Under `baseline_scope: cohort`, with a collection date for every sample
+and baseline presence or the gene-level de novo analysis switched on (longitudinal data),
+a sample at **any** timepoint can show that an allele was already present. The workflow
+then builds a cache for every MAG that is eligible in some comparison at **every witness
+timepoint**: every compared timepoint, plus, under `cohort_witnesses: sheet` (the
+default), every other timepoint of the sample sheet. See
+[Which samples are the baseline](strain_turnover_analysis.md#which-samples-are-the-baseline-baseline_scope).
 
-```python
-timepoint_to_canonical_tp = {
-    "5mo":  "5mo_10mo",
-    "10mo": "5mo_10mo",
-    "16mo": "5mo_16mo",
-    "22mo": "5mo_22mo",
-}
-```
+Example: comparisons `pre_post` and `pre_end`; the sheet also holds timepoint `mid`; MAG
+`M1` is eligible in both comparisons, `M2` in `pre_post` only.
 
-### `get_canonical_qc_file` in `shared/common.smk`
+| | `M1` caches | `M2` caches |
+|---|---|---|
+| cohort condition not met | `pre`, `post`, `end` | `pre`, `post` |
+| met, `cohort_witnesses: comparisons` | `pre`, `post`, `end` | `pre`, `post`, `end` |
+| met, `cohort_witnesses: sheet` | `pre`, `post`, `end`, `mid` | `pre`, `post`, `end`, `mid` |
 
-```python
-def get_canonical_qc_file(mag_wildcard, timepoint):
-    canonical_tp = timepoint_to_canonical_tp.get(timepoint)
-    return os.path.join(OUTDIR, "QC", f"QC_{canonical_tp}", f"{mag_wildcard}_QC.tsv")
-```
+The list of cache files is fixed from the eligibility tables, before any QC table is read.
+So a cache can be requested for a MAG that turns out to have no QC-passing sample at that
+timepoint (`M2` at `mid`, say). The workflow runs the cache command with `--allow_empty`:
+such a job writes a Parquet file with the normal columns and **zero rows**, plus a
+header-only sidecar, logs a warning and exits 0. Baseline presence and the gene-level de
+novo analysis read a zero-row cache as "no sample of this MAG at this timepoint"; a cache
+file that is missing altogether stops them. Without `--allow_empty` (a call by hand) the
+same case is an error, and a sample that passed QC but whose profile cannot be read is an
+error either way.
 
-**Examples for DRIDO:**
-
-```python
-get_canonical_qc_file("MRGM_1079", "5mo")
-# canonical_tp = "5mo_10mo"
-# → "{OUTDIR}/QC/QC_5mo_10mo/MRGM_1079_QC.tsv"
-
-get_canonical_qc_file("MRGM_1079", "10mo")
-# canonical_tp = "5mo_10mo"   ← same tp_combo as 5mo
-# → "{OUTDIR}/QC/QC_5mo_10mo/MRGM_1079_QC.tsv"
-
-get_canonical_qc_file("MRGM_1079", "16mo")
-# canonical_tp = "5mo_16mo"
-# → "{OUTDIR}/QC/QC_5mo_16mo/MRGM_1079_QC.tsv"
-
-get_canonical_qc_file("MRGM_1079", "22mo")
-# canonical_tp = "5mo_22mo"
-# → "{OUTDIR}/QC/QC_5mo_22mo/MRGM_1079_QC.tsv"
-```
-
-The `5mo` and `10mo` caches both use the `5mo_10mo` QC file — `10mo` rows are filtered
-out inside the cache script by `filter_qc_to_timepoint(qc_path, mag_id, "10mo")`.
+Pairwise ANI and dN/dS never read the witness-only caches: they keep to the timepoints of
+the comparisons a MAG is eligible in.
 
 ---
 
@@ -270,12 +251,12 @@ allele_analysis (MRGM_1079, 5mo_22mo, 1D_AL)
                MRGM_1079_allele_frequency_changes_no_zero-diff.parquet
 
 allele_freq_cache (MRGM_1079, 5mo)        ← shared by all 6 gr_combos + 3 tp_combos
-    qc     → QC/QC_5mo_10mo/MRGM_1079_QC.tsv
+    qc     → QC/QC_{timepoint}/{mag}_QC.tsv   (the QC table of this same timepoint)
     filter → time == "5mo"
     writes → allele_freq_cache/5mo/MRGM_1079_5mo_allele_frequency.parquet
 
 allele_freq_cache (MRGM_1079, 22mo)
-    qc     → QC/QC_5mo_22mo/MRGM_1079_QC.tsv
+    qc     → QC/QC_{timepoint}/{mag}_QC.tsv   (the QC table of this same timepoint)
     filter → time == "22mo"
     writes → allele_freq_cache/22mo/MRGM_1079_22mo_allele_frequency.parquet
 ```
@@ -292,13 +273,9 @@ no additional cache writes, just reads and a different `--groups` filter.
 
 ```
 {OUTDIR}/
-├── QC/
-│   ├── QC_5mo_10mo/                   ← all groups, both timepoints
-│   │   └── MRGM_1079_QC.tsv
-│   ├── QC_5mo_16mo/
-│   │   └── MRGM_1079_QC.tsv
-│   └── QC_5mo_22mo/
-│       └── MRGM_1079_QC.tsv
+├── QC/                                ← one folder per single timepoint, all groups
+│   └── QC_{timepoint}/
+│       └── {mag}_QC.tsv
 │
 ├── allele_freq_cache/                 ← group-independent; shared across all gr_combos
 │   ├── 5mo/
@@ -339,7 +316,8 @@ aggregating. It does not use `load_allele_freq_inputs` for the concatenation ste
 
 | File | Role |
 |---|---|
-| [`shared/common.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/shared/common.smk) | `timepoint_to_canonical_tp`, `get_canonical_qc_file`, `get_allele_freq_cache_path` |
+| [`shared/common.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/shared/common.smk) | `get_timepoint_qc_file`, `get_allele_freq_cache_path`, `CACHE_TIMEPOINTS` (every timepoint that gets QC and caches) |
+| [`shared/dynamic_targets.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/shared/dynamic_targets.smk) | `_cache_universe`: which (MAG, timepoint) cache files a run builds and each consumer reads |
 | [`rules/allele_analysis.smk`](../../../alleleflux/smk_workflow/alleleflux_pipeline/rules/allele_analysis.smk) | `allele_freq_cache` rule (Stage 1), `allele_analysis` rule (Stage 2) |
 | [`scripts/analysis/allele_frequency/allele_freq_cache.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq_cache.py) | Stage 1: reads profiles for all groups at one timepoint, writes Parquet |
 | [`scripts/analysis/allele_frequency/allele_freq.py`](../../../alleleflux/scripts/analysis/allele_frequency/allele_freq.py) | Stage 2: loads cache, applies `--groups` filter, computes diffs |

@@ -266,51 +266,60 @@ alleleflux-cmh-scores --cmh-df INPUT --mag-id MAG --output-dir DIR [options]
 
 ### `alleleflux-metadata` — build MAG metadata from profiles
 
-Generate MAG metadata files from sample profiles and sample sheet.
+Generate MAG metadata files from sample profiles and sample sheet. The workflow runs it once per **single timepoint** (not per comparison), into `inputMetadata/inputMetadata_{timepoint}/`.
 
 ```bash
-alleleflux-metadata --metadata-file INPUT --profiles-dir DIR \
-  --mag-id MAG --output-dir DIR [options]
+alleleflux-metadata --rootDir PROFILES_DIR --metadata SHEET --outDir DIR \
+  --groups GROUP [GROUP ...] [--timepoints TIMEPOINT [TIMEPOINT ...]] [--data_type TYPE]
 ```
 
 #### Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--metadata-file` | Input sample metadata file (CSV/TSV). |
-| `--profiles-dir` | Directory containing profile files. |
-| `--mag-id` | MAG ID to process. |
-| `--output-dir` | Output directory. |
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--rootDir` | Required | The `profiles/` directory (one sub-folder per sample). |
+| `--metadata` | Required | Sample metadata TSV (`sample_id`, `subjectID`, `group`, `bam_path`; optional `time`, `replicate`). |
+| `--outDir` | Required | Output directory. |
+| `--groups` | Required | One or more groups to keep. Every group given is written to the files; which two are compared is decided later by `alleleflux-eligibility`. |
+| `--timepoints` | — | Timepoints to keep. Required for longitudinal data (one or more; the workflow passes exactly one). At most one for single data. |
+| `--data_type` | `longitudinal` | `single` or `longitudinal`. |
+
+#### Output
+
+One `{mag}_metadata.tsv` per MAG that has a profile under `--rootDir`, listing its samples at the requested timepoint(s) and groups, plus `summary_mag_index.tsv`. A MAG with no such sample gets a file with the header and no rows. The command stops with an error when **no** MAG has a sample for the request.
 
 ---
 
 ### `alleleflux-qc` — quality control on profiles
 
-Perform coverage and breadth QC on MAG profiles.
+Perform coverage and breadth QC on MAG profiles. The workflow runs it once per **single timepoint**, on that timepoint's metadata folder, into `QC/QC_{timepoint}/`.
 
 ```bash
-alleleflux-qc --root-dir PROFILES --mag-id MAG --output-dir DIR [options]
+alleleflux-qc --rootDir METADATA_DIR --fasta FASTA --mag_mapping_file MAPPING \
+  --output_dir DIR [options]
 ```
 
 #### Required Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `--root-dir` | Directory containing profile files. |
-| `--mag-id` | MAG ID to process. |
-| `--output-dir` | Output directory. |
+| `--rootDir` | A metadata folder written by `alleleflux-metadata` (its `*_metadata.tsv` files; every MAG of the folder is processed). |
+| `--fasta` | Reference FASTA with the contigs (MAG sizes). |
+| `--mag_mapping_file` | Contig-to-MAG mapping TSV (`contig_id`, `mag_id`). |
+| `--output_dir` | Output directory. |
 
 #### Optional Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--fasta` | None | Path to reference FASTA (optional). |
-| `--mag-mapping-file` | None | Contig-to-MAG mapping file (optional). |
-| `--breadth-threshold` | 0.1 | Minimum breadth of coverage (0-1). |
-| `--coverage-threshold` | 1.0 | Minimum `average_coverage_including_zeros` (summed depth / genome size). |
-| `--data-type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
+| `--breadth_threshold` | 0.1 | Minimum breadth of coverage (0-1). |
+| `--coverage_threshold` | 1.0 | Minimum `average_coverage_including_zeros` (summed depth / genome size). |
+| `--data_type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
+| `--cpus` | All available | Number of processors. |
 
 #### Output
+
+The tables hold per-sample facts only. Which subjects are readable at both timepoints of a comparison, and the replicate counts per group, are worked out by `alleleflux-eligibility`. A MAG whose metadata file is header-only gets a `{mag_id}_QC.tsv` with the header and no rows; a folder in which every metadata file is header-only is an error.
 
 Creates `{mag_id}_QC.tsv`, one row per sample, with the sample metadata, `genome_size`, and:
 
@@ -324,40 +333,48 @@ The two averages answer different questions: a genome with a handful of very dee
 #### Examples
 
 ```bash
-# Basic QC
-alleleflux-qc --root-dir profiles/ --mag-id MAG000001 --output-dir qc/
+# QC of one timepoint's metadata folder
+alleleflux-qc --rootDir inputMetadata/inputMetadata_pre/ --fasta reference.fa \
+  --mag_mapping_file mag_mapping.tsv --output_dir QC/QC_pre/
 
 # Custom thresholds
-alleleflux-qc --root-dir profiles/ --mag-id MAG000001 --output-dir qc/ \
-  --breadth-threshold 0.2 --coverage-threshold 5.0
+alleleflux-qc --rootDir inputMetadata/inputMetadata_pre/ --fasta reference.fa \
+  --mag_mapping_file mag_mapping.tsv --output_dir QC/QC_pre/ \
+  --breadth_threshold 0.2 --coverage_threshold 5.0
 ```
 
 ---
 
 ### `alleleflux-eligibility` — generate MAG eligibility tables
 
-Create eligibility tables for statistical tests based on QC results.
+Create the eligibility table of one comparison from its per-timepoint QC folders. The command works out the pairing itself: which subjects passed QC at both timepoints, how many replicates each tested group then has, and how many replicates the two groups share (see [Outputs](outputs.md#eligibility-table) for a worked example).
 
 ```bash
-alleleflux-eligibility --qc-dir QC_DIR --output-file OUTPUT [options]
+alleleflux-eligibility --qc_dirs QC_DIR [QC_DIR] --output_file OUTPUT \
+  --groups GROUP1 GROUP2 [options]
 ```
 
 #### Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--qc-dir` | Required | Directory containing QC files. |
-| `--output-file` | Required | Output eligibility file path. |
-| `--min-sample-num` | 4 | Minimum number of samples required. |
-| `--data-type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
+| `--qc_dirs` | Required | QC folders holding the `*_QC.tsv` files, one folder per timepoint of the comparison: exactly two for longitudinal data (`QC/QC_pre QC/QC_post`), exactly one for single data. |
+| `--output_file` | Required | Output eligibility file path. |
+| `--min_sample_num` | 4 | Minimum number of replicates required per group. |
+| `--data_type` | `longitudinal` | Analysis type: `single` or `longitudinal`. |
+| `--groups` | — | The two tested groups. The QC folders cover every group of the run; replicates and paired replicates are counted over these two only. Without it, the groups found in each MAG's rows are used and a MAG is left out unless there are exactly two. |
+| `--permuted_metadata` | — | Permuted metadata TSV of a null run: each sample's group is taken from this sheet before anything is counted. |
 
 #### Output
 
 Creates eligibility table with columns:
-- `mag_id`: MAG identifier
+- `MAG_ID`: MAG identifier
+- `replicates_per_group_*`, `paired_replicates_per_group_*`: the counts behind the flags, one column per tested group
 - `unpaired_test_eligible`: Eligible for unpaired tests
 - `paired_test_eligible`: Eligible for paired tests
 - `single_sample_eligible_*`: Per-group single-sample eligibility
+
+Every MAG must have a QC table in every folder given (header-only when it has no sample at that timepoint); a missing table is an error.
 
 ---
 
@@ -915,7 +932,7 @@ alleleflux-pairwise-ani --mag MAG --cache_dir DIR --qc_files QC [QC ...] \
 |----------|-------------|
 | `--mag` | MAG identifier. |
 | `--cache_dir` | The run's `allele_freq_cache/` directory. Per-sample counts are read from the cache (QC-passing samples, site-depth-filtered), never from raw profiles. A QC-passing sample missing from an existing cache file stops the run; one whose timepoint has no cache file is skipped with a warning. |
-| `--qc_files` | Per-MAG QC TSV(s), one per timepoint combination; samples that passed anywhere are compared. |
+| `--qc_files` | Per-MAG QC TSV(s), one per timepoint (`QC/QC_{timepoint}/{mag}_QC.tsv`); samples that passed in any of them are compared. The workflow passes the timepoints of the comparisons the MAG is eligible in. |
 | `--fasta` | Reference FASTA. |
 | `--mag_mapping` | MAG-to-contig mapping TSV (`mag_id`, `contig_id`). |
 | `--output_dir` | Output directory. |
@@ -924,6 +941,7 @@ alleleflux-pairwise-ani --mag MAG --cache_dir DIR --qc_files QC [QC ...] \
 
 | Argument | Default | Description |
 |----------|---------|-------------|
+| `--groups` | every group in the QC tables | Compare only samples of these groups. The workflow passes the groups of `groups_combinations`, so samples that are in the QC tables only as baseline witnesses (`cohort_witnesses: sheet`) never enter a pair. |
 | `--min_cov` | 5 | Reads required in **both** samples for a position to be compared; 1 disables the depth gate. |
 | `--min_freq` | 0.05 | Minimum read fraction for an allele to count as present (popANI only). |
 | `--fdr` | 1e-6 | Tolerated per-position probability that sequencing error explains an allele (popANI only). |
@@ -1035,6 +1053,7 @@ For every MAG with a mean-change table in `--allele_analysis_dir`: the letters w
 | `--min_cages` | required | Cages per group a gene needs before it is tested (`quality_control.min_sample_num`). |
 | `--turnover_dir` | — | `{mag}_strain_turnover.tsv` tables; required by `--strain_gate carrier`. |
 | `--baseline_scope` | `cohort` | As `alleleflux-baseline-presence`: `individual`, `own_group`, `comparison` or `cohort`. |
+| `--witness_timepoints`, `--witness_groups`, `--pre_treatment_timepoints` | no restriction / no split | As `alleleflux-baseline-presence` (below): which sheet samples outside the comparison are read as baseline witnesses under the dated `cohort` scope, and which timepoints were sampled before treatment began. With the last one, a rise whose carrying witnesses were all sampled after treatment began reads `first_seen_after_treatment_began` in `origin`; it is never an event. |
 | `--cluster_window_bp` | `1000` | Cluster rule: de novo alleles within this many bp on one contig **in one cage** are neighbours. |
 | `--max_de_novo_neighbours` | `0` | More de novo neighbours than this → `block_event`. |
 | `--strain_gate` | `carrier` | `carrier` (the event's own carriers' turnover verdicts) or `none`; the group vote has no cage-level meaning and is not offered. |
@@ -1073,14 +1092,18 @@ alleleflux-baseline-presence --run_dir DIR --comparison LABEL --test_type TYPE \
 | `--threshold_column` | `q_value` | `q_value` or `min_p_value`. |
 | `--threshold` | 0.05 | Significance cutoff. |
 | `--baseline_scope` | `cohort` | What "absent at baseline" is judged against: `individual` = the carrier mice's own earlier samples; `own_group` = every earlier sample of the site's own group (within-group tests only: `single_sample`, `lmm_across_time`; an error with any other family); `comparison` = every earlier sample of both groups; `cohort` = every QC-passing sample of the run, any group, any timepoint, collected before the first carrier sample (needs `collection_date`, `YYYY-MM-DD`, for every sample in the metadata: a partly dated sheet is an error; with no dates at all "before" means an earlier timepoint label and a warning is logged). |
+| `--witness_timepoints` | any timepoint of the sheet | `cohort` scope only: a sample **outside** the comparison is read as a baseline witness only when its timepoint is one of these. The workflow passes every timepoint it built allele-frequency caches at (`analysis.baseline_presence.cohort_witnesses` decides which). The comparison's own samples are always read. |
+| `--witness_groups` | any group of the sheet | `cohort` scope only: the same for the sample's group. The workflow passes every group it built QC and caches for. |
+| `--pre_treatment_timepoints` | no split | `cohort` scope on a fully dated sheet only: the timepoints sampled **before** treatment began. An allele a pre-treatment witness carried is `standing_variation`; one that only witnesses at other timepoints carried is `first_seen_after_treatment_began`. An error under any other scope, on a sheet without a date for every sample, or for a label that is no timepoint of the samples read. See [Three labels](../usage/strain_turnover_analysis.md#three-labels-pre_treatment_timepoints). |
 | `--turnover_dir` | — | Strain-turnover outputs; adds a `strain_background` column. |
 | `--mags` | all | Restrict to these MAG ids. |
 | `--min_cov` | 5 | Reads at a position before any verdict (1 = off). |
 | `--min_freq` | 0.05 | Presence frequency floor. |
 | `--fdr` | 1e-6 | Null-model false-discovery rate. |
 | `--min_base_quality` | 30 | Base quality assumed by the null model. |
-| `--disable_site_depth_filter`, `--site_depth`, `--site_ratio`, `--min_allele_reads`, `--zero_low_counts` | see below | The per-site depth filter, applied to each profile as it is loaded; a removed position reads as `not_covered` for that sample (see [Site-depth filter flags](#site-depth-filter-flags)). |
-| `--cpus` | all | Worker processes (one profile load per MAG × sample). |
+| `--cpus` | all | Worker processes. |
+
+The command takes no site-depth filter flags: it reads the allele-frequency cache, which `alleleflux-cache-allele-freq` already filtered (see [Site-depth filter flags](#site-depth-filter-flags)). A position the filter removed reads as `not_covered` for that sample.
 
 #### Output
 

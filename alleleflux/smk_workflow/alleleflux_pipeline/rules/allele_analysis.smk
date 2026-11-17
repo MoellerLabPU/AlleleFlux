@@ -69,8 +69,10 @@ rule allele_freq_cache:
             if DATA_TYPE == "longitudinal"
             else ""
         ),
-        # Per-site depth filter flags, shared with pairwise_ani and
-        # baseline_presence so every profile reader filters identically.
+        # Per-site depth filter flags.  This command is the only one that
+        # reads profiles after QC, so the filter is applied once, here; every
+        # other consumer (pairwise ANI, baseline presence, ...) reads the
+        # filtered cache.
         site_filter_args=SITE_DEPTH_FILTER_ARGS,
     # --allow_empty in the command below: the list of cache files is fixed from
     # the eligibility tables, before any QC table is read.  Under the cohort
@@ -89,7 +91,7 @@ rule allele_freq_cache:
         """
         alleleflux-cache-allele-freq \
             --magID {wildcards.mag} \
-            --qc_files {params.qc_file} \
+            --qc_file {params.qc_file} \
             {params.timepoint_arg} \
             --data_type {params.data_type} \
             {params.site_filter_args} \

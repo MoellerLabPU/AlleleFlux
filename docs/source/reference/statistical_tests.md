@@ -144,6 +144,27 @@ Where:
 - Tests association between group and allele frequency controlling for replicate/timepoint
 - Detects consistent allele frequency differences across strata
 
+**Which replicates enter the test at a site:**
+
+The strata are the replicates. A replicate is a *pair* at a site only when **both** groups have a row for it at that site. A row means a sample of that replicate has reads at the position. A replicate with reads in one group and nothing in the other is not a pair and is left out. The site is tested only when at least `quality_control.min_sample_num` pairs remain, and the result's `num_pairs` column reports how many were used.
+
+Example: one site, replicates `r1` to `r4`, `min_sample_num` 4.
+
+| replicate | row in group A | row in group B | pair? |
+|---|---|---|---|
+| r1 | yes | yes | yes |
+| r2 | yes | yes | yes |
+| r3 | yes | yes | yes |
+| r4 | yes | no | no |
+
+| step | result |
+|---|---|
+| pairs at the site | 3 (`r1`, `r2`, `r3`) |
+| floor | `min_sample_num` = 4 |
+| outcome | 3 < 4, so the site is not tested. With a floor of 3 it is tested and `num_pairs` reads 3 |
+
+Two further filters apply after pairing: the site needs at least two bases with reads, and a pair whose total read count over those bases is 1 or less is dropped (the floor is checked again afterwards).
+
 **Score calculation (DIFFERENT from other tests):**
 
 CMH uses **differential significance** between timepoints:
@@ -230,6 +251,8 @@ Score (%) = (Number of Significant Sites / Total Sites) × 100
 - Within-group categorical changes over time
 - Stratified analysis within one group
 
+The two timepoints take the place of the two groups, and the pairing rule is the same as for the between-group CMH test above: a replicate is a pair at a site only when it has a row at **both** timepoints at that site.
+
 **Score calculation:**
 
 ```
@@ -300,26 +323,6 @@ score = (len(differential) / len(common_sites)) * 100
 ---
 
 ## Choosing the Right Test
-
-```mermaid
-flowchart TD
-    A[Start] --> B{Comparing groups?}
-    B -->|Yes| C{Paired samples?}
-    B -->|No| D{Longitudinal data?}
-    
-    C -->|Yes| E{Repeated measures?}
-    C -->|No| F[Two-Sample Unpaired]
-    
-    E -->|Yes| G[LMM]
-    E -->|Stratified| H[CMH]
-    E -->|No| I[Two-Sample Paired]
-    
-    D -->|Yes| J{Test within group?}
-    D -->|No| K[Not applicable]
-    
-    J -->|Yes| L[Single-Sample / LMM Across Time]
-    J -->|No| K
-```
 
 ### Decision Table
 

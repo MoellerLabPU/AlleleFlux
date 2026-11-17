@@ -215,6 +215,76 @@ def test_lone_de_novo_site_is_de_novo_with_every_carrier_absent_before(pipeline_
 
 
 @pytest.mark.regression
+def test_first_seen_site_is_first_seen_after_treatment_began(pipeline_run):
+    """The one allele carried, before the later timepoint, only by a sample
+    taken after treatment began gets the third label at every level, with the
+    witness counts that explain it; no other planted site is touched."""
+    card = _card(pipeline_run)
+    if card["data_type"] != "longitudinal":
+        pytest.skip("baseline presence is longitudinal-only")
+    label = "first_seen_after_treatment_began"
+    witness = card["witness_timepoint"]
+    n_witnesses = len(witness["samples"])
+    # every earlier-timepoint sample of both groups is a pre-treatment witness
+    n_pre = len(card["carrier_samples"]) * len(card["groups"])
+    site = next(
+        s
+        for s in card["significant_sites"]
+        if s["kind"] == "first_seen_after_treatment"
+    )
+    assert _site_key(site)[-1] == card["first_seen_after_treatment"]["position"]
+
+    # Site level: the label and the five counts.
+    rows = _rising_rows(_baseline_summary(pipeline_run, card), card)
+    row = rows[_site_key(site)]
+    assert row["origin_any_mouse"] == label, row["origin_any_mouse"]
+    assert int(row["n_pre_treatment_witnesses_covered"]) == n_pre
+    assert int(row["n_pre_treatment_witnesses_allele_present"]) == 0
+    assert int(row["n_pre_treatment_witnesses_below_detection"]) == 0
+    assert int(row["n_on_treatment_witnesses_covered"]) == n_witnesses
+    assert int(row["n_on_treatment_witnesses_allele_present"]) == 1
+    # Every other planted site: both witnesses read, neither carries the
+    # allele, and the label is not the third one.
+    for other in card["significant_sites"]:
+        if other is site:
+            continue
+        r = rows[_site_key(other)]
+        assert r["origin_any_mouse"] != label, _site_key(other)
+        assert int(r["n_on_treatment_witnesses_covered"]) == n_witnesses
+        assert int(r["n_on_treatment_witnesses_allele_present"]) == 0
+
+    # Run level: the allele row carries the label; the tally has its row.
+    origin_dir = pipeline_run.pipeline_data_dir / "baseline_presence" / "rising_origin"
+    alleles = _read(origin_dir / "rising_origin_alleles.tsv")
+    a = alleles[
+        (alleles["contig"] == site["contig"])
+        & (alleles["position"] == site["position"])
+        & (alleles["allele"] == site["rising_allele"])
+    ]
+    assert len(a) == 1 and a.iloc[0]["origin"] == label, a["origin"].tolist()
+    tally = _read(origin_dir / "rising_origin_summary.tsv")
+    counted = tally[
+        (tally["origin"] == label) & (tally["rose_in"] == card["groups"]["treatment"])
+    ]
+    assert len(counted) >= 1 and (counted["n_alleles"].astype(int) == 1).all()
+
+    # Gene level: every treatment cage's rise at the site reads the label and
+    # is not a de novo event (the events table lists rises; the label is
+    # reported, never counted).
+    events = _read(
+        _gene_de_novo_dir(pipeline_run, card) / f"{site['mag']}_gene_de_novo_events.tsv"
+    )
+    e = events[
+        (events["contig"] == site["contig"])
+        & (events["position"] == site["position"])
+        & (events["allele"] == site["rising_allele"])
+        & (events["group"] == card["groups"]["treatment"])
+    ]
+    assert len(e) == len(card["carrier_samples"]), len(e)
+    assert set(e["origin"]) == {label}, e["origin"].tolist()
+
+
+@pytest.mark.regression
 def test_block_sites_are_one_block_event(pipeline_run):
     card = _card(pipeline_run)
     if card["data_type"] != "longitudinal":

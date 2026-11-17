@@ -8,9 +8,13 @@ AlleleFlux generates structured outputs organized by analysis type and data type
 {root_dir}/
 └── {data_type}/                    # "single" or "longitudinal"
     ├── profiles/                   # Sample profiles (per MAG)
-    ├── inputMetadata/              # MAG-sample mappings
-    ├── QC/                         # Quality control metrics
-    ├── eligibility_table_*.tsv     # MAG test eligibility
+    ├── inputMetadata/              # MAG-sample mappings, one folder per timepoint
+    │   └── inputMetadata_{timepoint}/
+    ├── QC/                         # Quality control metrics, one folder per timepoint
+    │   └── QC_{timepoint}/
+    ├── eligibility_table_*.tsv     # MAG test eligibility, one per comparison
+    ├── allele_freq_cache/          # Per-sample allele frequencies, one folder per timepoint
+    │   └── {timepoint}/
     ├── allele_analysis/            # Allele frequencies
     ├── significance_tests/         # Statistical test results
     │   ├── two_sample_unpaired_*/
@@ -43,31 +47,99 @@ Base-level coverage and allele counts per sample-MAG pair.
 | `A`, `C`, `G`, `T` | int | Base counts |
 | `gene_id` | str | Overlapping gene (null if intergenic) |
 
+### Sample Metadata Files
+
+**Path:** `inputMetadata/inputMetadata_{timepoint}/{mag}_metadata.tsv`, plus `summary_mag_index.tsv` in the same folder
+
+Built once per **single timepoint**, not per comparison and not per group pair. With comparisons `pre_post` and `pre_end` there are three folders (`pre`, `post`, `end`), and the `pre` samples are listed once. For single-timepoint data the comparison label already is one timepoint, so there is one folder per comparison label.
+
+Each file lists the profiled samples of one MAG at that timepoint, for every group named in `groups_combinations` (plus the sheet's other groups when they are read as baseline witnesses, see `cohort_witnesses` in the [Strain Turnover and Baseline Presence guide](../usage/strain_turnover_analysis.md)): `sample_id`, `subjectID`, `time` (longitudinal data only), `group`, `replicate`, `file_path` (the profile), `bam_path`.
+
+Every MAG that has a profile somewhere in the run gets a file in every timepoint folder. A MAG with no profiled sample at a timepoint gets a file with the header and no rows. So "no sample here" is a file you can open, and a missing file means a step failed.
+
+`summary_mag_index.tsv` stacks the rows of every MAG of the folder into one table (`mag_id` first).
+
 ### Quality Control Files
 
-**Path:** `QC/QC_{timepoints}-{groups}/{mag}_qc.tsv`
+**Path:** `QC/QC_{timepoint}/{mag}_QC.tsv`
 
-Sample-level QC metrics.
+Built once per **single timepoint**, from that timepoint's metadata folder. One row per sample listed in that metadata folder, passing or not, all groups together. The table holds facts about one sample and one MAG only; nothing in it depends on a comparison or a group pair.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `sample_id` | str | Sample identifier |
-| `breadth_of_coverage` | float | Fraction of genome covered (0-1) |
-| `mean_coverage` | float | Average depth |
-| `passed_breadth` | bool | Whether sample passed QC |
+| `sample_id`, `MAG_ID`, `file_path` | str | The sample, the MAG and the profile that was read |
+| `group`, `subjectID`, `replicate` | str | Copied from the sample sheet |
+| `genome_size` | int | Length of the MAG in bases |
+| `breadth` | float | Fraction of the genome with at least one read (0-1) |
+| `breadth_threshold_passed`, `breadth_fail_reason` | bool, str | The breadth check against `quality_control.breadth_threshold` |
+| `average_coverage` | float | Mean depth over the covered positions only |
+| `average_coverage_including_zeros` | float | Summed depth / genome size; the number `quality_control.coverage_threshold` tests |
+| `coverage_threshold_passed`, `coverage_fail_reason` | bool, str | **The sample's QC verdict.** True only when the breadth check passed too |
+| `median_coverage`, `median_coverage_including_zeros`, `coverage_std`, `coverage_std_including_zeros`, `length_weighted_coverage` | float | Further depth statistics |
+| `time` | str | The timepoint (longitudinal data only) |
+
+A MAG with no profiled sample at the timepoint gets a table with the header and no rows.
+
+Three summary files sit next to the per-MAG tables and cover the same single timepoint: `ALL_MAGs_QC_group_summary.tsv`, `ALL_MAGs_QC_group_time_summary.tsv` (longitudinal data only) and `ALL_MAGs_QC_overall_summary.tsv`.
+
+Which subjects were readable at both timepoints of a comparison, and how many replicates each group then has, are **not** in the QC tables. Those are questions about a comparison, and the eligibility step answers them (next section).
 
 ### Eligibility Table
 
 **Path:** `eligibility_table_{timepoints}-{groups}.tsv`
 
-Determines which MAGs qualify for each statistical test.
+One table per comparison (`{timepoints}` is `{earlier}_{later}` for longitudinal data, the timepoint itself for single data) and group pair. It says which MAGs qualify for each statistical test.
 
 | Column | Description |
 |--------|-------------|
-| `mag_id` | MAG identifier |
-| `unpaired_test_eligible` | Eligible for unpaired tests and LMM |
-| `paired_test_eligible` | Eligible for paired tests and CMH |
-| `single_sample_eligible_{group}` | Per-group single-sample eligibility |
+| `MAG_ID` | MAG identifier |
+| `replicates_per_group_{group}` | Replicates of that group among the samples that count (see below) |
+| `paired_replicates_per_group_{group}` | Of those, the replicates that both tested groups have |
+| `unpaired_test_eligible` | Both groups have at least `min_sample_num` replicates: unpaired tests and LMM |
+| `paired_test_eligible` | Both groups have at least `min_sample_num` paired replicates: paired tests and CMH |
+| `single_sample_eligible_{group}` | That group has at least `min_sample_num` replicates (longitudinal data; empty for single data) |
+
+**How the counts are made.** The eligibility step reads the QC folders of the comparison's timepoints (two for longitudinal data, one for single) and works out the pairing itself:
+
+1. A sample **counts** when it passed QC (`coverage_threshold_passed`) and, for longitudinal data, its subject has a passing sample at **both** timepoints of the comparison.
+2. Only the two tested groups are kept.
+3. Replicates are counted per group among the samples that count. A replicate is *paired* when both tested groups have it.
+
+Small example, longitudinal, comparison `pre_post`, groups `A` and `B`, `min_sample_num` 2, replicate = cage:
+
+| subject | group | cage | passed QC at `pre` | passed QC at `post` | counts? |
+|---|---|---|---|---|---|
+| a1 | A | c1 | yes | yes | yes |
+| a2 | A | c2 | yes | yes | yes |
+| b1 | B | c3 | yes | yes | yes |
+| b2 | B | c4 | yes | no | no (not readable at `post`) |
+
+| step | result |
+|---|---|
+| replicates per group | A: 2 cages (c1, c2); B: 1 cage (c3) |
+| paired replicates | 0 (no cage holds both groups) |
+| unpaired test | not eligible: B is below the floor of 2 |
+| paired test | not eligible: 0 paired replicates |
+| single-sample test | A eligible, B not |
+
+A MAG appears in the table only when both tested groups have at least one sample that counts; a MAG with samples at only one of the two timepoints is left out. Rows are in MAG name order.
+
+### Allele-Frequency Cache
+
+**Path:** `allele_freq_cache/{timepoint}/{mag}_{timepoint}_allele_frequency.parquet`
+
+One Parquet file per MAG per **single timepoint**, holding one row per (contig, position, sample) for every QC-passing sample of that timepoint, all groups together. It is built from the MAG's QC table of the same timepoint and is read by every comparison that names the timepoint. See [Allele Frequency Cache Architecture](../usage/allele_freq_cache_architecture.md).
+
+Which (MAG, timepoint) pairs get a cache:
+
+| Run | Caches built |
+|---|---|
+| Any run | Each MAG that is eligible for at least one test in a comparison, at that comparison's timepoints |
+| `baseline_scope: cohort`, longitudinal data, every sample dated, baseline presence or gene de novo switched on | Each such MAG at **every witness timepoint**: every compared timepoint, plus (under `cohort_witnesses: sheet`, the default) every other timepoint of the sample sheet |
+
+The second row exists because, under the cohort scope, a sample at *any* timepoint can show that an allele was already there (see [Which samples are the baseline](../usage/strain_turnover_analysis.md#which-samples-are-the-baseline-baseline_scope)). Example: comparisons `pre_post` and `pre_end`, the sheet also holds timepoint `mid`, and MAG `M2` is eligible in `pre_post` only. Without the cohort condition `M2` has caches at `pre` and `post`. With it, `M2` has caches at `pre`, `post`, `end` and `mid`.
+
+**Zero-row caches.** A MAG can have no QC-passing sample at one of those timepoints. Its cache is then a Parquet file with the normal columns and **no rows**, and its sidecar (see [Site-Depth Filter Sidecars](#site-depth-filter-sidecars) below) has the header only. Baseline presence and the gene-level de novo analysis read such a file as "no sample of this MAG at this timepoint". A cache file that is missing altogether stops them with an error naming the path.
 
 ### Allele Frequency Files
 
@@ -89,7 +161,7 @@ Position-level allele frequencies across samples.
 
 **Path:** `allele_freq_cache/{timepoint}/{mag}_{timepoint}_allele_frequency_site_depth_filter.tsv`
 
-Written next to every allele-frequency cache file: what the per-site depth filter (`quality_control.site_depth_filter`) did to each sample's profile before the cache was built. One row per sample.
+Written next to every allele-frequency cache file: what the per-site depth filter (`quality_control.site_depth_filter`) did to each sample's profile before the cache was built. One row per sample; header only next to a zero-row cache.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -101,7 +173,7 @@ Written next to every allele-frequency cache file: what the per-site depth filte
 | `n_removed_high` | int | Positions dropped for depth above `site_ratio` × `mean_coverage` |
 | `n_kept` | int | Positions that entered the cache |
 
-The workflow's `site_depth_filter_summary` rule runs `alleleflux-site-filter-summary` once every cache job has finished and writes `site_depth_filter/site_depth_filter_summary.tsv` (every sidecar stacked into one run-level table) and `site_depth_filter/site_depth_filter_summary_by_mag.tsv` next to it, one row per MAG × timepoint with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high` (the share of covered positions the ceiling removed). Pairwise ANI, baseline presence, dN/dS and the plotting tools read this cache rather than raw profiles, so a position removed for a sample is absent for that sample everywhere downstream.
+The workflow's `site_depth_filter_summary` rule runs `alleleflux-site-filter-summary` once every cache job has finished and writes `site_depth_filter/site_depth_filter_summary.tsv` (every sidecar stacked into one run-level table) and `site_depth_filter/site_depth_filter_summary_by_mag.tsv` next to it, one row per MAG × timepoint with `n_samples`, `mean_of_mean_coverage`, `mean_of_mean_coverage_after_filter`, `sites_removed_high_total`, `sites_covered_total` and `fraction_removed_high` (the share of covered positions the ceiling removed). A header-only sidecar holds no sample, so a zero-row cache adds no row to either table. Pairwise ANI, baseline presence, dN/dS and the plotting tools read this cache rather than raw profiles, so a position removed for a sample is absent for that sample everywhere downstream.
 
 ## Statistical Test Results
 
@@ -155,9 +227,12 @@ Cochran-Mantel-Haenszel test stratified by replicate/timepoint.
 | Column | Description |
 | ------ | ----------- |
 | `p_value_CMH` | CMH test p-value |
+| `num_pairs` | Replicates the test used at this site (see below) |
 | `time` | Timepoint identifier (for longitudinal data) |
 | `mode` | `across-time` or `across-group` |
 | Stratum columns | Allele counts per stratum (replicate or timepoint) |
+
+**Which replicates count at a site.** A replicate is a pair at a site only when **both** groups have a row for it at that site (for the across-time test: both timepoints). "A row" means a sample of that replicate has the position in its allele-frequency data, that is, it has reads there. A replicate with reads in one group and no row in the other is not a pair. The site is tested only when at least `min_sample_num` pairs remain. Example with replicates 1 to 4 and `min_sample_num` 4: replicate 4 has reads in the treatment group and no row in the control group, so the site has 3 pairs and is not tested. See [Statistical Tests Reference](statistical_tests.md).
 
 **CMH Score Calculation (Differential Significance):**
 
@@ -342,6 +417,18 @@ Long table: one row per significant site × allele × sample, with `allele_reads
 
 Summary: one row per site × allele. Sample-count columns (`origin_any_mouse`, `n_{earlier}_samples_allele_present`, `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`, `{earlier}_mice_allele_present`, `{later}_mice_allele_present` (the carriers), `n_mice_standing_variation`, `n_mice_de_novo_candidate`, ...) apply the presence rule; read-count columns (`total_reads_{tp}`, `allele_reads_{tp}`, `allele_frequency_{tp}`) are unfiltered sums over every sample at that timepoint. Two reporting-only columns say how hard the baseline was looked at (no verdict depends on them): `n_baseline_reads`, the reads at the position over the *covered* baseline samples only, and `n_carriers_own_baseline_absent`, the carriers whose own earlier sample was covered and clean, the strictest per-mouse evidence of a new allele. Timepoint names in column headers are the comparison's own labels.
 
+Five witness-count columns follow `n_carriers_own_baseline_absent` in the summary and in the rising table. They are **always in the header**. They are filled only when the run names its pre-treatment timepoints (`analysis.baseline_presence.pre_treatment_timepoints`, dated `cohort` scope only) and are empty otherwise. A *witness* is a covered baseline sample of the row; it is *pre-treatment* when its timepoint label is in the list and *on-treatment* when it is not.
+
+| Column | Counts |
+|---|---|
+| `n_pre_treatment_witnesses_covered` | Pre-treatment witnesses |
+| `n_pre_treatment_witnesses_allele_present` | Of those, the ones carrying the allele (presence rule) |
+| `n_pre_treatment_witnesses_below_detection` | Of those, the ones with a few reads of the allele under the detection bar. They do not carry it, so they never make it standing; a `first_seen_after_treatment_began` label with a count here is a weaker call |
+| `n_on_treatment_witnesses_covered` | On-treatment witnesses |
+| `n_on_treatment_witnesses_allele_present` | Of those, the ones carrying the allele |
+
+The two `covered` counts add up to `n_{earlier}_samples_covered` and the two `allele_present` counts to `n_{earlier}_samples_allele_present`. With the list set, `origin_any_mouse` can also read `first_seen_after_treatment_began` (see [Three labels](../usage/strain_turnover_analysis.md#three-labels-pre_treatment_timepoints)).
+
 Rising table: the summary's columns plus `rose_in`, `frequency_change`, `n_replicates`, `n_mice`; one row per (site, allele, group the allele rose in). At a biallelic site both alleles are candidates and both are listed in the summary, but only one rose; the one that fell was the common allele at baseline and always reads standing. The rising table leaves it out, and checks end-point presence in the `rose_in` group only. Count standing vs de novo from this table.
 
 ### Rising Origin
@@ -352,7 +439,8 @@ Written by `alleleflux-rising-origin` once every comparison's rising table exist
 
 | origin | meaning |
 |---|---|
-| `standing_variation` | present in at least one covered earlier sample |
+| `standing_variation` | present in at least one covered earlier sample; in a run that names its pre-treatment timepoints, in at least one covered **pre-treatment** witness |
+| `first_seen_after_treatment_began` | only in a run that names its pre-treatment timepoints: present in at least one covered witness, but in none sampled before treatment began. A label, not a proof: the allele may have arisen under treatment, or it may have been there all along in no sampled pre-treatment witness. Never relabelled by the cluster rule or the strain gate |
 | `de_novo` | earlier samples covered, the allele in none of them |
 | `de_novo_below_detection` | a few earlier reads, under the detection bar |
 | `new_strain` | de novo, but the strain gate says the allele most likely arrived with a new strain: the group's across-cage vote says replaced (gate `group`), or more than half of the allele's own carriers changed strain (gate `carrier`) |
@@ -361,7 +449,7 @@ Written by `alleleflux-rising-origin` once every comparison's rising table exist
 | `not_present_later` | no covered later sample of the group shows it |
 | `baseline_not_covered` | no earlier sample deep enough to judge |
 
-The first four are verdicts; `block_event`, `strain_undetermined` and the last two are not, so a block or an undetermined strain drops out of `n_called` and lowers the de novo share. Two different letters rising at the *same* position (possible only at a site where three or four bases were tested) are two alleles 0 bp apart and form a block: two independent mutations at one base in one group is about as unlikely as it gets, while reads from a related strain mapping with a mismatch there, or an imported chunk carrying a different letter, produce exactly this picture; neither is two clean de novo events. The cluster rule runs before any strain gate, on every de novo candidate, because adjacency is a fact about positions and a gate that ran first could hide a block member's neighbours. With strain turnover on, every allele is joined to its MAG's verdict for that period: a within-group allele reads the group it rose in, and a between-group allele reads both groups and takes the dirtier arm. A MAG never classified is `unverified` (`strain_status = not_in_strain_table`).
+The first five are verdicts and are counted in `n_called`; `block_event`, `strain_undetermined` and the last two are not, so a block or an undetermined strain drops out of `n_called` and lowers the de novo share. An allele labelled `first_seen_after_treatment_began` would read `standing_variation` without the pre-treatment list, so `n_called` is the same number with and without it. Two different letters rising at the *same* position (possible only at a site where three or four bases were tested) are two alleles 0 bp apart and form a block: two independent mutations at one base in one group is about as unlikely as it gets, while reads from a related strain mapping with a mismatch there, or an imported chunk carrying a different letter, produce exactly this picture; neither is two clean de novo events. The cluster rule runs before any strain gate, on every de novo candidate, because adjacency is a fact about positions and a gate that ran first could hide a block member's neighbours. With strain turnover on, every allele is joined to its MAG's verdict for that period: a within-group allele reads the group it rose in, and a between-group allele reads both groups and takes the dirtier arm. A MAG never classified is `unverified` (`strain_status = not_in_strain_table`).
 
 **The strain gate** (`--strain_gate`, config `analysis.baseline_presence.strain_gate`) decides which verdict relabels a de novo allele; only the two de novo flavours are ever relabelled. Two verdicts are available and **both are written to every row** whenever their input was given, whatever the gate: under `group` the carrier columns are reporting only, under `carrier` the group columns are. The gate decides which is *read*, so the two can always be compared on the same run.
 
@@ -375,7 +463,9 @@ The first four are verdicts; `block_event`, `strain_undetermined` and the last t
 | `both` | both: one undetermined verdict → `strain_undetermined` (removed, not explained); else one replaced / new-strain verdict → `new_strain`; else kept | | | |
 | `none` | nothing | | | |
 
-Summary: one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the four verdicts). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
+Allele table (`rising_origin_alleles.tsv`): one row per rising allele with its `origin`, the five witness-count columns of its rising-table row (`n_pre_treatment_witnesses_covered` ... `n_on_treatment_witnesses_allele_present`; empty when the run names no pre-treatment timepoints), `block_id`, `n_de_novo_neighbours` and the strain columns described above.
+
+Summary (`rising_origin_summary.tsv`): one row per floor × comparison × group × strain class × origin, zero counts included, with `n_alleles`, `n_mags`, `n_rising`, `n_called`, `pct_of_all` (of every rising allele in the block) and `pct_of_called` (of the verdicts). The `first_seen_after_treatment_began` rows are there only when the run made the split; the command reads that from the rising tables themselves (their witness-count columns are filled). Strain classes are each class present plus `all`; without strain verdicts only `all`, with no floor. Comparisons and groups are never pooled.
 
 ## Gene-Level De Novo Accumulation
 
@@ -383,7 +473,7 @@ Summary: one row per floor × comparison × group × strain class × origin, zer
 
 Written by `alleleflux-gene-de-novo` when `use_gene_de_novo` is on (longitudinal only). The cage (`group` × `replicate`) is the replicate throughout; see the [Gene De Novo guide](../usage/gene_de_novo_analysis.md) for the method.
 
-**Events** (`{mag}_gene_de_novo_events.tsv`): one row per candidate rise, a (cage, contig, position, letter) whose cage-average share went up in the mean-change table, with the columns of the rise (`contig`, `position`, `gene_id`, blank between genes, `replicate`, `group`, `allele`, `diff_mean`, `subjectID_count`) and the verdict: `origin` (`de_novo`, `de_novo_below_detection`, `standing_variation`, `block_event`, `new_strain`, `strain_undetermined`, `not_present_later`, `baseline_not_covered`; the same words as [rising origin](#rising-origin), judged per cage), `block_id` (`{mag}:{contig}:{group}|{replicate}:{k}`: blocks never span two cages), `n_de_novo_neighbours`, `carriers` (the cage's later-timepoint mice carrying the letter), `n_carriers`, `carrier_strain_status`, `n_carriers_determined`, `n_carriers_strain_changed`, `n_baseline_samples_covered`, `n_baseline_samples_present`. The two de novo flavours count as events; a `block_event` counts only under `block_rule: once`.
+**Events** (`{mag}_gene_de_novo_events.tsv`): one row per candidate rise, a (cage, contig, position, letter) whose cage-average share went up in the mean-change table, with the columns of the rise (`contig`, `position`, `gene_id`, blank between genes, `replicate`, `group`, `allele`, `diff_mean`, `subjectID_count`) and the verdict: `origin` (`de_novo`, `de_novo_below_detection`, `standing_variation`, `first_seen_after_treatment_began`, `block_event`, `new_strain`, `strain_undetermined`, `not_present_later`, `baseline_not_covered`; the same words as [rising origin](#rising-origin), judged per cage; `first_seen_after_treatment_began` appears only when the run names its pre-treatment timepoints), `block_id` (`{mag}:{contig}:{group}|{replicate}:{k}`: blocks never span two cages), `n_de_novo_neighbours`, `carriers` (the cage's later-timepoint mice carrying the letter), `n_carriers`, `carrier_strain_status`, `n_carriers_determined`, `n_carriers_strain_changed`, `n_baseline_samples_covered`, `n_baseline_samples_present`. The two de novo flavours count as events; a `block_event` counts only under `block_rule: once`. `first_seen_after_treatment_began` is a reported label and never an event, so the genes, cages and tests tables are the same with and without the pre-treatment list; the events table gets no extra column for it.
 
 **Genes** (`{mag}_gene_de_novo_genes.tsv`): one row per gene × cage, zero rows kept: `n_de_novo` (counted events in the gene), `n_block_excluded` (block rows dropped by `block_rule: exclude`), `covered_bp` (readable bases of the gene in that cage: the denominator, never the gene length), `gene_length`, `covered_fraction`, `entered` (readable above `min_gene_covered_fraction`; a cage that does not enter reports `covered_bp` 0 and `n_de_novo` 0 so the tests never see it), `rate` (`n_de_novo / covered_bp`, blank when not entered).
 

@@ -9,7 +9,7 @@ timepoint.
 
     alleleflux-cache-allele-freq
         --magID       MRGM_1079
-        --qc_files    {OUTDIR}/QC/QC_5mo/MRGM_1079_QC.tsv
+        --qc_file     {OUTDIR}/QC/QC_5mo/MRGM_1079_QC.tsv
         --timepoint   5mo
         --data_type   longitudinal
         --output_path {OUTDIR}/allele_freq_cache/5mo/MRGM_1079_5mo_allele_frequency.parquet
@@ -214,14 +214,13 @@ def main():
         help="MAG ID to process.",
     )
     parser.add_argument(
-        "--qc_files",
+        "--qc_file",
         required=True,
-        nargs="+",
         type=str,
         help=(
             "Path to the genome's QC TSV of this timepoint "
-            "(QC/QC_{timepoint}/{mag}_QC.tsv).  Exactly one file is read; the "
-            "nargs='+' form is kept so existing calls keep working."
+            "(QC/QC_{timepoint}/{mag}_QC.tsv).  One table: a cache is one "
+            "genome at one timepoint."
         ),
     )
     parser.add_argument(
@@ -288,11 +287,11 @@ def main():
             parser.error("--timepoint is required when --data_type is 'longitudinal'.")
         # The Snakemake rule passes the genome's QC table of this timepoint.
         # Keep its passing rows at the requested timepoint.
-        qc_df = filter_qc_to_timepoint(args.qc_files[0], mag_id, args.timepoint)
+        qc_df = filter_qc_to_timepoint(args.qc_file, mag_id, args.timepoint)
     else:
         # Single data: the QC file covers exactly one timepoint — load all passing
         # samples without any timepoint-based row filtering.
-        qc_df = load_qc_results(args.qc_files[0], mag_id)
+        qc_df = load_qc_results(args.qc_file, mag_id)
 
     output_path = Path(args.output_path)
     tp_label = args.timepoint if args.data_type == "longitudinal" else "N/A (single)"
@@ -305,7 +304,7 @@ def main():
     if qc_df.empty:
         message = (
             f"zero QC-passing samples for MAG {mag_id} at timepoint {tp_label} "
-            f"in {args.qc_files[0]}"
+            f"in {args.qc_file}"
         )
         if not args.allow_empty:
             raise ValueError(

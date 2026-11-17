@@ -50,6 +50,7 @@ usage/interpreting_results.md
 usage/dnds_analysis.md
 usage/strain_turnover_analysis.md
 usage/gene_de_novo_analysis.md
+usage/regional_contrast_analysis.md
 ```
 
 ```{toctree}
@@ -69,6 +70,7 @@ reference/configuration.md
 reference/inputs.md
 reference/outputs.md
 reference/statistical_tests.md
+scripts/dnds_from_timepoints.md
 reference/faq.md
 ```
 

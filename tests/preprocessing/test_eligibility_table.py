@@ -528,7 +528,7 @@ def test_matches_the_plain_definition_on_random_designs(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_cli_reads_two_folders_and_the_old_single_folder_flag_is_gone(tmp_path):
+def test_cli_reads_two_folders(tmp_path):
     folders = _folders(
         tmp_path, {"MAG_A": _four_cages("A", "a") + _four_cages("B", "b")}
     )
@@ -544,14 +544,6 @@ def test_cli_reads_two_folders_and_the_old_single_folder_flag_is_gone(tmp_path):
     assert list(table["MAG_ID"]) == ["MAG_A"]
     assert table.loc[0, "replicates_per_group_A"] == 4
     assert bool(table.loc[0, "unpaired_test_eligible"])
-    # --qc_dir named ONE folder holding both timepoints; that layout is gone.
-    old = subprocess.run(
-        base + ["--qc_dir", folders[0], "--output_file", str(tmp_path / "old.tsv")],
-        capture_output=True,
-        text=True,
-    )
-    assert old.returncode != 0
-    assert not (tmp_path / "old.tsv").exists()
 
 
 # ---------------------------------------------------------------------------

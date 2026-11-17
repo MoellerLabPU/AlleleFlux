@@ -78,6 +78,11 @@ input:
 Everything group-independent is read straight from the prior run; only
 eligibility → Stage 2 → stats → scores re-runs on the new settings.
 
+QC and the cache are read from one folder per single timepoint
+(`QC/QC_{timepoint}/`, `allele_freq_cache/{timepoint}/`), so a run made before
+QC moved to that layout cannot be the `reuse_from` of a new run for QC and
+caches; its profiles can still be reused through `profiles_path`.
+
 :::{tip}
 **The decision rule.**
 Changed a QC/coverage/breadth threshold? → `profiles_path` (reuse pileup, rebuild the rest).

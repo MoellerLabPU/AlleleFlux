@@ -13,7 +13,7 @@ What gets generated
   reference/prodigal_genes.fna     — gene coordinates in Prodigal header format
   reference/mag_mapping.tsv        — maps every contig to its MAG
   reference/gtdbtk_taxonomy.tsv    — mock GTDB taxonomy rows
-  metadata/sample_metadata.tsv     — 8-row sample sheet
+  metadata/sample_metadata.tsv     — sample sheet (one row per sample)
   profiles/{sample}/               — one gzipped TSV per sample × MAG
   significant_sites/               — dummy significant-site table for visualisation
   config_generated.yml             — ready-to-run AlleleFlux config
@@ -45,6 +45,7 @@ import gzip
 import json
 import logging
 import random
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -97,6 +98,21 @@ NOISE_MAX_READS = 1  # background reads per NON-dominant base at a position: one
 #   the baseline-presence bar (3 reads below depth 40) and read as a real
 #   minor allele, which turned every low-depth position into a fake de novo
 #   candidate for the gene-level analysis
+WITNESS_TIMEPOINT = "mid"  # label of the sheet-only timepoint (longitudinal): it
+#   is in NO comparison; its samples are read only as baseline witnesses
+WITNESS_GROUP = "other"  # group of the witness samples: a third group that is
+#   in no comparison.  It must not be one of the two compared groups: a null
+#   run (alleleflux-permute-metadata --block replicate) swaps the compared
+#   groups' labels within matched pairs and refuses an unpaired sample there,
+#   while rows of any other group pass through unchanged
+N_WITNESSES = 2  # animals sampled at that timepoint, after treatment began in
+#   the study; the first one carries the first-seen allele, the second is clean
+WITNESS_DAYS_BEFORE_LATER = 45  # the witness samples are collected this many
+#   days before the later timepoint: after the earlier one, and before every
+#   carrier sample, so the dated cohort scope reads them as witnesses
+FIRST_SEEN_KIND = "first_seen_after_treatment"  # ``kind`` of the one listed site
+#   whose rising allele is carried, before the later timepoint, ONLY by a
+#   witness-timepoint sample: no pre-treatment sample has a read of it
 
 
 def generate_random_sequence(length: int) -> str:
@@ -516,6 +532,21 @@ def plan_the_plants(
       event planted there would be folded with them.  The contig must be
       free of the block and the lone allele for the same reason (the 1 kb
       window would reach them in every cage).
+    * ``witness_timepoint`` and ``first_seen_after_treatment`` (longitudinal
+      only): ``N_WITNESSES`` extra animals of a third group
+      (``WITNESS_GROUP``) sampled once at ``WITNESS_TIMEPOINT``; neither the
+      group nor the timepoint is in a comparison, and the samples are dated
+      between the earlier and the later timepoint.  ONE of the drawn standing sites
+      (the first in card order) changes kind to ``first_seen_after_treatment``:
+      the standing mouse does not carry its rising allele, the first witness
+      sample does (at ``shift_rising_fraction``), and every earlier-timepoint
+      sample has zero reads of it.  With ``pre_treatment_timepoints`` naming
+      the earlier timepoint, the pipeline must label that allele
+      ``first_seen_after_treatment_began``; without the list it would read
+      ``standing_variation``.  The witnesses carry no other planted allele, so
+      the de novo sites stay de novo.  This plant takes NO random draw, so
+      every other plant and every other read count is what it was before the
+      plant existed.
     * ``strain_swap``: the last treatment mouse's later sample rotates its
       CONSENSUS at ``swap_fraction`` of each contig's positions (never at a
       planted site).
@@ -523,8 +554,10 @@ def plan_the_plants(
       stretch at ``SPIKE_FACTOR`` x the mean depth, placed clear of every
       planted site.
 
-    Example (longitudinal, 16 samples, two MAGs of two contigs): 12 standing
-    sites, 1 lone + 3 block de novo sites, carrier_samples = the four
+    Example (longitudinal, 16 samples, two MAGs of two contigs): 11 standing
+    sites and 1 first-seen site (carried by ``other_subj9_mid``; the other
+    witness is ``other_subj10_mid``), 1 lone + 3 block de novo sites,
+    carrier_samples = the four
     ``treatment_subj*_post`` ids, standing_mouse = ``subj1`` (its pre and post
     samples, 15 % of reads), strain_swap on ``treatment_subj8_post``, spikes in
     ``control_subj1_pre`` and ``control_subj2_post``, hot_gene = the longest
@@ -739,6 +772,76 @@ def plan_the_plants(
             ],
             "fraction": STANDING_FRACTION,
         }
+
+        # ---- The witness timepoint and the allele first seen there ----------
+        # No random draw from here to the end of the function: the block,
+        # the lone allele, the hot gene, the standing sites, the spikes and
+        # the swap above keep the positions they had before this plant.
+        if WITNESS_TIMEPOINT in timepoints:
+            raise ValueError(
+                f"timepoint label {WITNESS_TIMEPOINT!r} is reserved for the witness "
+                f"timepoint; the design's timepoints are {timepoints}"
+            )
+        if WITNESS_GROUP in groups:
+            raise ValueError(
+                f"group label {WITNESS_GROUP!r} is reserved for the witness "
+                f"samples; the design's groups are {groups}"
+            )
+        earlier = timepoints[0]
+        dates = truth["collection_dates"]
+        # 45 days before the later timepoint: timepoints are three months
+        # apart (collection_dates_for), so this is after the earlier ones and
+        # before every carrier sample.
+        witness_date = (
+            date.fromisoformat(dates[later]) - timedelta(days=WITNESS_DAYS_BEFORE_LATER)
+        ).isoformat()
+        # New animals, numbered after the design's (subj1 .. subjN) and given
+        # the replicate letters after the design's (a group has n_per_group
+        # of them), so no id or replicate of the comparison is reused.
+        n_subjects = len({s["subjectID"] for s in samples})
+        n_per_group = len({s["subjectID"] for s in samples if s["group"] == treatment})
+        replicate_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        witnesses = []
+        for k in range(N_WITNESSES):
+            subject = f"subj{n_subjects + 1 + k}"
+            witnesses.append(
+                {
+                    "sample_id": f"{WITNESS_GROUP}_{subject}_{WITNESS_TIMEPOINT}",
+                    "subjectID": subject,
+                    "group": WITNESS_GROUP,
+                    "replicate": replicate_letters[
+                        (n_per_group + k) % len(replicate_letters)
+                    ],
+                    "time": WITNESS_TIMEPOINT,
+                }
+            )
+        # The first standing site in card order becomes the first-seen site.
+        standing_sites = [s for s in sites if s["kind"] == "standing"]
+        if not standing_sites:
+            raise ValueError(
+                "the first-seen plant needs at least one standing site (n_standing >= 1)"
+            )
+        first_seen = standing_sites[0]
+        first_seen["kind"] = first_seen["label"] = FIRST_SEEN_KIND
+        truth["n_standing"] = len(standing_sites) - 1
+        dates[WITNESS_TIMEPOINT] = witness_date
+        truth["witness_timepoint"] = {
+            "label": WITNESS_TIMEPOINT,
+            "group": WITNESS_GROUP,
+            "collection_date": witness_date,
+            # what the config's pre_treatment_timepoints holds
+            "pre_treatment_timepoints": [earlier],
+            "samples": witnesses,
+        }
+        truth["first_seen_after_treatment"] = {
+            "mag": first_seen["mag"],
+            "contig": first_seen["contig"],
+            "position": first_seen["position"],
+            "ref_base": first_seen["ref_base"],
+            "rising_allele": first_seen["rising_allele"],
+            "carried_by": witnesses[0]["sample_id"],
+            "fraction": SHIFT_RISING_FRACTION,
+        }
     return truth
 
 
@@ -876,10 +979,17 @@ def generate_profile_data(
          at a *standing* site, the rising allele gets ``fraction`` (0.15) of at
          least 40 reads and the reference the rest: A=34 T=6 -> present at
          baseline unambiguously, and unchanged in that mouse over time;
+       - at the ONE *first-seen* site (``truth["first_seen_after_treatment"]``)
+         the witness sample named ``carried_by`` carries the rising allele like
+         a carrier does, and the standing mouse does NOT carry it: its reads
+         are all reference there (no noise draw, which keeps every later
+         count of the dataset what it was before this plant existed);
        - in every other sample the reference is dominant with the usual noise
          on the two bases that are NEITHER ref NOR rising, and the rising
          allele has exactly 0 reads: a de novo allele is absent everywhere it
-         should be, and a standing one is present in exactly one baseline mouse.
+         should be, a standing one is present in exactly one baseline mouse,
+         and the first-seen one in exactly one sample taken after treatment
+         began.
     2. **Hot-gene event** (``truth["hot_gene"]["events"]``, longitudinal): in
        the event's ONE sample the rising allele takes ``shift_rising_fraction``
        of the reads exactly as at a carrier's significant site; in every
@@ -902,6 +1012,9 @@ def generate_profile_data(
     standing = truth.get("standing_mouse") or {}
     is_standing_mouse = sample_id in standing.get("sample_ids", ())
     standing_fraction = standing.get("fraction", 0.0)
+    # The one witness sample that carries the first-seen allele (longitudinal).
+    first_seen = truth.get("first_seen_after_treatment") or {}
+    carries_first_seen = sample_id == first_seen.get("carried_by")
 
     # Lookups for this sample, built once per call (a few hundred entries).
     site_at = {(s["contig"], s["position"]): s for s in truth["significant_sites"]}
@@ -945,10 +1058,22 @@ def generate_profile_data(
 
                 if site is not None:
                     rising = site["rising_allele"]
-                    if is_carrier:
+                    if is_carrier or (
+                        carries_first_seen and site["kind"] == FIRST_SEEN_KIND
+                    ):
+                        # A carrier at any listed site, or the witness sample
+                        # at the first-seen site: the same counts, no noise.
                         counts = _rising_counts(
                             ref_base, rising, coverage, truth["shift_rising_fraction"]
                         )
+                    elif is_standing_mouse and site["kind"] == FIRST_SEEN_KIND:
+                        # The standing mouse does not carry this allele: all
+                        # reads reference.  Written without a noise draw on
+                        # purpose: this sample took none here while the site
+                        # was a standing one, so the random stream, and with
+                        # it every other count of the dataset, is unchanged.
+                        counts = {"A": 0, "T": 0, "G": 0, "C": 0}
+                        counts[ref_base] = coverage
                     elif is_standing_mouse and site["kind"] == "standing":
                         coverage = max(coverage, STANDING_MIN_COVERAGE)
                         standing_n = round(coverage * standing_fraction)
@@ -1155,6 +1280,14 @@ def write_config(
     threshold_column: "q_value"
     threshold: 0.05
     baseline_scope: "cohort"
+    # The earlier timepoint was sampled before treatment began; the samples of
+    # the sheet-only timepoint (planted_truth.json: witness_timepoint; a third
+    # group, in no comparison) were taken after.  With this list, an allele that an earlier-dated sample
+    # carried reads standing_variation only when a pre-treatment sample
+    # carried it, and first_seen_after_treatment_began when only samples
+    # taken after treatment began did (the one planted case:
+    # first_seen_after_treatment).
+    pre_treatment_timepoints: ["__EARLIER_TIMEPOINT__"]
     cluster_window_bp: 1000
     max_de_novo_neighbours: 0
     strain_gate: "carrier"
@@ -1248,6 +1381,11 @@ def write_config(
         )
         config_filename = f"config_with_bams_{data_type}.yml"
 
+    # The pre-treatment timepoint of the longitudinal block is the design's
+    # earlier one (the block is a plain string, hence the placeholder).
+    longitudinal_block = longitudinal_block.replace(
+        "__EARLIER_TIMEPOINT__", timepoints[0]
+    )
     # ONE spelling per data type (config.template.yml): a single
     # timepoint is ``timepoint: name``; a longitudinal pair is spelled
     # as its earlier and later timepoint, the later one being the focus.
@@ -1430,6 +1568,11 @@ def generate_dataset(
     )
     truth = plan_the_plants(mags, samples, data_type, coverage_range=coverage_range)
     truth["seed"] = seed
+    # The witness-timepoint samples (longitudinal; none on single data) are in
+    # no comparison.  They come AFTER the design's samples everywhere, so the
+    # design's profiles are written from the same random stream as without them.
+    witnesses = truth.get("witness_timepoint", {}).get("samples", [])
+    profile_samples = samples + witnesses
 
     profiles_dir = output_dir / "profiles"
     # Profile-mode metadata: bam_path points at the per-sample profile directory,
@@ -1437,7 +1580,7 @@ def generate_dataset(
     # convention is to cd into example_dir before invoking, so "profiles/<id>"
     # resolves correctly against cwd.
     write_metadata(
-        samples,
+        profile_samples,
         output_dir / "metadata" / "sample_metadata.tsv",
         path_resolver=lambda s: Path("profiles") / s["sample_id"],
         collection_dates=truth["collection_dates"],
@@ -1448,7 +1591,9 @@ def generate_dataset(
     # written eagerly so the BAM-mode config can reference it without a second
     # invocation.  The pipeline validates BAM existence at runtime.  NOTE: the
     # BAMs are simulated from the unmodified reference, so none of the planted
-    # facts reach them -- BAM mode exercises profiling, not the plants.
+    # facts reach them -- BAM mode exercises profiling, not the plants.  The
+    # witness samples are a planted fact, so this sheet keeps to the design's
+    # samples (and no BAM is needed for a witness).
     write_metadata(
         samples,
         output_dir / "metadata" / "sample_metadata_bams.tsv",
@@ -1457,12 +1602,12 @@ def generate_dataset(
     )
 
     # --- Profiles (the slow step for large datasets) --------------------
-    logger.info(f"Generating profiles for {len(samples)} samples...")
-    for i, sample in enumerate(samples):
+    logger.info(f"Generating profiles for {len(profile_samples)} samples...")
+    for i, sample in enumerate(profile_samples):
         # Throttle progress logs: every 10th sample plus the final one, so a
         # 17-sample run logs "10/17" and then "17/17" instead of going silent.
-        if (i + 1) % 10 == 0 or i == len(samples) - 1:
-            logger.info(f"  {i+1}/{len(samples)}: {sample['sample_id']}")
+        if (i + 1) % 10 == 0 or i == len(profile_samples) - 1:
+            logger.info(f"  {i+1}/{len(profile_samples)}: {sample['sample_id']}")
         profiles = generate_profile_data(
             sample, mags, coverage_range=coverage_range, truth=truth
         )
@@ -1492,11 +1637,20 @@ def generate_dataset(
     readme = (
         f"# Generated AlleleFlux Test Data\n\n"
         f"Seed: {seed} | MAGs: {num_mags} | "
-        f"Samples: {len(samples)} ({data_type})\n\n"
+        f"Samples: {len(samples)} ({data_type})"
+        + (
+            f" + {len(witnesses)} of group `{truth['witness_timepoint']['group']}` "
+            f"at the witness timepoint `{truth['witness_timepoint']['label']}` "
+            f"(profiles only)"
+            if witnesses
+            else ""
+        )
+        + "\n\n"
         f"All paths in the configs and metadata are RELATIVE to this directory.\n"
         f"`cd` into this directory before running the pipeline.\n\n"
         f"`planted_truth.json` lists every fact planted in the profiles\n"
-        f"(significant sites, standing / de novo alleles, the strain-swapped\n"
+        f"(significant sites, standing / de novo alleles, the allele first seen\n"
+        f"after treatment began and its witness samples, the strain-swapped\n"
         f"sample, the depth spikes, the hot gene); the regression test asserts\n"
         f"them.\n\n"
         f"## Option A — pre-generated profiles (fastest; carries the planted facts)\n\n"

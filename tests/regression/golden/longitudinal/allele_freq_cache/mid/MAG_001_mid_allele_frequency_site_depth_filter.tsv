@@ -1,0 +1,3 @@
+sample_id	mag_id	timepoint	mean_coverage	mean_coverage_after_filter	n_sites_covered	n_removed_low	n_removed_high	n_kept
+other_subj9_mid	MAG_001	mid	47.00748299319728	47.00748299319728	2940	0	0	2940
+other_subj10_mid	MAG_001	mid	46.48095238095238	46.48095238095238	2940	0	0	2940

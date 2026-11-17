@@ -54,6 +54,13 @@ and the only accepted value, and strain turnover itself (which needs a
 transition) is refused at parse time together with the other
 longitudinal-only features (see `data_type` in the configuration reference).
 
+**Which samples take part.** A MAG's ANI job reads the MAG's QC tables at the
+timepoints of the comparisons the MAG is eligible in, and keeps the QC-passing
+samples of the groups named in `groups_combinations`.  This does not move with
+the de novo settings below: samples that are read only as baseline witnesses
+(another timepoint, or a group outside every comparison) never enter an ANI
+pair.
+
 The filter-by-filter reference, with a worked position, lives with the code at
 `alleleflux/scripts/analysis/ani/README.md`.
 
@@ -172,12 +179,63 @@ at the later timepoint and m3 (control) does not:
 | `cohort` (default) | every QC-passing sample of the whole run, any group, any age, as long as it was collected on an earlier **date** than the first carrier's sample. If a completely unrelated mouse had G a year earlier, G was already in the building: not new. | shared facility or colony |
 
 **What `cohort` needs.** A `collection_date` column in the metadata, ISO
-`YYYY-MM-DD` (see [inputs](../reference/inputs.md)).  The job then loads every
-sample in the sheet, not only the comparison's, and for each site keeps as
+`YYYY-MM-DD` (see [inputs](../reference/inputs.md)).  The job then loads the
+comparison's samples plus every other sheet sample that may testify (by
+default all of them; see `cohort_witnesses` below), and for each site keeps as
 baseline those dated strictly before the earliest later-timepoint sample that
 carries the allele (the *first carrier*).  Samples dated on or after it, the
 carriers' own later samples included, are not baseline.  A `cohort` column
 (enrollment batch), when present, is carried into the outputs.
+
+**What `cohort` builds.** A sample can only be read as a baseline witness if
+it has QC and an allele-frequency cache.  So when all four of these hold:
+longitudinal data, `baseline_scope: cohort`, a `collection_date` for every
+sample, and baseline presence or the gene-level de novo analysis switched on,
+the workflow builds a cache for every eligible MAG at **every witness
+timepoint**, not only at the timepoints of the comparisons it is eligible
+in.  ("Eligible" = the eligibility table of at least one comparison admits
+the MAG to at least one test.)  When one of the four does not hold, nothing
+extra is built.
+
+Which timepoints and groups are witnesses is one setting,
+`analysis.baseline_presence.cohort_witnesses`:
+
+| `cohort_witnesses` | Who may testify (if dated before the first carrier) | Extra work |
+|---|---|---|
+| `sheet` (default) | any sample of the metadata sheet, at any timepoint and in any group | sample metadata, QC and caches also at the sheet's timepoints that sit in no comparison, and also for the sheet's groups that sit in no comparison |
+| `comparisons` | only samples at a timepoint named in `timepoints_combinations` **and** in a group named in `groups_combinations` | no extra timepoint or group; each eligible MAG still gets a cache at every compared timepoint |
+
+Example.  The sheet has timepoints `pre`, `mid`, `post`, `end` and groups `A`,
+`B`, `C`.  The config compares `pre_post` and `pre_end`, group `A` against `B`.
+
+| | witness timepoints | witness groups | QC folders | caches of a MAG eligible in `pre_post` only |
+|---|---|---|---|---|
+| `sheet` | `pre`, `post`, `end`, `mid` | `A`, `B`, `C` | `pre`, `post`, `end`, `mid` | `pre`, `post`, `end`, `mid` |
+| `comparisons` | `pre`, `post`, `end` | `A`, `B` | `pre`, `post`, `end` | `pre`, `post`, `end` |
+| the four conditions not met | (none outside the comparison) | (none) | `pre`, `post`, `end` | `pre`, `post` |
+
+Why groups matter: an allele rises in `A`, and a `C` sample dated earlier
+carried it.  With `C` left out the allele is called de novo.  Under `sheet`
+the `C` sample testifies and the allele is standing variation.
+
+The extra timepoints and groups are only ever read as witnesses.  They are
+never tested: eligibility and the statistics name their own two groups and two
+timepoints, and pairwise ANI keeps to the compared timepoints and groups.  The
+workflow turns the setting into two lists (witness timepoints, witness groups),
+builds QC and caches for exactly those, and hands the same lists to both de
+novo commands (`--witness_timepoints`, `--witness_groups`), so a command never
+asks for a cache that was not built.
+
+A MAG with no QC-passing sample at a witness timepoint still gets a cache: a
+file with the normal columns and **no rows**.  The de novo commands read it as
+"no witness of this MAG at this timepoint".  A cache file that is missing
+altogether stops them with an error naming the path.
+
+A timepoint label that sits in no comparison becomes a folder name, so under
+`sheet` it may hold only letters, digits, `.` and `-`.  A group label that
+sits in no comparison may hold letters, digits, `.`, `-` and `_`.  The run
+stops while the workflow is being read, before any job, on a label that breaks
+these rules and on a blank `time` or `group` cell in the sheet.
 
 **Dates are all-or-nothing.** A `collection_date` column with *some* blank
 cells is refused under `cohort`: the job stops before writing anything and
@@ -221,6 +279,92 @@ rose without any later sample clearing the presence bar (no carrier, verdict
 later timepoint.  So the two rising rows of one site, and the summary row,
 describe comparable baselines; a sheet with no dates at all falls back to the
 comparison's earlier timepoint.
+
+### Three labels (`pre_treatment_timepoints`)
+
+Under the dated `cohort` scope an allele is "not de novo" as soon as any
+earlier-dated sample carried it.  But some earlier-dated samples were taken
+**after treatment began**.  An allele first seen in one of those may have
+arisen under treatment, which is exactly the event the analysis looks for.
+
+`analysis.baseline_presence.pre_treatment_timepoints` is a list of timepoint
+labels (as spelled in the sheet's `time` column) that were sampled before
+treatment began.  The default is an empty list: no split, two labels as
+before.  With the list filled, "an earlier sample carried the allele" splits
+in two:
+
+| Witnesses that carry the allele | Label |
+|---|---|
+| none | de novo (unchanged) |
+| at least one pre-treatment witness | `standing_variation` |
+| only witnesses sampled after treatment began | `first_seen_after_treatment_began` |
+
+Two things do **not** change:
+
+* **Who is a witness.**  Still the covered samples dated strictly before the
+  first carrier.  The list never adds or removes a witness.
+* **How a witness is classed.**  By its timepoint label only: a witness at a
+  listed timepoint is pre-treatment, a witness at any other timepoint is
+  on-treatment.  Its group and its date play no part.
+
+Example.  Timepoints `t0`, `t1`, `t2`; the comparison is `t0_t2`; the config
+says `pre_treatment_timepoints: ["t0"]`.  Allele G rose, and its first carrier
+is dated 2021-06-10.
+
+| sample | timepoint | collected | covered | carries G | witness? | class |
+|---|---|---|---|---|---|---|
+| w1 | `t0` | 2021-01-10 | yes | no | yes | pre-treatment |
+| w2 | `t0` | 2021-01-12 | yes | no | yes | pre-treatment |
+| w3 | `t1` | 2021-04-02 | yes | yes | yes | on-treatment |
+| w4 | `t0` | 2021-07-01 | yes | yes | no: dated after the first carrier | not counted |
+
+| question | answer |
+|---|---|
+| Did any witness carry G? | yes, w3: not de novo |
+| Did a pre-treatment witness carry G? | no, w1 and w2 are clean |
+| Label | `first_seen_after_treatment_began` |
+| Witness counts | pre-treatment: 2 covered, 0 carrying, 0 below detection; on-treatment: 1 covered, 1 carrying |
+
+Had w1 carried G, the label would be `standing_variation`.  Without the list
+the label is `standing_variation` and the five count columns are empty.  w4
+shows a consequence of the calendar rule: a pre-treatment sample dated after
+the first carrier is not a witness, so "no pre-treatment witness carried it"
+can rest on few samples.  That is why the counts are reported.
+
+**"First seen after treatment began" is a label, not a proof.**  It also holds
+alleles that were in the population all along but in no sampled pre-treatment
+witness.  Read it together with `n_pre_treatment_witnesses_covered`: a call
+resting on 2 pre-treatment witnesses is much weaker than one resting on 80.  A
+pre-treatment witness with a few reads of the allele under the detection bar
+does not carry it by the presence rule, so it does not make the allele
+standing; `n_pre_treatment_witnesses_below_detection` flags those rows.
+
+**Where the label appears.**
+
+| Output | What changes with the list filled |
+|---|---|
+| Baseline-presence summary and rising table | `origin_any_mouse` can read `first_seen_after_treatment_began`; the five witness-count columns are filled. The columns are always in the header and are empty when the list is empty. The long table is not affected |
+| `rising_origin_alleles.tsv` | the same five columns, and `origin` can read the new label |
+| `rising_origin_summary.tsv` | a `first_seen_after_treatment_began` row per block, only when the run made the split. The label is a verdict, so it is counted in `n_called`. The cluster rule and the strain gate never relabel it |
+| Gene-level events table | the label appears in the existing `origin` column. It is never an event, so gene counts, cage counts and both tests are identical with and without the list |
+
+**What stops the run.**  Whenever baseline presence or the gene-level de novo
+analysis is on, the list is checked while the workflow is being read, before
+any job is submitted.  The run stops when:
+
+* the list is filled and `baseline_scope` is not `cohort`;
+* the list is filled and the sheet does not have a `collection_date` for every
+  sample (without dates every witness comes from the comparison's earlier
+  timepoint, so no witness is "after treatment began");
+* the value is not a list (`t0` instead of `["t0"]`), or a label is blank;
+* a label is not a timepoint of the sheet;
+* a label is a sheet timepoint but not a witness timepoint (possible only
+  under `cohort_witnesses: comparisons`, for a timepoint in no comparison).
+
+Run by hand, `alleleflux-baseline-presence` and `alleleflux-gene-de-novo`
+refuse `--pre_treatment_timepoints` in the same three cases: a scope other
+than `cohort`, a sheet without a date for every sample, and a label that is no
+timepoint of the samples they read.
 
 ### Naming
 
@@ -267,7 +411,15 @@ Its columns come in two kinds:
   `n_{earlier}_samples_covered`, `n_replicates_with_allele_at_{earlier}`,
   `{earlier}_mice_allele_present`, and the same-mouse counts
   `n_mice_standing_variation`, `n_mice_de_novo_candidate`,
-  `n_mice_de_novo_candidate_below_detection_at_{earlier}`.
+  `n_mice_de_novo_candidate_below_detection_at_{earlier}`.  Five witness-count
+  columns (`n_pre_treatment_witnesses_covered`,
+  `n_pre_treatment_witnesses_allele_present`,
+  `n_pre_treatment_witnesses_below_detection`,
+  `n_on_treatment_witnesses_covered`,
+  `n_on_treatment_witnesses_allele_present`) are always present and are filled
+  only when `pre_treatment_timepoints` is set; `origin_any_mouse` can then also
+  read `first_seen_after_treatment_began` (see
+  [Three labels](#three-labels-pre_treatment_timepoints)).
 * **Read counts, unfiltered:** `total_reads_{tp}`, `allele_reads_{tp}`,
   `allele_frequency_{tp}` for each timepoint, summed over **every** sample at
   that timepoint, thin and profile-less samples included.  That is what makes
@@ -311,6 +463,9 @@ counting it applies two rules to the de novo alleles, in this order:
    neither replaced nor not replaced, becomes `strain_undetermined` and is not
    counted as de novo.  Both verdicts are written to every row for comparison.
 
+Neither rule touches an allele labelled `first_seen_after_treatment_began`:
+both act on the two de novo origins only.
+
 The workflow runs it once, after the last baseline-presence job, with the
 run's classification table and turnover tables; by hand it takes one
 classification table per voter floor and the turnover folder.
@@ -343,9 +498,9 @@ which pools both groups' `end` samples, calls G standing.
 ## Running by hand
 
 ```bash
-# One MAG's ANI table (QC files: one per timepoint combination)
+# One MAG's ANI table (QC files: one per timepoint)
 alleleflux-pairwise-ani --mag MAG_A --cache_dir run/longitudinal/allele_freq_cache \
-  --qc_files run/longitudinal/QC/QC_pre_end/MAG_A_QC.tsv \
+  --qc_files run/longitudinal/QC/QC_pre/MAG_A_QC.tsv run/longitudinal/QC/QC_end/MAG_A_QC.tsv \
   --fasta ref.fa --mag_mapping mapping.tsv --output_dir run/longitudinal/pairwise_ani \
   --pairs transitions --transitions pre:end
 
@@ -362,6 +517,15 @@ alleleflux-baseline-presence --run_dir run/longitudinal --comparison pre_end-fat
   --output_dir run/longitudinal/baseline_presence \
   --turnover_dir run/longitudinal/strain_turnover --cpus 8
 ```
+
+Under the `cohort` scope the baseline-presence command reads, besides the
+comparison's own samples, every sheet sample whose timepoint is in
+`--witness_timepoints` and whose group is in `--witness_groups`.  Leave both
+out, as above, and every sample of the sheet is read; on a dated sheet the
+command then needs a cache file for every MAG it assesses at every timepoint
+of those samples and stops on a missing one.  The workflow always passes both
+lists, so it asks for exactly the caches it built.  Add
+`--pre_treatment_timepoints pre` for the three-label split.
 
 ## In the workflow
 
@@ -383,13 +547,15 @@ analysis:
     threshold_column: q_value
     threshold: 0.05
     baseline_scope: cohort          # needs collection_date in the metadata
+    cohort_witnesses: sheet         # sheet | comparisons (cohort scope only)
+    pre_treatment_timepoints: []    # e.g. ["pre"]; empty = no three-label split
     cluster_window_bp: 1000
     max_de_novo_neighbours: 0
     strain_gate: carrier            # carrier | group | both | none
     min_determined_carriers: 3
 ```
 
-The five de novo knobs are read once (`de_novo_rule_params` in `common.smk`)
+The seven de novo knobs are read once (`de_novo_rule_params` in `common.smk`)
 so the baseline-presence and rising-origin rules cannot disagree; every gate
 but `none` requires `use_strain_turnover` (the rising-origin job then waits
 for the classification table and the per-MAG turnover tables and receives

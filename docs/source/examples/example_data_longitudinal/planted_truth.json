@@ -7,6 +7,7 @@
     "treatment_subj8_post"
   ],
   "collection_dates": {
+    "mid": "2024-03-01",
     "post": "2024-04-15",
     "pre": "2024-01-15"
   },
@@ -29,6 +30,15 @@
       "start": 1590
     }
   ],
+  "first_seen_after_treatment": {
+    "carried_by": "other_subj9_mid",
+    "contig": "MAG_001.fa_contig1",
+    "fraction": 0.48,
+    "mag": "MAG_001",
+    "position": 641,
+    "ref_base": "A",
+    "rising_allele": "T"
+  },
   "groups": {
     "control": "control",
     "treatment": "treatment"
@@ -66,15 +76,15 @@
     "gene_start": 204,
     "mag": "MAG_001"
   },
-  "n_standing": 12,
+  "n_standing": 11,
   "rising_allele_rule": "the next base after ref_base in the A,T,G,C cycle",
   "seed": 42,
   "shift_rising_fraction": 0.48,
   "significant_sites": [
     {
       "contig": "MAG_001.fa_contig1",
-      "kind": "standing",
-      "label": "standing",
+      "kind": "first_seen_after_treatment",
+      "label": "first_seen_after_treatment",
       "mag": "MAG_001",
       "position": 641,
       "ref_base": "A",
@@ -353,5 +363,29 @@
   "timepoints": [
     "pre",
     "post"
-  ]
+  ],
+  "witness_timepoint": {
+    "collection_date": "2024-03-01",
+    "group": "other",
+    "label": "mid",
+    "pre_treatment_timepoints": [
+      "pre"
+    ],
+    "samples": [
+      {
+        "group": "other",
+        "replicate": "E",
+        "sample_id": "other_subj9_mid",
+        "subjectID": "subj9",
+        "time": "mid"
+      },
+      {
+        "group": "other",
+        "replicate": "F",
+        "sample_id": "other_subj10_mid",
+        "subjectID": "subj10",
+        "time": "mid"
+      }
+    ]
+  }
 }

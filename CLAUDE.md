@@ -133,10 +133,11 @@ environment.yml          # Conda environment spec
 ```
 
 **Pipeline optimization notes (2A/2B/2D):**
-- **QC scope**: `generate_metadata` and `qc` run once per `{timepoints}` (not per `{timepoints}-{groups}`). QC dirs at `QC/QC_{timepoints}/`.
-- **Eligibility**: `eligibility_table` still runs per `{timepoints}-{groups}`, reads group-independent QC dir, filters via `--groups`.
-- **Cache**: `allele_freq_cache` group-independent — `{mag}_{timepoint}_allele_frequency.parquet`. 6× fewer cache jobs for DRIDO.
-- **QC parallelism**: `quality_control.py` uses `ProcessPoolExecutor` for concurrent outer MAG loop.
+- **QC scope**: `generate_metadata` and `qc` run once per single `{timepoint}` (not per comparison `{timepoints}`, not per `{timepoints}-{groups}`). Dirs: `inputMetadata/inputMetadata_{timepoint}/`, `QC/QC_{timepoint}/`. QC tables hold per-sample columns only (no pairing columns); every genome gets a table at every QC timepoint, header-only when it has no sample there.
+- **Eligibility**: `eligibility_table` runs per `{timepoints}-{groups}`, reads the comparison's per-timepoint QC dirs via `--qc_dirs` (two for longitudinal, one for single) and derives pairing and replicate counts itself over the two `--groups`.
+- **Cache**: `allele_freq_cache` is per (genome, single timepoint), group-independent: `allele_freq_cache/{timepoint}/{mag}_{timepoint}_allele_frequency.parquet`, built from that timepoint's QC table. Under `baseline_scope: cohort` on a fully dated sheet with a de novo analysis on, every eligible genome gets a cache at every witness timepoint (`cohort_witnesses`: `sheet` = every sheet timepoint and group, `comparisons` = compared ones only); no QC-passing sample there = zero-row cache (`--allow_empty`), which the de novo commands accept.
+- **Three labels**: `analysis.baseline_presence.pre_treatment_timepoints` (a list, default empty) splits "an earlier-dated sample carried the allele" into `standing_variation` (a pre-treatment witness carried it) and `first_seen_after_treatment_began` (only later-timepoint witnesses did). A witness's class is its timepoint label only; who is a witness (covered, dated strictly before the first carrier) does not change. At the gene level the label is reported, never counted.
+- **QC parallelism**: `quality_control.py` runs a `multiprocessing.Pool` over samples (one task per sample; the large lookup tables go to each worker once, through the pool initializer).
 
 
 ---

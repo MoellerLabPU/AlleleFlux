@@ -11,13 +11,28 @@ desktop computer. No HPC access or GPU is required.
 | Property | Value |
 |---|---|
 | MAGs | 2 (`MAG_001`, `MAG_002`) |
-| Samples | 8 (4 control, 4 treatment; 2 subjects × 2 timepoints each) |
+| Samples | 16 in the comparison (4 control and 4 treatment subjects, each at `pre` and `post`), plus 2 samples of a third group, `other`, at a third timepoint, `mid`; neither the group nor the timepoint is in a comparison |
 | Design | Longitudinal (pre → post) |
-| Genome size | ~3,600–3,650 positions per MAG (2 contigs each) |
+| Genome size | 2,940 and 2,132 positions (2 contigs each) |
 
-A simulated treatment effect is present in the pre-generated profiles: at ~8%
-of positions in treatment post-timepoint samples, the dominant allele is shifted
-to an alternative base. This signal is what AlleleFlux is designed to detect.
+The pre-generated profiles carry a small set of planted facts, all listed in
+`planted_truth.json` next to the data:
+
+| Planted fact | What it is |
+|---|---|
+| 16 significant sites | In the treatment `post` samples a second allele takes 48% of the reads. |
+| 11 standing alleles | One control subject already carries the allele at `pre` and `post`. |
+| 4 de novo alleles | No earlier sample has a read of the allele: one lone site and a block of three close together. |
+| 1 allele first seen after treatment began | No `pre` sample has it; one `mid` sample does. The config names `pre` as the pre-treatment timepoint (`pre_treatment_timepoints`), so the allele is labelled `first_seen_after_treatment_began` instead of `standing_variation`. |
+| 1 strain change | One treatment subject's `post` sample differs from its `pre` sample at 2% of positions. |
+| 2 depth spikes | Two control samples each have a 40-position stretch at ten times the usual depth. |
+| 1 hot gene | Three treatment subjects each gain a private new allele in the same gene. |
+
+The two `mid` samples are read only as baseline witnesses: they are never
+tested, and QC and an allele-frequency cache are built for them because the
+config uses `baseline_scope: cohort`.  They sit in a group of their own so that
+a null run, which swaps the labels of the two compared groups, leaves them
+alone.
 
 ---
 
@@ -532,6 +547,6 @@ parameters, so no treatment effect is present at the read level.
 | `sample_id` | Unique sample identifier |
 | `bam_path` | Path to BAM file or pre-generated profile directory |
 | `subjectID` | Biological replicate / subject ID |
-| `group` | Experimental group (`control` / `treatment`) |
+| `group` | Experimental group (`control` / `treatment`; the two `mid` samples of the longitudinal example are in a third group, `other`) |
 | `replicate` | Replicate letter within group |
-| `time` | Timepoint (`pre` / `post`) |
+| `time` | Timepoint (`pre` / `post`; the longitudinal example also has two samples at `mid`) |

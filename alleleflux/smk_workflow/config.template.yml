@@ -105,6 +105,14 @@ analysis:
                                    # own_group = only its own group (groups housed apart, e.g. single-diet cages;
                                    #   needs summary single_sample or lmm_across_time, an error otherwise);
                                    # individual = the carrier mice's own earlier samples only.
+                                   # What cohort builds: with longitudinal data, a collection_date for every
+                                   #   sample and this analysis or use_gene_de_novo on, every genome that is
+                                   #   eligible in some comparison gets an allele-frequency cache at every witness
+                                   #   timepoint (see cohort_witnesses), not only at the timepoints of the
+                                   #   comparisons it is eligible in.  A genome with no QC-passing sample at
+                                   #   one of them gets a cache with zero rows, which the de novo analyses read
+                                   #   as "no witness there".  Nothing extra is built when one of those
+                                   #   conditions does not hold.
     cohort_witnesses: "sheet"      # who may testify under baseline_scope: cohort (ignored under the other scopes):
                                    # sheet = any sample of the metadata sheet, at any timepoint and in any group;
                                    #   timepoints and groups that sit in no comparison then get QC and

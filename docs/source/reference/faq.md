@@ -312,7 +312,7 @@ Key output locations under `{root_dir}/{data_type}/`:
 | **Outlier genes** | `outlier_genes/{timepoints}-{groups}/{test}_outlier_genes.tsv.gz` |
 | **Statistical test results** | `significance_tests/{test}_{timepoints}-{groups}/{mag}_*.tsv.gz` |
 | **Eligibility tables** | `eligibility_table_{timepoints}-{groups}.tsv` |
-| **QC metrics** | `QC/QC_{timepoints}-{groups}/{mag}_qc.tsv` |
+| **QC metrics** | `QC/QC_{timepoint}/{mag}_QC.tsv` (one folder per single timepoint) |
 | **dN/dS results** | `dnds/{timepoints}-{groups}/{mag}_gene_summary_ng86.tsv.gz` |
 
 :::{seealso}

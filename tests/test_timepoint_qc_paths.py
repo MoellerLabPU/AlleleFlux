@@ -13,9 +13,9 @@ A comparison (``pre_post``) reads the folders of its two timepoints;
 
 The helpers are sliced out of the ``.smk`` source and exec'd with their free
 globals stubbed, as in ``test_cache_timepoints.py``.  The last tests read the
-rule files as text: they pin that the old "one QC folder per comparison"
-lookup is gone and that every flag a rule passes exists in the command it
-calls (a renamed flag would otherwise surface only when a job runs).
+rule files as text: they pin that the metadata and QC rules are keyed on one
+timepoint and that every flag a rule passes exists in the command it calls (a
+renamed flag would otherwise surface only when a job runs).
 """
 
 from __future__ import annotations
@@ -157,18 +157,7 @@ class TestQcTablesOfOneGenome:
             fn["qc_tables_for_cache_files"]("MAG_7", [])
 
 
-class TestOldLayoutIsGone:
-    def test_canonical_comparison_lookup_is_removed_everywhere(self):
-        # QC used to live in one folder per COMPARISON, and a timepoint's cache
-        # read the table of the first comparison naming it.  With one folder
-        # per timepoint there is nothing to look up.
-        sources = [COMMON_SMK, PIPELINE / "Snakefile", *sorted(RULES.glob("*.smk"))]
-        sources += sorted((PIPELINE / "shared").glob("*.smk"))
-        for path in sources:
-            text = path.read_text()
-            assert "timepoint_to_canonical_tp" not in text, path.name
-            assert "get_canonical_qc_file" not in text, path.name
-
+class TestRulesAreKeyedOnOneTimepoint:
     def test_metadata_and_qc_rules_are_keyed_on_one_timepoint(self):
         metadata = (RULES / "metadata.smk").read_text()
         qc = (RULES / "quality_control.smk").read_text()
@@ -221,4 +210,3 @@ class TestRuleFlagsExistInTheCommands:
     def test_eligibility_rule_passes_the_per_timepoint_folders(self):
         flags = _shell_flags("eligibility.smk", "alleleflux-eligibility")
         assert "--qc_dirs" in flags
-        assert "--qc_dir" not in flags

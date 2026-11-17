@@ -111,8 +111,11 @@ top to bottom:
 
 - `samples in the metadata sheet (treatment, pre)` — one row per group and
   timepoint in the sample sheet.
-- `MAGs with profiles (pre_post)` — distinct MAGs in
-  `inputMetadata_{timepoints}/summary_mag_index.tsv`.
+- `MAGs with profiles (pre_post)` — distinct MAGs over the
+  `inputMetadata_{timepoint}/summary_mag_index.tsv` files of the comparison's
+  timepoints (here `inputMetadata_pre/` and `inputMetadata_post/`; one folder
+  for single-timepoint data).  Reads "not available in this run" when one of
+  those files is missing.
 - `MAGs with enough samples ...` — one row per yes/no flag of the comparison's
   eligibility table, worded by which tests the flag feeds: `for the
   within-group tests in treatment (parallelism)` (one row per group),

@@ -74,6 +74,14 @@ analysis:
     threshold_column: "q_value"
     threshold: 0.05
     baseline_scope: "cohort"
+    # The earlier timepoint was sampled before treatment began; the samples of
+    # the sheet-only timepoint (planted_truth.json: witness_timepoint; a third
+    # group, in no comparison) were taken after.  With this list, an allele that an earlier-dated sample
+    # carried reads standing_variation only when a pre-treatment sample
+    # carried it, and first_seen_after_treatment_began when only samples
+    # taken after treatment began did (the one planted case:
+    # first_seen_after_treatment).
+    pre_treatment_timepoints: ["pre"]
     cluster_window_bp: 1000
     max_de_novo_neighbours: 0
     strain_gate: "carrier"

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 GENERATOR = (
@@ -475,3 +476,217 @@ class TestWriteConfig:
         qc = self._emit(tmp_path, data_type)["quality_control"]
         assert qc["site_depth_filter"]["enabled"] is True
         assert qc["site_depth_filter"]["site_ratio"] == 3.0
+
+
+# ---------------------------------------------------------------------------
+# The allele "first seen after treatment began" and the witness timepoint
+# ---------------------------------------------------------------------------
+def _witness_profiles(longitudinal):
+    """Profiles of the witness-timepoint samples of the ``longitudinal`` fixture."""
+    mags, _, truth, _ = longitudinal
+    return {
+        w["sample_id"]: gen.generate_profile_data(w, mags, truth=truth)
+        for w in truth["witness_timepoint"]["samples"]
+    }
+
+
+class TestFirstSeenAfterTreatment:
+    """One listed site is carried, before the comparison's later timepoint, only
+    by a sample taken AFTER treatment began (the witness timepoint).  The
+    pipeline's three-label split must call it first_seen_after_treatment_began;
+    here the generator's side of that fact is pinned."""
+
+    def test_plan_turns_one_drawn_site_into_the_first_seen_site(self, longitudinal):
+        _, _, truth, _ = longitudinal
+        fact = truth["first_seen_after_treatment"]
+        listed = [
+            s
+            for s in truth["significant_sites"]
+            if s["kind"] == "first_seen_after_treatment"
+        ]
+        assert len(listed) == 1
+        assert (fact["mag"], fact["contig"], fact["position"]) == (
+            listed[0]["mag"],
+            listed[0]["contig"],
+            listed[0]["position"],
+        )
+        assert fact["rising_allele"] == listed[0]["rising_allele"]
+        # It is one of the N_STANDING drawn sites, so the card's standing
+        # count is one lower and the number of listed sites does not change.
+        assert truth["n_standing"] == gen.N_STANDING - 1
+        assert len(truth["significant_sites"]) == gen.N_STANDING + 4
+
+    def test_witness_timepoint_is_outside_the_comparison_and_dated_between(
+        self, longitudinal
+    ):
+        _, samples, truth, _ = longitudinal
+        witness = truth["witness_timepoint"]
+        assert witness["label"] not in truth["timepoints"]
+        earlier, later = truth["timepoints"][0], truth["timepoints"][-1]
+        dates = truth["collection_dates"]
+        assert dates[earlier] < witness["collection_date"] < dates[later]
+        assert dates[witness["label"]] == witness["collection_date"]
+        assert witness["pre_treatment_timepoints"] == [earlier]
+        # Two animals that are in no comparison: new subjects, a third group
+        # and the witness timepoint.  The group must be outside the compared
+        # pair: a null run permutes labels within the matched pairs of the two
+        # compared groups, and an unpaired extra sample there stops it.
+        assert len(witness["samples"]) == 2
+        assert witness["group"] == gen.WITNESS_GROUP
+        assert witness["group"] not in truth["groups"].values()
+        compared_subjects = {s["subjectID"] for s in samples}
+        compared_replicates = {s["replicate"] for s in samples}
+        for w in witness["samples"]:
+            assert w["group"] == witness["group"]
+            assert w["time"] == witness["label"]
+            assert w["subjectID"] not in compared_subjects
+            assert w["replicate"] not in compared_replicates
+            assert w["sample_id"] == (
+                f"{w['group']}_{w['subjectID']}_{witness['label']}"
+            )
+        ids = [w["sample_id"] for w in witness["samples"]]
+        assert truth["first_seen_after_treatment"]["carried_by"] == ids[0]
+
+    def test_only_the_carriers_and_one_witness_carry_the_allele(self, longitudinal):
+        _, samples, truth, profiles = longitudinal
+        fact = truth["first_seen_after_treatment"]
+        key = (fact["contig"], fact["position"])
+        every = {**profiles, **_witness_profiles(longitudinal)}
+        carrying = set(truth["carrier_samples"]) | {fact["carried_by"]}
+        assert len(every) == len(samples) + 2
+        for sample_id, by_mag in every.items():
+            counts = _rows_by_position(by_mag[fact["mag"]])[key]
+            rising = counts[fact["rising_allele"]]
+            if sample_id in carrying:
+                assert abs(rising / counts["cov"] - fact["fraction"]) < 0.03
+                assert rising >= 5
+            else:
+                # every pre sample, the standing mouse and the second witness
+                assert rising == 0, sample_id
+
+    def test_witnesses_carry_no_other_planted_allele(self, longitudinal):
+        """The de novo alleles must stay de novo and the standing ones must stay
+        the standing mouse's alone: a witness with reads of them would change
+        both labels."""
+        _, _, truth, _ = longitudinal
+        fact = truth["first_seen_after_treatment"]
+        for sample_id, by_mag in _witness_profiles(longitudinal).items():
+            for site in truth["significant_sites"]:
+                if site["kind"] == "first_seen_after_treatment":
+                    continue
+                counts = _rows_by_position(by_mag[site["mag"]])[
+                    (site["contig"], site["position"])
+                ]
+                assert counts[site["rising_allele"]] == 0, (sample_id, site)
+            hot = truth["hot_gene"]
+            for event in hot["events"]:
+                counts = _rows_by_position(by_mag[hot["mag"]])[
+                    (hot["contig"], event["position"])
+                ]
+                assert counts[event["rising_allele"]] == 0
+        assert fact["carried_by"] in _witness_profiles(longitudinal)
+
+    def test_single_design_has_no_witness_timepoint(self):
+        random.seed(3)
+        mags = [gen.create_mag_structure("MAG_001", num_contigs=2)]
+        samples = gen.generate_sample_structure(
+            8, timepoints=["t1"], data_type="single"
+        )
+        truth = gen.plan_the_plants(mags, samples, "single")
+        assert "witness_timepoint" not in truth
+        assert "first_seen_after_treatment" not in truth
+
+    def test_a_timepoint_named_like_the_witness_label_is_refused(self):
+        random.seed(3)
+        mags = [
+            gen.create_mag_structure(
+                f"MAG_{i:03d}", num_contigs=2, contig_length_range=(1200, 1500)
+            )
+            for i in (1, 2)
+        ]
+        samples = gen.generate_sample_structure(
+            16, timepoints=["pre", gen.WITNESS_TIMEPOINT], data_type="longitudinal"
+        )
+        with pytest.raises(ValueError, match=gen.WITNESS_TIMEPOINT):
+            gen.plan_the_plants(mags, samples, "longitudinal")
+
+    def test_a_group_named_like_the_witness_group_is_refused(self):
+        random.seed(3)
+        mags = [
+            gen.create_mag_structure(
+                f"MAG_{i:03d}", num_contigs=2, contig_length_range=(1200, 1500)
+            )
+            for i in (1, 2)
+        ]
+        samples = gen.generate_sample_structure(
+            16, groups=["control", gen.WITNESS_GROUP], data_type="longitudinal"
+        )
+        with pytest.raises(ValueError, match=gen.WITNESS_GROUP):
+            gen.plan_the_plants(mags, samples, "longitudinal")
+
+    def test_null_run_permutation_leaves_the_witnesses_alone(self, tmp_path):
+        """The tool that builds a null run swaps the two compared groups'
+        labels within matched pairs; it must accept the bundled sheet and
+        return the witness rows unchanged."""
+        from alleleflux.scripts.preprocessing.permute_metadata import permute_metadata
+
+        truth = gen.generate_dataset(
+            tmp_path / "ds",
+            data_type="longitudinal",
+            num_samples=16,
+            contig_length_range=(1200, 1500),
+            seed=11,
+        )
+        sheet = pd.read_csv(
+            tmp_path / "ds" / "metadata" / "sample_metadata.tsv", sep="\t", dtype=str
+        )
+        permuted = permute_metadata(
+            sheet,
+            unit="subjectID",
+            block="replicate",
+            seed=5,
+            swaps=1,
+            groups=[truth["groups"]["treatment"], truth["groups"]["control"]],
+        )
+        ids = [w["sample_id"] for w in truth["witness_timepoint"]["samples"]]
+        is_witness = sheet["sample_id"].isin(ids)
+        assert permuted[is_witness].equals(sheet[is_witness])
+        assert (permuted["group"] != sheet["group"]).sum() == 4  # one pair, 2 x 2 rows
+
+    def test_dataset_writes_the_witnesses_in_profile_mode_only(self, tmp_path):
+        import yaml
+
+        truth = gen.generate_dataset(
+            tmp_path / "ds",
+            data_type="longitudinal",
+            num_samples=16,
+            contig_length_range=(1200, 1500),
+            seed=11,
+        )
+        witness = truth["witness_timepoint"]
+        ids = [w["sample_id"] for w in witness["samples"]]
+        meta = pd.read_csv(
+            tmp_path / "ds" / "metadata" / "sample_metadata.tsv", sep="\t", dtype=str
+        )
+        assert len(meta) == 18
+        rows = meta[meta["sample_id"].isin(ids)]
+        assert list(rows["time"]) == [witness["label"]] * 2
+        assert list(rows["group"]) == [gen.WITNESS_GROUP] * 2
+        assert set(rows["collection_date"]) == {witness["collection_date"]}
+        for sample_id in ids:
+            folder = tmp_path / "ds" / "profiles" / sample_id
+            assert len(list(folder.glob("*_profiled.tsv.gz"))) == 2  # one per MAG
+        # The BAMs are simulated from the unmodified reference and carry no
+        # plant, so the BAM-mode sheet keeps to the compared samples.
+        bams = pd.read_csv(
+            tmp_path / "ds" / "metadata" / "sample_metadata_bams.tsv",
+            sep="\t",
+            dtype=str,
+        )
+        assert len(bams) == 16
+        assert not bams["sample_id"].isin(ids).any()
+        cfg = yaml.safe_load(
+            (tmp_path / "ds" / "config_generated_longitudinal.yml").read_text()
+        )
+        block = cfg["analysis"]["baseline_presence"]
+        assert block["pre_treatment_timepoints"] == ["pre"]

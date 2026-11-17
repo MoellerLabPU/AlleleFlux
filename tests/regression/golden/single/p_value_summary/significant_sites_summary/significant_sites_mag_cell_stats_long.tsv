@@ -1,6 +1,6 @@
 comparison	period	group_pair	test_type	group_analyzed	mag_id	n_total_sites	n_sig_p	n_sig_q	pct_sig_p	pct_sig_q	min_p_value	min_q_value
-t1-treatment_control	t1	treatment_control	CMH		MAG_002	2109	51	44	2.418207681365576	2.0862968231389285	2.7945728050165284e-29	7.008788594981453e-26
-t1-treatment_control	t1	treatment_control	CMH		MAG_001	2907	63	50	2.1671826625387	1.7199862401100792	1.824908378589785e-33	9.15374042700636e-30
+t1-treatment_control	t1	treatment_control	CMH		MAG_002	2109	51	44	2.418207681365576	2.0862968231389285	2.7945728050165284e-29	7.010185881383961e-26
+t1-treatment_control	t1	treatment_control	CMH		MAG_001	2908	63	50	2.1664374140302614	1.71939477303989	1.824908378589785e-33	9.155565335384949e-30
 t1-treatment_control	t1	treatment_control	two_sample_paired_Wilcoxon		MAG_001	2908	0	0	0.0	0.0	0.125	0.4796367112810707
 t1-treatment_control	t1	treatment_control	two_sample_paired_Wilcoxon		MAG_002	2109	0	0	0.0	0.0	0.125	0.4796367112810707
 t1-treatment_control	t1	treatment_control	two_sample_paired_tTest		MAG_002	2109	242	12	11.474632527264106	0.5689900426742532	1.952623468194997e-07	0.0003280066742385

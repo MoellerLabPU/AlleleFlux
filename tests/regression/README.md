@@ -39,11 +39,15 @@ run are tolerated.  Catches silent numerical drift and dropped outputs.
 
 **Planted facts** (`test_planted_truth.py`).  The data generator decided every
 significant site, the standing allele, the lone de novo allele, the block of
-three, the strain-swapped sample, the depth spikes and the hot gene up front
-and wrote them to `planted_truth.json` beside each dataset.  Eight tests read
+three, the allele first seen after treatment began (with its two witness
+samples at a timepoint that is in no comparison), the strain-swapped sample,
+the depth spikes and the hot gene up front and wrote them to
+`planted_truth.json` beside each dataset.  Nine tests read
 that card and look each fact up in the run's outputs: significant and rising
 in treatment; standing with the planted mouse named at baseline; de novo with
-every carrier absent before; one `block_event`; the swapped sample the only
+every carrier absent before; first seen after treatment began at the site,
+run and gene level, with the witness counts behind the label; one
+`block_event`; the swapped sample the only
 strain change; the spikes removed for exactly the spiked samples; the hot gene
 (one private de novo event per strain-keeping treatment mouse, none in
 control) the only gene of its genome with events and significant between the

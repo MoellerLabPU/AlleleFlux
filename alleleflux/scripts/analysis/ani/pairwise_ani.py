@@ -38,8 +38,9 @@ Worked example (a real run, verified 2026-08-27; identifiers anonymised)::
     alleleflux-pairwise-ani \\
         --mag MAG_A \\
         --cache_dir .../run/longitudinal/allele_freq_cache \\
-        --qc_files .../run/longitudinal/QC/QC_pre_end/MAG_A_QC.tsv \\
-                   .../run/longitudinal/QC/QC_pre_post/MAG_A_QC.tsv \\
+        --qc_files .../run/longitudinal/QC/QC_pre/MAG_A_QC.tsv \\
+                   .../run/longitudinal/QC/QC_end/MAG_A_QC.tsv \\
+                   .../run/longitudinal/QC/QC_post/MAG_A_QC.tsv \\
         --fasta .../reference.fa \\
         --mag_mapping .../mag_mapping.tsv \\
         --output_dir /tmp/ani_check

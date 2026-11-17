@@ -2053,11 +2053,12 @@ def site_depth_filter_params():
 
 
 def site_depth_filter_cli_args():
-    """The filter flags, identical on every CLI that reads profiles.
+    """The filter flags of ``alleleflux-cache-allele-freq``, as one string.
 
-    allele_freq_cache, pairwise_ani and baseline_presence all take the flags
-    ``add_site_depth_filter_args`` defines; building the string here, once,
-    is what keeps the cache and the ANI/baseline tables filtered identically.
+    The cache command is the only one that reads profiles after QC, so it is
+    the only one that takes the flags ``add_site_depth_filter_args`` defines.
+    Pairwise ANI, baseline presence and every other per-site consumer read the
+    cache it writes, which is what keeps them all filtered identically.
 
     Example: defaults -> ``"--site_depth 0 --site_ratio 3.0 --min_allele_reads 0"``;
     ``enabled: false`` adds ``--disable_site_depth_filter`` in front and

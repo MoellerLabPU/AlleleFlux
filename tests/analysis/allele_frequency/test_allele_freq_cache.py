@@ -91,7 +91,7 @@ def _run(monkeypatch, qc, out, *extra, data_type="longitudinal"):
         "alleleflux-cache-allele-freq",
         "--magID",
         "MAG",
-        "--qc_files",
+        "--qc_file",
         qc,
         "--data_type",
         data_type,
@@ -228,3 +228,25 @@ class TestStillAnError:
 def test_empty_cache_table_refuses_an_unknown_data_type():
     with pytest.raises(ValueError, match="data_type"):
         common.empty_cache_table("paired")
+
+
+def test_exactly_one_qc_table_per_call(tmp_path, monkeypatch):
+    """A cache is one genome at one timepoint, so the command reads ONE QC
+    table.  Two paths after the flag are refused, not silently cut to the
+    first: the samples of the second table would be missing from the cache
+    without any message."""
+    profile = _write_profile(tmp_path / "s1_MAG_profiled.tsv.gz")
+    first = _write_qc(tmp_path / "first_QC.tsv", [("s1", profile, True)])
+    second = _write_qc(tmp_path / "second_QC.tsv", [("s1", profile, True)])
+    out = tmp_path / "MAG_t0_allele_frequency.parquet"
+    argv = ["alleleflux-cache-allele-freq", "--magID", "MAG"]
+    argv += ["--qc_file", first, second]  # two tables for one cache
+    argv += ["--data_type", "longitudinal", "--timepoint", "t0"]
+    argv += ["--output_path", str(out), "--cpus", "1"]
+    monkeypatch.setattr("sys.argv", argv)
+
+    with pytest.raises(SystemExit) as stop:  # argparse: unrecognized argument
+        cli.main()
+
+    assert stop.value.code == 2
+    assert not out.exists()

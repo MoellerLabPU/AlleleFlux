@@ -121,7 +121,7 @@ class TestCacheCliSidecar:
                 "alleleflux-cache-allele-freq",
                 "--magID",
                 "MAG",
-                "--qc_files",
+                "--qc_file",
                 str(qc),
                 "--timepoint",
                 "t0",

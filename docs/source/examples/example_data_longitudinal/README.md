@@ -1,12 +1,13 @@
 # Generated AlleleFlux Test Data
 
-Seed: 42 | MAGs: 2 | Samples: 16 (longitudinal)
+Seed: 42 | MAGs: 2 | Samples: 16 (longitudinal) + 2 of group `other` at the witness timepoint `mid` (profiles only)
 
 All paths in the configs and metadata are RELATIVE to this directory.
 `cd` into this directory before running the pipeline.
 
 `planted_truth.json` lists every fact planted in the profiles
-(significant sites, standing / de novo alleles, the strain-swapped
+(significant sites, standing / de novo alleles, the allele first seen
+after treatment began and its witness samples, the strain-swapped
 sample, the depth spikes, the hot gene); the regression test asserts
 them.
 

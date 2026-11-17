@@ -17,6 +17,8 @@ The cage is the replicate throughout: mice in a cage share a microbiome, so two 
 2. Each candidate is judged **per cage** with the site-level rules, reused as they are: a later-timepoint mouse of the cage must carry the letter by the presence rule (otherwise `not_present_later`); the letter must be absent from every covered baseline sample under `baseline_scope` (`standing_variation` when present, `de_novo_below_detection` when a whisper of it was there, `baseline_not_covered` when no baseline sample was deep enough); de novo alleles within `cluster_window_bp` of one another **in the same cage** form a block (`block_event`: one imported or recombined chunk, never independent mutations; the window never spans two cages); under `strain_gate: carrier` the cage's carriers are looked up in the strain-turnover table (`new_strain` when more than half of them changed strain, `strain_undetermined` when fewer than `min_determined_carriers` have a verdict).
 3. **Counted events** are `de_novo` and `de_novo_below_detection`, plus `block_event` rows when `block_rule: once`.
 
+Under `baseline_scope: cohort` the baseline samples are the same witnesses the site-level analysis reads: the workflow builds their allele-frequency caches (a zero-row cache for a genome with no QC-passing sample at a witness timepoint) and passes this command the same witness lists; see [What `cohort` builds](strain_turnover_analysis.md#which-samples-are-the-baseline-baseline_scope). When the run names its pre-treatment timepoints (`analysis.baseline_presence.pre_treatment_timepoints`), a rise whose carrying witnesses were all sampled after treatment began reads `first_seen_after_treatment_began` in the `origin` column instead of `standing_variation`; see [Three labels](strain_turnover_analysis.md#three-labels-pre_treatment_timepoints). That label is reported only. It is never an event, so the gene counts, the cage counts and both tests are identical with and without the list.
+
 ## The denominator: readable bases, never gene length
 
 A gene read over 300 of its 1,200 bases was searched over 300. A base is readable in a cage when some mouse of the cage that was sampled at both timepoints has at least `min_cov` reads there at **both** timepoints (the same `min_cov` as the presence rule). The per-gene and genome-wide readable base counts are the denominators of both tests. A cage made only of mice sampled once was never searched and contributes nothing, rather than "zero mutations in N bases". `min_gene_covered_fraction` (default 0.0) lets a thin reading of a gene keep that cage out of the gene's test; the covered fraction is reported either way.
@@ -72,6 +74,8 @@ analysis:
     min_determined_carriers: 1
   baseline_presence:          # the shared de novo rules
     baseline_scope: "cohort"
+    cohort_witnesses: "sheet"       # who may testify under cohort: sheet | comparisons
+    pre_treatment_timepoints: []    # e.g. ["pre"]: reports first_seen_after_treatment_began
     cluster_window_bp: 1000
     max_de_novo_neighbours: 0
     strain_gate: "carrier"    # needs use_strain_turnover (and use_pairwise_ani); or none
