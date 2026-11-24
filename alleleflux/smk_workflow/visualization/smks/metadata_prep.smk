@@ -39,7 +39,6 @@ rule clean_metadata:
             "alleleflux-prepare-metadata",
             f"--metadata-in {input.tsv_in}",
             f"--metadata-out {output.tsv_out}",
-            f"--base-profile-dir '{params.run_params['base_profile_dir']}'"
         ]
 
         # Add columns with defaults

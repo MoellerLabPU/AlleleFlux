@@ -1,0 +1,9 @@
+MAG_ID	group	transition	metric	n_mice_with_call	n_mice_undetermined	n_mice_changed	majority_mice_changed	any_mouse_changed	all_mice_changed	no_mouse_changed	strain_status	n_replicates_with_call	n_replicates_changed	majority_replicates_changed	all_replicates_changed	strain_status_replicates	min_voters	vote_rule	tie_rule	replicate_rule
+MAG_001	control	pre_post	strain_replacement	4	0	0	False	False	False	True	not_replaced	4	0	False	False	not_replaced	2	majority	not_replaced	average
+MAG_001	treatment	pre_post	strain_replacement	4	0	1	False	True	False	False	not_replaced	4	1	False	False	not_replaced	2	majority	not_replaced	average
+MAG_002	control	pre_post	strain_replacement	4	0	0	False	False	False	True	not_replaced	4	0	False	False	not_replaced	2	majority	not_replaced	average
+MAG_002	treatment	pre_post	strain_replacement	4	0	1	False	True	False	False	not_replaced	4	1	False	False	not_replaced	2	majority	not_replaced	average
+MAG_001	control	pre_post	dominant_strain_change	4	0	0	False	False	False	True	not_replaced	4	0	False	False	not_replaced	2	majority	not_replaced	average
+MAG_001	treatment	pre_post	dominant_strain_change	4	0	1	False	True	False	False	not_replaced	4	1	False	False	not_replaced	2	majority	not_replaced	average
+MAG_002	control	pre_post	dominant_strain_change	4	0	0	False	False	False	True	not_replaced	4	0	False	False	not_replaced	2	majority	not_replaced	average
+MAG_002	treatment	pre_post	dominant_strain_change	4	0	1	False	True	False	False	not_replaced	4	1	False	False	not_replaced	2	majority	not_replaced	average

@@ -29,8 +29,8 @@ input:
  analysis:
    data_type: longitudinal
    timepoints_combinations:
-     - timepoint: [pre, during]       # Compare pre → during treatment
-       focus: during                  # Focus on during-treatment state
+     - earlier: pre       # Compare pre → during treatment
+       later: during  # Focus on during-treatment state
    groups_combinations:
      - [antibiotic, control]
    use_lmm: true
@@ -58,8 +58,8 @@ input:
 For the post-treatment phase, create a second config file with:
 ```yaml
 timepoints_combinations:
-  - timepoint: [during, post]      # Compare during → post treatment
-    focus: post                     # Focus on post-treatment state
+  - earlier: during      # Compare during → post treatment
+    later: post  # Focus on post-treatment state
 ```
 
 **Expected command**:
@@ -115,8 +115,8 @@ quality_control:
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [baseline, week1]
-      focus: week1                 # Focus on initial dietary response
+    - earlier: baseline
+      later: week1  # Focus on initial dietary response
   groups_combinations:
     - [highfat, standard]
   use_lmm: true
@@ -153,8 +153,8 @@ output:
   root_dir: output/diet_adaptation/week1_week4/
 
 timepoints_combinations:
-  - timepoint: [week1, week4]      # Compare week1 → week4 adaptation
-    focus: week4                     # Focus on steady-state adaptations
+  - earlier: week1      # Compare week1 → week4 adaptation
+    later: week4  # Focus on steady-state adaptations
 ```
 
 **Output files to examine**:
@@ -200,8 +200,8 @@ quality_control:
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [week0, week4]
-      focus: week4                 # Compare early → mid-stage genotype effects
+    - earlier: week0
+      later: week4  # Compare early → mid-stage genotype effects
   groups_combinations:
     - [wildtype, knockout]
   use_lmm: true                    # Critical: captures mouse-level random effects
@@ -238,8 +238,8 @@ output:
   root_dir: output/host_microbe/week4_week8/
 
 timepoints_combinations:
-  - timepoint: [week4, week8]
-    focus: week8                   # Compare mid-stage → late-stage genotype effects
+  - earlier: week4
+    later: week8  # Compare mid-stage → late-stage genotype effects
 ```
 
 **Output files to examine**:
@@ -285,8 +285,8 @@ quality_control:
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [month0, month3]
-      focus: month3
+    - earlier: month0
+      later: month3
   groups_combinations:
     - [contaminated, pristine]
   use_lmm: false                   # Site effects complex; pair-wise comparisons instead
@@ -323,8 +323,8 @@ output:
   root_dir: output/environmental/month3_month6/
 
 timepoints_combinations:
-  - timepoint: [month3, month6]
-    focus: month6                  # Track sustained adaptation to contamination
+  - earlier: month3
+    later: month6  # Track sustained adaptation to contamination
 ```
 
 **Output files to examine**:
@@ -370,8 +370,8 @@ quality_control:
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [pre_fmt, month3_post]
-      focus: month3_post           # Final steady state
+    - earlier: pre_fmt
+      later: month3_post  # Final steady state
   groups_combinations:
     - [recipient, donor]           # Compare recipient+donor evolution
   use_lmm: true                    # Critical: each recipient is unique host environment
@@ -408,22 +408,22 @@ For detailed temporal resolution of early establishment and late adaptation phas
 output:
   root_dir: output/fmt_adaptation/pre_fmt_day1_post/
 timepoints_combinations:
-  - timepoint: [pre_fmt, day1_post]
-    focus: day1_post
+  - earlier: pre_fmt
+    later: day1_post
 
 # Mid phase: establishment
 output:
   root_dir: output/fmt_adaptation/day1_post_week1_post/
 timepoints_combinations:
-  - timepoint: [day1_post, week1_post]
-    focus: week1_post
+  - earlier: day1_post
+    later: week1_post
 
 # Late phase: stabilization
 output:
   root_dir: output/fmt_adaptation/week1_post_month3_post/
 timepoints_combinations:
-  - timepoint: [week1_post, month3_post]
-    focus: month3_post
+  - earlier: week1_post
+    later: month3_post
 ```
 
 **Output files to examine**:
@@ -473,8 +473,8 @@ quality_control:
 analysis:
   data_type: longitudinal
   timepoints_combinations:
-    - timepoint: [gen0, gen200]
-      focus: gen200                # Compare ancestral vs. final evolved state
+    - earlier: gen0
+      later: gen200  # Compare ancestral vs. final evolved state
   groups_combinations:
     - [high_temp, standard]
   use_lmm: true                    # Captures bioreactor-specific effects
@@ -511,15 +511,15 @@ For resolution of evolutionary kinetics across generational transitions, create 
 output:
   root_dir: output/bioreactor_evolution/gen0_gen100/
 timepoints_combinations:
-  - timepoint: [gen0, gen100]
-    focus: gen100
+  - earlier: gen0
+    later: gen100
 
 # Mid-to-late evolution
 output:
   root_dir: output/bioreactor_evolution/gen100_gen200/
 timepoints_combinations:
-  - timepoint: [gen100, gen200]
-    focus: gen200
+  - earlier: gen100
+    later: gen200
 ```
 
 **Output files to examine**:

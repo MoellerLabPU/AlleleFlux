@@ -30,7 +30,9 @@ source_suffix = {
 
 # Templates
 templates_path = ["_templates"]
-exclude_patterns = []
+# The bundled example datasets are data folders, not documentation pages: their
+# generated README files and pipeline outputs are not built into the site.
+exclude_patterns = ["examples/example_data_*"]
 
 # HTML output options
 html_theme = "furo"

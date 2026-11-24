@@ -42,12 +42,13 @@ checkpoint terminal_analysis:
     input:
         metadata = config["metadata"],
         sig_sites = config["significant_sites_file"],
-        profile_dir = config["profile_dir"], 
     output:
         # The script generates a summary file. We use this as the target.
         summary = os.path.join(config["output_dir"], "terminal_nucleotide","terminal_nucleotide_analysis_summary.tsv"),
     params:
         out_dir = directory(os.path.join(config["output_dir"], "terminal_nucleotide")),
+        # the run's allele-frequency cache: the single per-site source after QC
+        cache_dir = config["cache_dir"],
         group = config["analysis_params"]["group"],
         time = config["analysis_params"]["timepoint"],
         p_col = config["analysis_params"].get("p_value_column", "q_value"),
@@ -63,7 +64,7 @@ checkpoint terminal_analysis:
         """
         alleleflux-terminal-nucleotide \
             --significant_sites {input.sig_sites} \
-            --profile_dir {input.profile_dir} \
+            --cache_dir {params.cache_dir} \
             --group {params.group} \
             --timepoint {params.time} \
             --metadata {input.metadata} \
@@ -89,6 +90,7 @@ rule track_allele_frequencies:
         long = os.path.join(config["output_dir"], "track_freqs" , "{mag_id}_frequency_table.long.tsv")
     params:
         out_dir = os.path.join(config["output_dir"], "track_freqs"),
+        cache_dir = config["cache_dir"],
         mag_id = "{mag_id}",
         anchor_col = config["tracking_params"]["anchor_column"],
         min_cov = config["tracking_params"]["min_cov_per_site"]
@@ -100,6 +102,7 @@ rule track_allele_frequencies:
         alleleflux-track-alleles \
             --mag-id {params.mag_id} \
             --anchor-file {input.anchor_file} \
+            --cache-dir {params.cache_dir} \
             --metadata {input.metadata} \
             --output-dir {params.out_dir} \
             --anchor-column {params.anchor_col} \

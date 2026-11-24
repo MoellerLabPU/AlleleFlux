@@ -112,8 +112,12 @@ def run_paired_tests(
             # --- Test 1: Paired test on raw values ---
             # Pre-emptively check if all paired differences are zero.
             # This avoids errors from scipy functions and correctly reflects no difference.
+            # atol 1e-6: the allele-frequency cache stores float32, whose rounding noise
+            # is ~1e-8, so a 1e-8 window can let "flat" data through and t-test the
+            # noise; 1e-6 is still 1,000x below the smallest real change (1 read in a
+            # 1,000x sample).
             d = data1 - data2
-            if np.allclose(d, 0, atol=1e-8, rtol=0):
+            if np.allclose(d, 0, atol=1e-6, rtol=0):
                 p_values[f"{nucleotide}_p_value_tTest"] = (
                     1.0  # Paired t-test outputs NaN if both groups have identical values
                 )
@@ -145,7 +149,7 @@ def run_paired_tests(
                 abs_data1 = np.abs(data1)
                 abs_data2 = np.abs(data2)
                 d = abs_data1 - abs_data2
-                if np.allclose(d, 0, atol=1e-8, rtol=0):
+                if np.allclose(d, 0, atol=1e-6, rtol=0):  # same window as above
                     p_values[f"{nucleotide}_p_value_tTest_abs"] = 1.0
                     p_values[f"{nucleotide}_p_value_Wilcoxon_abs"] = 1.0
                     notes += f"{nucleotide}: absolute values identical in both groups, p-value for both abs tests is set to 1; "

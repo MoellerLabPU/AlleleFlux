@@ -27,76 +27,13 @@ from typing import Optional
 import pandas as pd
 from tqdm import tqdm
 
+from alleleflux.scripts.utilities.cache_io import cache_samples, load_cache_sites
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 
 # Global constant for nucleotide symbols
 NUCLEOTIDES = ["A", "C", "G", "T"]
-
-# Standard dtypes for profile files
-PROFILE_DTYPES = {
-    "contig": str,
-    "position": int,
-    "total_coverage": float,
-    **{nuc: "int32" for nuc in NUCLEOTIDES},
-}
-
-
-def find_profile_files(profile_dir, sample_ids, mag_ids):
-    """
-    Find profile files in subdirectories by sample ID and MAG ID.
-
-    Parameters:
-    -----------
-    profile_dir : str
-        Root directory containing profile subdirectories by sample ID
-    sample_ids : list
-        List of sample IDs to look for
-    mag_ids : list
-        List of MAG IDs to filter profile files by. If None, uses wildcard pattern.
-
-    Returns:
-    --------
-    dict : Dictionary mapping sample_id to list of profile file paths
-    """
-    profile_files = {}
-    profile_dir_path = Path(profile_dir)
-
-    if not profile_dir_path.exists():
-        raise FileNotFoundError(f"Profile directory not found: {profile_dir}")
-
-    logger.info(
-        f"Searching for profile files for {len(sample_ids)} sample(s) and {len(mag_ids)} MAG(s)"
-    )
-
-    # Check if profile_dir contains subdirectories (new structure) or files directly
-    subdirs = [d for d in profile_dir_path.iterdir() if d.is_dir()]
-
-    if subdirs:
-        # New structure: subdirectories by sample_id
-        logger.info(f"Found {len(subdirs)} subdirectories in profile directory")
-        for subdir in subdirs:
-            sample_id = subdir.name
-            if sample_id in sample_ids:
-                for mag_id in mag_ids:
-                    base = f"{sample_id}_{mag_id}_profiled.tsv"
-                    candidates = list(subdir.glob(base)) + list(
-                        subdir.glob(base + ".gz")
-                    )
-                    if candidates:
-                        profile_files.setdefault(sample_id, []).extend(
-                            map(str, candidates)
-                        )
-    # Log summary
-    total_files_found = sum(len(files) for files in profile_files.values())
-    samples_with_files = len(profile_files)
-
-    logger.info(
-        f"Profile file search complete: found {total_files_found} files for {samples_with_files}/{len(sample_ids)} samples"
-    )
-
-    return profile_files
 
 
 def get_terminal_samples(metadata_file, group, timepoint):
@@ -405,12 +342,13 @@ def calculate_per_subject_frequency_changes(
 
 def worker_wrapper(
     mag_data,
-    profile_files,
+    cache_dir,
     sample_ids,
+    timepoint,
     p_value_column,
     output_dir,
-    initial_profile_files=None,
     initial_sample_ids=None,
+    initial_timepoint=None,
     subject_mapping=None,
 ):
     """
@@ -422,18 +360,20 @@ def worker_wrapper(
     -----------
     mag_data : tuple
         Tuple of (mag_id, mag_sites_dataframe)
-    profile_files : dict
-        Dictionary mapping sample_id to profile file paths (terminal timepoint)
+    cache_dir : str
+        The run's allele_freq_cache/ directory (the single per-site source after QC)
     sample_ids : list
         List of sample IDs to process (terminal timepoint)
+    timepoint : str
+        Terminal timepoint label (names the cache file)
     p_value_column : str
         Column name for p-values
     output_dir : str
         Output directory
-    initial_profile_files : dict, optional
-        Dictionary mapping sample_id to profile file paths (initial timepoint)
     initial_sample_ids : list, optional
         List of sample IDs for initial timepoint
+    initial_timepoint : str, optional
+        Initial timepoint label (names its cache file)
     subject_mapping : dict, optional
         Mapping of subject_id to {'terminal': sample_id, 'initial': sample_id}
 
@@ -443,14 +383,15 @@ def worker_wrapper(
     """
     mag_id, mag_sites = mag_data
     return process_single_mag(
-        mag_id=mag_id,
-        mag_sites=mag_sites,
-        profile_files=profile_files,
-        sample_ids=sample_ids,
-        p_value_column=p_value_column,
-        output_dir=output_dir,
-        initial_profile_files=initial_profile_files,
+        mag_id,
+        mag_sites,
+        cache_dir,
+        sample_ids,
+        timepoint,
+        p_value_column,
+        output_dir,
         initial_sample_ids=initial_sample_ids,
+        initial_timepoint=initial_timepoint,
         subject_mapping=subject_mapping,
     )
 
@@ -461,66 +402,49 @@ def worker_wrapper(
 
 
 def load_profile_cache(
-    profile_files_dict: dict,
+    cache_dir: str,
     sample_id_list: list,
     mag_id: str,
+    timepoint: str,
+    sites: pd.DataFrame,
     timepoint_label: str,
 ) -> dict:
-    """
-    Load and cache profile data for a set of samples.
+    """Per-sample count tables at the significant sites, from the allele-frequency cache.
 
-    Parameters:
-    -----------
-    profile_files_dict : dict
-        Dictionary mapping sample_id to list of profile file paths
-    sample_id_list : list
-        List of sample IDs to load
-    mag_id : str
-        MAG identifier to filter profile files
-    timepoint_label : str
-        Label for logging (e.g., "terminal", "initial")
+    The cache is the single per-site source after QC (site-filtered, QC-passing
+    samples only).  Returns ``{sample_id: frame indexed by (contig, position)}``
+    with ``total_coverage`` and the four base counts, for the samples of
+    ``sample_id_list`` that have rows in ``mag_id``'s cache at ``timepoint``.
+    A sample with no rows there did not pass QC for the MAG: it is logged and
+    left out (the site loop then counts it as missing, as before).
 
-    Returns:
-    --------
-    dict : Dictionary mapping sample_id to indexed DataFrame
+    Example: two samples, one site c1:100 -> ``{"s1": frame with one row (c1, 100)}``
+    for each sample that has the position; a sample lacking the position has an
+    empty frame, and ``.loc`` raises KeyError for it, which the caller handles.
     """
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        [timepoint],
+        sites=sites[["contig", "position"]].drop_duplicates(),
+        sample_ids=sample_id_list,
+        columns=["total_coverage", *NUCLEOTIDES],
+    )
+    roster = set(cache_samples(cache_dir, mag_id, timepoint))
     cache = {}
     for sample_id in sample_id_list:
-        if sample_id not in profile_files_dict:
+        if sample_id not in roster:
             logger.warning(
-                f"No profile files found for {timepoint_label} sample {sample_id}"
+                f"{timepoint_label} sample {sample_id} has no rows in the {mag_id} cache "
+                f"at {timepoint} (did not pass QC for this MAG)"
             )
             continue
-
-        # Filter profile files for this specific MAG ID
-        mag_specific_files = [
-            f for f in profile_files_dict[sample_id] if f"_{mag_id}_profiled.tsv" in f
-        ]
-
-        if len(mag_specific_files) == 0:
-            logger.warning(
-                f"No profile file found for {timepoint_label} sample {sample_id} and MAG {mag_id}"
-            )
-            continue
-        elif len(mag_specific_files) > 1:
-            raise ValueError(
-                f"Multiple profile files found for {timepoint_label} sample {sample_id} "
-                f"and MAG {mag_id}: {mag_specific_files}"
-            )
-
-        profile_file = mag_specific_files[0]
-        profile_data = pd.read_csv(
-            profile_file,
-            sep="\t",
-            dtype=PROFILE_DTYPES,
-            usecols=PROFILE_DTYPES.keys(),
-        )
-        # Filter for positions with total_coverage > 0
-        profile_data = profile_data[profile_data["total_coverage"] > 0]
-        # Index by (contig, position) for fast lookup
-        profile_data = profile_data.set_index(["contig", "position"])
-        cache[sample_id] = profile_data
-
+        # zero-coverage rows (hand-made inputs; the profiler never writes them) are
+        # not usable positions, as before
+        own = rows[(rows["sample_id"] == sample_id) & (rows["total_coverage"] > 0)]
+        cache[sample_id] = own[
+            ["contig", "position", "total_coverage", *NUCLEOTIDES]
+        ].set_index(["contig", "position"])
     return cache
 
 
@@ -675,12 +599,13 @@ def split_count_nucleotides(series: pd.Series) -> dict:
 def process_single_mag(
     mag_id,
     mag_sites,
-    profile_files,
+    cache_dir,
     sample_ids,
+    timepoint,
     p_value_column,
     output_dir,
-    initial_profile_files=None,
     initial_sample_ids=None,
+    initial_timepoint=None,
     subject_mapping=None,
 ):
     """
@@ -692,18 +617,20 @@ def process_single_mag(
         MAG identifier
     mag_sites : pd.DataFrame
         Sites for this MAG
-    profile_files : dict
-        Dictionary mapping sample_id to profile file paths (terminal timepoint)
+    cache_dir : str
+        The run's allele_freq_cache/ directory (the single per-site source after QC)
     sample_ids : list
         List of sample IDs to process (terminal timepoint)
+    timepoint : str
+        Terminal timepoint label (names the cache file)
     p_value_column : str
         Column name for p-values
     output_dir : str
         Output directory
-    initial_profile_files : dict, optional
-        Dictionary mapping sample_id to profile file paths (initial timepoint)
     initial_sample_ids : list, optional
         List of sample IDs for initial timepoint
+    initial_timepoint : str, optional
+        Initial timepoint label (names its cache file)
     subject_mapping : dict, optional
         Mapping of subject_id to {'terminal': sample_id, 'initial': sample_id}
 
@@ -714,12 +641,18 @@ def process_single_mag(
     use_freq_change = subject_mapping is not None and len(subject_mapping) > 0
 
     # Load profile caches
-    terminal_cache = load_profile_cache(profile_files, sample_ids, mag_id, "terminal")
-
+    sites = (
+        mag_sites if len(mag_sites) else pd.DataFrame(columns=["contig", "position"])
+    )
+    terminal_cache = (
+        load_profile_cache(cache_dir, sample_ids, mag_id, timepoint, sites, "terminal")
+        if len(sites)
+        else {}
+    )
     initial_cache = {}
-    if use_freq_change and initial_profile_files and initial_sample_ids:
+    if use_freq_change and initial_sample_ids and initial_timepoint and len(sites):
         initial_cache = load_profile_cache(
-            initial_profile_files, initial_sample_ids, mag_id, "initial"
+            cache_dir, initial_sample_ids, mag_id, initial_timepoint, sites, "initial"
         )
 
     # Process each significant site
@@ -853,7 +786,7 @@ def process_single_mag(
         "intermediate_output": (
             str(intermediate_output_file) if not intermediate_df.empty else None
         ),
-        "samples_processed": len(sample_ids),
+        "samples_processed": len(terminal_cache),
     }
 
     if use_freq_change:
@@ -880,11 +813,9 @@ def main():
     )
 
     parser.add_argument(
-        "--profile_dir",
-        help="Directory containing nucleotide frequency profiles for each sample (organized in subdirectories by sample_id)",
-        type=str,
+        "--cache_dir",
         required=True,
-        metavar="directory",
+        help="The run's allele_freq_cache/ directory (the single per-site source after QC)",
     )
 
     parser.add_argument(
@@ -1005,8 +936,8 @@ def main():
         if not Path(file_path).exists():
             raise FileNotFoundError(f"Input file not found: {file_path}")
 
-    if not Path(args.profile_dir).exists():
-        raise FileNotFoundError(f"Profile directory not found: {args.profile_dir}")
+    if not Path(args.cache_dir).exists():
+        raise FileNotFoundError(f"Cache directory not found: {args.cache_dir}")
 
     # Create output directory
     output_path = Path(args.output)
@@ -1088,7 +1019,6 @@ def main():
 
     # Get initial timepoint samples and subject mapping if frequency change analysis is requested
     initial_samples = None
-    initial_profile_files = None
     subject_mapping = None
     use_freq_change = args.initial_timepoint is not None
 
@@ -1110,25 +1040,6 @@ def main():
     # Find profile files for specific MAG IDs from significant sites
     mag_groups = significant_sites.groupby("mag_id")
     mag_ids = list(mag_groups.groups.keys())
-    profile_files = find_profile_files(args.profile_dir, terminal_samples, mag_ids)
-
-    if not profile_files:
-        raise ValueError(
-            f"No profile files found for terminal samples in {args.profile_dir}"
-        )
-
-    # Find profile files for initial timepoint samples
-    if use_freq_change:
-        initial_profile_files = find_profile_files(
-            args.profile_dir, initial_samples, mag_ids
-        )
-        if not initial_profile_files:
-            raise ValueError(
-                f"No profile files found for initial timepoint samples in {args.profile_dir}"
-            )
-
-    # Optimize CPU usage: use minimum of specified CPUs and number of MAGs
-    # to avoid wasting resources when there are fewer MAGs than CPUs
     effective_cpus = min(args.cpus, len(mag_ids))
 
     logger.info(
@@ -1147,12 +1058,13 @@ def main():
         # This ensures the worker is picklable on macOS/Windows (spawn start method)
         func = partial(
             worker_wrapper,
-            profile_files=profile_files,
+            cache_dir=str(args.cache_dir),
             sample_ids=terminal_samples,
+            timepoint=args.timepoint,
             p_value_column=args.p_value_column,
             output_dir=args.output,
-            initial_profile_files=initial_profile_files,
             initial_sample_ids=initial_samples,
+            initial_timepoint=args.initial_timepoint,
             subject_mapping=subject_mapping,
         )
 

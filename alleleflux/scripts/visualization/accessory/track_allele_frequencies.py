@@ -6,9 +6,10 @@ This script takes an "anchor file" (e.g., the output from the
 terminal_nucleotide_analysis.py script) which defines the allele of interest
 for each genomic position.
 
-It then scans the profile files for *all* samples (as defined in the
-metadata) and calculates the frequency of that specific anchor allele
-in every sample.
+It then reads the allele-frequency cache (the single per-site source after QC:
+site-filtered, QC-passing samples only) at the anchor sites, one cache file per
+timepoint, and calculates the frequency of that specific anchor allele in every
+sample listed in the metadata.
 
 This produces a "wide-form" table (sites x samples) and a long-form table that is "tidy"
 and ready for analysis in R, with one row per site-allele combination.
@@ -17,13 +18,13 @@ and ready for analysis in R, with one row per site-allele combination.
 import argparse
 import logging
 import multiprocessing
-from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from alleleflux.scripts.utilities.cache_io import cache_samples, load_cache_sites
 from alleleflux.scripts.utilities.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,6 @@ def load_and_validate_metadata(metadata_path):
     # Validate required metadata columns
     required_meta_cols = [
         "sample_id",
-        "sample_profile_dir",
         "group",
         "time",
         "subjectID",
@@ -147,143 +147,127 @@ def load_and_prepare_anchor_sites(anchor_file_path, mag_id, anchor_column):
     return final_anchor_info_df, anchor_dict
 
 
-def process_single_sample(sample_data, anchor_dict, mag_id, min_cov_per_site):
-    """Worker function to process a single sample's profile file.
+def load_timepoint_rows(job: tuple) -> tuple[str, pd.DataFrame, set]:
+    """Worker: one timepoint's cache file -> anchor-site rows of every sample at it.
 
-    For a given sample, this function reads its profile file and calculates
-    the frequency of all specified anchor alleles.
-
-    Parameters:
-    -----------
-    sample_data : tuple
-        A tuple containing (sample_id, sample_profile_dir) from the metadata.
-    anchor_dict : dict
-        A dictionary mapping (contig, position) -> list of anchor_alleles to check.
-    mag_id : str
-        The MAG ID we are processing, used to construct the profile file path.
-
-    Returns:
-    --------
-    tuple : (sample_id, pd.Series)
-        A tuple containing the sample_id and a pandas Series where the
-        index is a MultiIndex (contig, position, anchor_allele) and
-        the values are the frequencies. Returns (sample_id, None) on failure.
+    ONE scan of the file serves every sample at that timepoint (a scan is
+    ~1 min for a 1 GB file, so scanning per sample would multiply that by the
+    roster).  ``job`` = (timepoint, sample_ids, sites, mag_id, cache_dir) where
+    ``sites`` has ``contig, position``.  Returns ``(timepoint, rows, roster)``:
+    the matching rows (all requested samples, anchor sites only) and the set of
+    sample ids the file holds at all, so "sample never passed QC for this MAG"
+    can be told apart from "sample has no row at these sites".
     """
-    sample_id, sample_profile_dir = sample_data
-    logger.debug(f"Starting processing for sample: {sample_id}")
+    timepoint, sample_ids, sites, mag_id, cache_dir = job
+    rows = load_cache_sites(
+        cache_dir,
+        mag_id,
+        [timepoint],
+        sites=sites,
+        sample_ids=sample_ids,
+        columns=["total_coverage", *NUCLEOTIDES],
+    )
+    return timepoint, rows, set(cache_samples(cache_dir, mag_id, timepoint))
 
-    # Construct the profile path
-    base_path = Path(sample_profile_dir) / f"{sample_id}_{mag_id}_profiled.tsv"
-    # Use with_name to append .gz safely
-    profile_path_gz = base_path.with_name(base_path.name + ".gz")
 
-    if profile_path_gz.exists():
-        profile_path = profile_path_gz
-    elif base_path.exists():
-        profile_path = base_path
-    else:
+def process_single_sample(
+    sample_id: str,
+    rows: pd.DataFrame,
+    in_cache: bool,
+    anchor_dict: dict,
+    min_cov_per_site: int,
+):
+    """One sample's anchor-allele frequencies from its already-loaded cache rows.
+
+    ``rows`` are this sample's anchor-site rows (from ``load_timepoint_rows``);
+    ``in_cache`` says whether the sample has ANY rows in the MAG's cache file.  A
+    site the sample has no row for, or covers below ``min_cov_per_site``, gives
+    NaN; a sample with no rows at all (it did not pass QC for the MAG) gives
+    ``(sample_id, None)``.
+
+    Returns ``(sample_id, pd.Series)`` indexed by (contig, position, anchor_allele).
+
+    Example: anchor c1:0 alleles A and C, cache row A=8, C=2 -> A 0.8, C 0.2.
+    """
+    if rows.empty and not in_cache:
         logger.warning(
-            f"Profile file not found for {sample_id} and {mag_id}. "
-            f"Checked: {profile_path_gz} and {base_path}"
+            f"Sample {sample_id} has no rows in the cache for this MAG "
+            f"(did not pass QC for it)."
         )
         return sample_id, None
-
-    # Define dtypes for efficient profile file reading
-    profile_dtypes = {
-        "contig": str,
-        "position": int,
-        "total_coverage": float,
-        **{nuc: "int32" for nuc in NUCLEOTIDES},
-    }
-
-    # Load the profile file for this sample
-    profile_df = pd.read_csv(
-        profile_path,
-        sep="\t",
-        dtype=profile_dtypes,
-        usecols=list(profile_dtypes.keys()),
-        compression="infer",  # Explicitly set to clarify intent
+    # Below the per-site depth floor the frequency is not reported (NaN), as before.
+    profile_df = rows[rows["total_coverage"] > min_cov_per_site - 1].set_index(
+        ["contig", "position"]
     )
-
-    # Filter out sites with coverage below minimum threshold and set the index for fast lookup
-    profile_df = profile_df[profile_df["total_coverage"] > min_cov_per_site - 1]
-    profile_df = profile_df.set_index(["contig", "position"])
-    if not profile_df.index.is_unique:
-        raise ValueError(
-            f"Profile file for {sample_id} and {mag_id} has duplicate (contig, position) entries."
-        )
-    # This dictionary will store the final frequency for each site
     results = {}
-
-    # Iterate through all the sites we need to track
     for (contig, position), anchor_alleles in anchor_dict.items():
         try:
-            # 1. Attempt to find the site
             site_row = profile_df.loc[(contig, position)]
             total_coverage = site_row["total_coverage"]
-
         except KeyError:
-            # 2. Site is missing (e.g., 0 coverage). This is NOT an error.
-            # Set all alleles for this site to NaN.
             logger.debug(
                 f"Site {(contig, position)} not found in sample {sample_id}. Setting to NaN."
             )
             for allele in anchor_alleles:
                 results[(contig, position, allele)] = np.nan
-            continue  # Move to the next site in the loop
-
-        # 3. Site was found. Now, process alleles.
-        # This is intentionally NOT in the try-except block.
-        # If an 'anchor_allele' is invalid (e.g., 'N'), we WANT this
-        # to raise a KeyError and fail the worker, as per user's request.
+            continue
         for allele in anchor_alleles:
-            # This will raise KeyError if 'allele' is not in NUCLEOTIDES
-            allele_count = site_row[allele]
-            frequency = allele_count / total_coverage
-            results[(contig, position, allele)] = frequency
-
-    # Convert the results dict to a Series for easier combination later
+            results[(contig, position, allele)] = site_row[allele] / total_coverage
     if not results:
-        logger.warning(f"No anchor sites found in profile for {sample_id}")
+        logger.warning(f"No anchor sites found in the cache for {sample_id}")
         return sample_id, None
-
     result_series = pd.Series(results)
     result_series.name = sample_id
-    logger.debug(f"Finished processing sample: {sample_id}")
-
     return sample_id, result_series
 
 
-def process_samples_parallel(metadata_df, anchor_dict, mag_id, cpus, min_cov_per_site):
-    """Handle multiprocessing logic for sample processing."""
-    sample_data_list = [
-        (row.sample_id, row.sample_profile_dir) for row in metadata_df.itertuples()
-    ]
-
-    # Use functools.partial to "freeze" the anchor_dict and mag_id arguments
-    worker_func = partial(
-        process_single_sample,
-        anchor_dict=anchor_dict,
-        mag_id=mag_id,
-        min_cov_per_site=min_cov_per_site,
+def process_samples_parallel(
+    metadata_df, anchor_dict, mag_id, cpus, min_cov_per_site, cache_dir
+):
+    """Load each timepoint's cache file once (in parallel across timepoints), then
+    compute every sample's anchor frequencies from the rows already in hand."""
+    sites = pd.DataFrame(
+        [(c, p) for (c, p) in anchor_dict], columns=["contig", "position"]
     )
+    # The timepoint names the cache file a sample lives in; one job per file.
+    by_timepoint = (
+        metadata_df.assign(
+            sample_id=metadata_df["sample_id"].astype(str),
+            time=metadata_df["time"].astype(str),
+        )
+        .groupby("time")["sample_id"]
+        .apply(list)
+    )
+    jobs = [
+        (tp, sample_ids, sites, mag_id, cache_dir)
+        for tp, sample_ids in by_timepoint.items()
+    ]
+    n_workers = max(1, min(cpus, len(jobs)))
+    logger.info(
+        f"Reading {len(jobs)} cache file(s) for {len(metadata_df)} samples "
+        f"with {n_workers} worker(s)..."
+    )
+    with multiprocessing.Pool(processes=n_workers) as pool:
+        loaded = list(
+            tqdm(
+                pool.imap_unordered(load_timepoint_rows, jobs),
+                total=len(jobs),
+                desc="Reading cache files",
+            )
+        )
 
-    logger.info(f"Processing {len(sample_data_list)} samples across {cpus} CPUs...")
-
-    # This will store the final Series from each successful worker
     all_results_dict = {}
-
-    # Run Multiprocessing
-    with multiprocessing.Pool(processes=cpus) as pool:
-        # Use imap_unordered for progress tracking and efficiency
-        for sample_id, result_series in tqdm(
-            pool.imap_unordered(worker_func, sample_data_list),
-            total=len(sample_data_list),
-            desc="Processing Samples",
-        ):
+    for timepoint, rows, roster in loaded:
+        for sample_id in by_timepoint[timepoint]:
+            sample_id, result_series = process_single_sample(
+                sample_id,
+                rows[rows["sample_id"] == sample_id],
+                sample_id in roster,
+                anchor_dict,
+                min_cov_per_site,
+            )
             if result_series is not None:
                 all_results_dict[sample_id] = result_series
-
     return all_results_dict
 
 
@@ -447,10 +431,16 @@ def main():
         required=True,
     )
     parser.add_argument(
+        "--cache-dir",
+        required=True,
+        type=Path,
+        help="The run's allele_freq_cache/ directory (the single per-site source after QC).",
+    )
+    parser.add_argument(
         "--metadata",
         help=(
-            "Path to the enhanced metadata TSV file. Required columns: "
-            "'sample_id', 'sample_profile_dir', 'group', 'time', 'subjectID'. "
+            "Path to the metadata TSV file. Required columns: "
+            "'sample_id', 'group', 'time', 'subjectID'. "
             "Optional columns: 'day', 'replicate'."
         ),
         type=Path,
@@ -475,7 +465,8 @@ def main():
     )
     parser.add_argument(
         "--cpus",
-        help="Number of CPU cores to use for parallel processing.",
+        help="Worker processes for reading the cache, one per timepoint file; "
+        "output identical for any value.",
         type=int,
         default=multiprocessing.cpu_count(),
     )
@@ -513,7 +504,12 @@ def main():
 
     # Process samples in parallel
     all_results_dict = process_samples_parallel(
-        metadata_df, anchor_dict, args.mag_id, args.cpus, args.min_cov_per_site
+        metadata_df,
+        anchor_dict,
+        args.mag_id,
+        args.cpus,
+        args.min_cov_per_site,
+        args.cache_dir,
     )
 
     # Assemble and save results

@@ -16,6 +16,7 @@ Usage:
     For across_time mode:
     python cmh_test.py --input_df <input.tsv> --preprocessed_df <preprocessed.tsv> --mag_id <MAG> --output_dir <dir> --data_type across_time --group <group_name>
 """
+
 import argparse
 import logging
 import os
@@ -33,7 +34,12 @@ from rpy2.robjects.packages import importr
 from tqdm import tqdm
 
 from alleleflux.scripts.utilities.logging_config import setup_logging
-from alleleflux.scripts.utilities.utilities import load_and_filter_data
+from alleleflux.scripts.utilities.utilities import (
+    input_has_column,
+    load_allele_freq_inputs,
+    load_and_filter_data,
+    relabel_groups_from_metadata,
+)
 
 NUCLEOTIDES: List[str] = ["A", "T", "G", "C"]
 
@@ -152,6 +158,7 @@ def prepare_cmh_input(
 
     The function performs the following steps:
     - Splits the input DataFrame into two groups based on the provided group names.
+    - Turns category labels (group, replicate) into plain text for this site's rows.
     - Aggregates nucleotide counts by contig, position, group, and replicate.
     - Identifies replicates shared between both groups and filters out those not present in both.
     - Pivots the data so that each row corresponds to a replicate, and columns represent nucleotide counts per group.
@@ -175,6 +182,13 @@ def prepare_cmh_input(
     Optional[pd.DataFrame]
         A DataFrame formatted for CMH test input, containing only informative bases and shared replicates,
         or None if requirements are not met (e.g., insufficient replicates or informative bases).
+
+    Notes
+    -----
+    A replicate is a pair only when BOTH groups have a row for it at this site,
+    whichever way the caller stores the labels.  Example: replicates 1-4, the
+    fourth with reads in ``fat`` and no row in ``control`` -> three pairs
+    (1, 2, 3); with ``min_sample_num`` 4 the site is not tested (``None``).
     """
     # Split group into two based on group name
     group1_df = df_group[df_group["group"] == group_1_name]
@@ -185,6 +199,22 @@ def prepare_cmh_input(
 
     # Combine both groups for aggregation
     combined_df = pd.concat([group1_df, group2_df])
+
+    # Labels as plain text for the rest of this function.  The loader hands
+    # group / replicate over as pandas categories when the input files hold
+    # the same label sets (as text otherwise), and a category remembers every
+    # label it has seen.  Grouping on categories makes pandas add a zero row
+    # for each (group, replicate) combination that has no data, so a replicate
+    # with NO row in one group came out as a "shared" replicate: min_sample_num
+    # was met by pairs with reads on one side only, and a label with no row at
+    # all reached R as an empty stratum, which mantelhaen.test refuses.  As
+    # text, only the rows that exist are grouped.  Done here, on one site's
+    # handful of rows, so the big table keeps its compact category columns.
+    # astype(object), not astype(str): a missing label stays missing instead
+    # of becoming the text "nan".
+    for label_column in ("group", "replicate"):
+        if isinstance(combined_df[label_column].dtype, pd.CategoricalDtype):
+            combined_df[label_column] = combined_df[label_column].astype(object)
 
     # Aggregate nucleotide counts by contig, position, group, and replicate
     # Get the sum of each nucleotide for each replicate
@@ -278,8 +308,7 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
     with localconverter(default_converter + pandas2ri.converter):
         ro.globalenv["r_df"] = pivoted_filtered
     # R code is generic: group names are parsed from column names
-    r(
-        f"""
+    r(f"""
         library(tidyr)
         # Convert wide to long format for R
         melted <- pivot_longer(
@@ -295,8 +324,7 @@ def run_cmh_test_in_r(pivoted_filtered: pd.DataFrame) -> Optional[float]:
         tab3d <- xtabs(count ~ group + nucleotide + replicate, data = melted)
         # Run CMH test
         cmh_result <- mantelhaen.test(tab3d, alternative = c("two.sided"), correct=FALSE)$p.value
-        """
-    )
+        """)
     # cmh_result is an R vector of length 1
     cmh_result = ro.globalenv["cmh_result"]
     return cmh_result[0]
@@ -446,8 +474,25 @@ def main() -> None:
     parser.add_argument(
         "--input_df",
         required=True,
-        help="Path to input allele frequency dataframe. For single timepoint data, preprocessed_df from preprocess_two_sample.py can be used for --input_df.",
+        nargs="+",
+        help=(
+            "Path(s) to input allele frequency dataframe(s). "
+            "Accepts one or more files; if multiple are given they are concatenated. "
+            "Files ending in .parquet are read with pd.read_parquet, otherwise as TSV. "
+            "For single timepoint data, preprocessed_df from preprocess_two_sample.py can be used for --input_df."
+        ),
         type=str,
+    )
+    parser.add_argument(
+        "--groups",
+        nargs="+",
+        type=str,
+        default=None,
+        help=(
+            "Optional list of group names to keep. When the input cache contains samples "
+            "from groups not in the current analysis (e.g. multiple group_combinations sharing "
+            "a timepoint cache), restrict to these groups before testing."
+        ),
     )
     parser.add_argument(
         "--preprocessed_df",
@@ -479,6 +524,17 @@ def main() -> None:
         type=str,
     )
     parser.add_argument(
+        "--permuted_metadata",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to a permuted metadata TSV (null/control run).  When "
+            "given, group labels are re-derived from this sheet (joined on "
+            "sample_id) right after the cache is loaded, before group filtering "
+            "and testing.  Omit for a normal run."
+        ),
+    )
+    parser.add_argument(
         "--cpus",
         help="Number of processors to use.",
         default=cpu_count(),
@@ -497,22 +553,50 @@ def main() -> None:
         "contig": str,
         "gene_id": str,
         "position": int,
-        "group": str,  # Use category for group to save memory
-        "replicate": str,  # Use category for replicate to save memory
+        "group": "category",
+        "replicate": "category",
         **{nuc: "int32" for nuc in NUCLEOTIDES},
     }
+    # Permuted run: read the join key so the loaded rows can be relabeled from
+    # the permuted sheet (the usecols-based loaders below would otherwise drop
+    # it).  Which key depends on the input: the allele-frequency cache carries
+    # sample_id, but the single-timepoint preprocessed between-groups table
+    # carries subjectID only -- and on single data one subject is one sample,
+    # so subjectID identifies the row just as well.  Probe the header rather
+    # than assume: demanding a column the file lacks fails the read outright
+    # (seen as "Usecols do not match columns ... ['sample_id']" in a null run
+    # on single data, 2026-10-30).
+    relabel_key = None
+    if args.permuted_metadata:
+        for candidate in ("sample_id", "subjectID"):
+            if input_has_column(args.input_df, candidate):
+                relabel_key = candidate
+                break
+        if relabel_key is None:
+            raise ValueError(
+                "--permuted_metadata needs a per-sample join key in the input "
+                f"(sample_id or subjectID); {args.input_df} has neither."
+            )
+        dtype_map[relabel_key] = str
 
     # Load and possibly filter data
     if args.data_type == "single":
         logger.info(
             "Datatype set to single. Loading input dataframe without any filtering."
         )
-        df = pd.read_csv(
+        df = load_allele_freq_inputs(
             args.input_df,
-            sep="\t",
-            usecols=dtype_map.keys(),
+            usecols=list(dtype_map.keys()),
             dtype=dtype_map,
         )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         tp_results = run_cmh_tests(
             df=df,
@@ -546,12 +630,19 @@ def main() -> None:
             logger.info(
                 "Datatype set to across_time. No preprocessed dataframe provided. Using input_df directly."
             )
-            df = pd.read_csv(
+            df = load_allele_freq_inputs(
                 args.input_df,
-                sep="\t",
-                usecols=dtype_map.keys(),
+                usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         # Process the group across timepoints
         group_results = run_cmh_tests_across_time(
@@ -577,12 +668,19 @@ def main() -> None:
             logger.info(
                 "Datatype set to longitudinal. No preprocessed dataframe provided. Using input_df directly."
             )
-            df = pd.read_csv(
+            df = load_allele_freq_inputs(
                 args.input_df,
-                sep="\t",
-                usecols=dtype_map.keys(),
+                usecols=list(dtype_map.keys()),
                 dtype=dtype_map,
             )
+        if args.permuted_metadata:
+            df = relabel_groups_from_metadata(
+                df, args.permuted_metadata, key=relabel_key
+            )
+            if "sample_id" in df.columns:
+                df = df.drop(columns=["sample_id"])
+        if args.groups:
+            df = df[df["group"].isin(args.groups)].copy()
 
         timepoints = df["time"].unique()
         if len(timepoints) != 2:
