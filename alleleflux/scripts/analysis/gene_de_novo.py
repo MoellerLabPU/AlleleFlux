@@ -725,6 +725,27 @@ CAGE_TOTAL_COLUMNS = [
 ]
 
 
+def one_row_per_named_gene(events: pd.DataFrame) -> pd.DataFrame:
+    """Each event once per gene it sits in; an event between genes drops out.
+
+    The profiles name a position inside two overlapping genes with both ids
+    joined by a comma (``profile_mags.lookup_gene``).  Splitting the
+    id gives such an event one row per gene, the same reading the gene scores
+    use (``gene_scores.py`` splits and explodes the same column).
+
+    Worked example (``gene_id`` must hold text, ``""`` for "between genes"):
+
+        position  gene_id         becomes
+        150       "g1"            one row:  g1
+        390       "g2,g1"         two rows: g2 and g1
+        1100      ""              no row
+    """
+    per_gene = events.assign(gene_id=events["gene_id"].str.split(",")).explode(
+        "gene_id"
+    )
+    return per_gene[per_gene["gene_id"] != ""]
+
+
 def gene_tables(
     events: pd.DataFrame,
     readable: dict[tuple[str, str], dict[str, np.ndarray]],
@@ -757,6 +778,15 @@ def gene_tables(
     ``covered_bp_total``.
 
     An event whose ``gene_id`` is not in ``genes`` raises.
+
+    Overlapping genes (ruling 2026-11-24).  A position inside two genes
+    carries both ids joined by a comma, and an event there counts for EACH
+    gene it names (``one_row_per_named_gene``), while the cage total still
+    counts it once.  So the genes' counts can sum to more than the cage
+    total.  Example: g1 100..399 and g2 380..699 share 380..399; events at
+    150 (g1), 390 ("g2,g1") and 500 (g2) give g1 2, g2 2, cage total 3.  An
+    excluded block is reported for each gene the same way.  Each name of a
+    two-gene id must be in ``genes``.
 
     No synonymous / nonsynonymous split (decision 4, deferred 2026-11-03): a
     class computed against the assembly's codon is wrong wherever the
@@ -825,35 +855,35 @@ def gene_tables(
     excluded_blocks = ev[
         (ev["origin"] == BLOCK_EVENT) & ~is_event(ev["origin"], block_rule)
     ]
+    # One row per event and gene it sits in.  An event inside two overlapping
+    # genes ("g2,g1") becomes two rows and so counts for each gene: each gene's
+    # covered_bp already includes the shared bases, so its count must too.
+    counted_per_gene = one_row_per_named_gene(counted)
     # An event naming a gene the gene file does not know is a contract
     # violation (the gene ids come from the same Prodigal file), never a
-    # silent zero.
-    named = counted[counted["gene_id"] != ""]
-    unknown = named[~named["gene_id"].isin(gene_index.index)]
+    # silent zero.  Each name of a two-gene id is checked on its own.
+    unknown = counted_per_gene[~counted_per_gene["gene_id"].isin(gene_index.index)]
     if len(unknown):
         e = unknown.iloc[0]
         raise ValueError(
             f"event at {e.position} names gene {e.gene_id!r}, not in the gene file"
         )
+    cage_and_gene = ["group", "replicate", "gene_id"]
+    n_by_gene = counted_per_gene.groupby(cage_and_gene).size()
+    blocks_by_gene = (
+        one_row_per_named_gene(excluded_blocks).groupby(cage_and_gene).size()
+    )
 
     # --- gene x cage rows.
     records = []
     for group, replicate in cage_keys:
-        in_cage = counted[
-            (counted["group"] == group) & (counted["replicate"] == replicate)
-        ]
-        blocks_in_cage = excluded_blocks[
-            (excluded_blocks["group"] == group)
-            & (excluded_blocks["replicate"] == replicate)
-        ]
         for gene in genes.itertuples(index=False):
             gid = str(gene.gene_id)
             length = int(gene.end) - int(gene.start) + 1
             covered = int(by_gene.get((group, replicate, gid), 0))
             fraction = covered / length if length else 0.0
             entered = covered > 0 and fraction >= min_gene_covered_fraction
-            mine = in_cage[in_cage["gene_id"] == gid]
-            n = int(len(mine)) if entered else 0
+            n = int(n_by_gene.get((group, replicate, gid), 0)) if entered else 0
             records.append(
                 {
                     "mag_id": mag_id,
@@ -862,7 +892,9 @@ def gene_tables(
                     "group": group,
                     "replicate": replicate,
                     "n_de_novo": n,
-                    "n_block_excluded": int((blocks_in_cage["gene_id"] == gid).sum()),
+                    "n_block_excluded": int(
+                        blocks_by_gene.get((group, replicate, gid), 0)
+                    ),
                     "covered_bp": covered if entered else 0,
                     "gene_length": length,
                     "covered_fraction": fraction,

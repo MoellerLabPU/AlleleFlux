@@ -875,12 +875,24 @@ CAGES = pd.DataFrame(
 )
 
 
+def _overlapping_genes_frame():
+    # g1 100..399 and g2 380..699 share the 20 bases 380..399; g3 700..999 stands alone.
+    # The profiles name a shared position with both ids joined by a comma.
+    genes = _genes_frame()
+    genes.loc[genes["gene_id"] == "g2", "start"] = 380
+    return genes
+
+
 class TestGeneTables:
-    def _run(self, events, readable, **over):
+    def _run(self, events, readable, genes=None, **over):
         kwargs = dict(mag_id="M", block_rule="exclude", min_gene_covered_fraction=0.0)
         kwargs.update(over)
         return gene_tables(
-            pd.DataFrame(events), readable, _genes_frame(), CAGES, **kwargs
+            pd.DataFrame(events),
+            readable,
+            _genes_frame() if genes is None else genes,
+            CAGES,
+            **kwargs,
         )
 
     def test_counts_rates_and_totals_pin_the_arithmetic(self):
@@ -993,6 +1005,117 @@ class TestGeneTables:
                 [_event("fat", "A", 150, "g9", "G")],
                 _readable({("fat", "A"): slice(0, 1200)}),
             )
+
+    def test_an_event_inside_two_overlapping_genes_counts_for_each_of_them(self):
+        # 150 is in g1 only, 390 in the shared stretch (named "g2,g1"), 500 in g2 only
+        events = [
+            _event("fat", "A", 150, "g1", "G"),
+            _event("fat", "A", 390, "g2,g1", "C"),
+            _event("fat", "A", 500, "g2", "T"),
+        ]
+        readable = _readable(
+            {("fat", "A"): slice(0, 1200), ("fat", "B"): None, ("ctl", "C"): None}
+        )
+        gene_cage, totals = self._run(
+            events, readable, genes=_overlapping_genes_frame()
+        )
+        gc = gene_cage.set_index(["group", "replicate", "gene_id"])
+        # each gene's bases include the shared 20, so each gene's count includes
+        # the event that sits in them
+        g1, g2 = gc.loc[("fat", "A", "g1")], gc.loc[("fat", "A", "g2")]
+        assert (g1.n_de_novo, g1.covered_bp) == (2, 300)
+        assert (g2.n_de_novo, g2.covered_bp) == (2, 320)
+        assert g1.rate == pytest.approx(2 / 300) and g2.rate == pytest.approx(2 / 320)
+        assert gc.loc[("fat", "A", "g3")].n_de_novo == 0
+        # the cage's own total counts every event once: 3, not the 4 the genes sum to
+        tot = totals.set_index(["group", "replicate"]).loc[("fat", "A")]
+        assert (tot.n_de_novo_total, tot.covered_bp_total) == (3, 1200)
+        assert gene_cage["n_de_novo"].sum() == 4
+
+    def test_the_order_of_the_two_names_does_not_matter(self):
+        readable = _readable(
+            {("fat", "A"): slice(0, 1200), ("fat", "B"): None, ("ctl", "C"): None}
+        )
+        tables = [
+            self._run(
+                [_event("fat", "A", 390, name, "C")],
+                readable,
+                genes=_overlapping_genes_frame(),
+            )
+            for name in ("g1,g2", "g2,g1")
+        ]
+        pd.testing.assert_frame_equal(tables[0][0], tables[1][0])
+        pd.testing.assert_frame_equal(tables[0][1], tables[1][1])
+
+    def test_a_shared_event_counts_only_for_the_gene_the_cage_entered(self):
+        # readable 0..449: all 300 bases of g1, but only 70 of g2's 320 (380..449)
+        events = [_event("fat", "A", 390, "g2,g1", "C")]
+        readable = _readable(
+            {("fat", "A"): slice(0, 450), ("fat", "B"): None, ("ctl", "C"): None}
+        )
+        gc, tot = self._run(
+            events,
+            readable,
+            genes=_overlapping_genes_frame(),
+            min_gene_covered_fraction=0.8,
+        )
+        gc = gc.set_index(["group", "replicate", "gene_id"])
+        assert gc.loc[("fat", "A", "g1")].n_de_novo == 1
+        g2 = gc.loc[("fat", "A", "g2")]
+        assert not g2.entered and g2.n_de_novo == 0  # 70 / 320 is under the bar
+        assert (
+            tot.set_index(["group", "replicate"]).loc[("fat", "A"), "n_de_novo_total"]
+            == 1
+        )
+
+    def test_a_block_inside_two_overlapping_genes_follows_the_knob_in_each(self):
+        events = [
+            _event("fat", "A", 385, "g2,g1", "G", origin="block_event"),
+            _event("fat", "A", 390, "g2,g1", "C", origin="block_event"),
+        ]
+        readable = _readable(
+            {("fat", "A"): slice(0, 1200), ("fat", "B"): None, ("ctl", "C"): None}
+        )
+        gc, tot = self._run(events, readable, genes=_overlapping_genes_frame())
+        gc = gc.set_index(["group", "replicate", "gene_id"])
+        for gene in ("g1", "g2"):
+            row = gc.loc[("fat", "A", gene)]
+            assert (row.n_de_novo, row.n_block_excluded) == (0, 2)
+        gc, tot = self._run(
+            events, readable, genes=_overlapping_genes_frame(), block_rule="once"
+        )
+        gc = gc.set_index(["group", "replicate", "gene_id"])
+        for gene in ("g1", "g2"):
+            row = gc.loc[("fat", "A", gene)]
+            assert (row.n_de_novo, row.n_block_excluded) == (2, 0)
+        assert (
+            tot.set_index(["group", "replicate"]).loc[("fat", "A"), "n_de_novo_total"]
+            == 2
+        )
+
+    def test_one_unknown_name_inside_a_two_gene_id_still_raises(self):
+        # "g1" is in the gene file, "g9" is not: the pair must not slip through
+        with pytest.raises(ValueError, match="'g9'"):
+            self._run(
+                [_event("fat", "A", 390, "g1,g9", "G")],
+                _readable({("fat", "A"): slice(0, 1200)}),
+                genes=_overlapping_genes_frame(),
+            )
+
+    def test_counting_does_not_change_the_events_it_was_given(self):
+        events = pd.DataFrame([_event("fat", "A", 390, "g2,g1", "C")])
+        before = events.copy()
+        gene_tables(
+            events,
+            _readable({("fat", "A"): slice(0, 1200)}),
+            _overlapping_genes_frame(),
+            CAGES,
+            mag_id="M",
+            block_rule="exclude",
+            min_gene_covered_fraction=0.0,
+        )
+        # the events file keeps the id exactly as the profile wrote it
+        pd.testing.assert_frame_equal(events, before)
 
 
 # ---------------------------------------------------------------------------
